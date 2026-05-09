@@ -1,0 +1,28 @@
+# Local Obsidian plugin state
+data.json
+
+# Secrets and local environment
+.env
+.env.*
+*.local.*
+*.secret.*
+
+
+# User recordings and generated notes
+LexVoice/
+录音/
+转写纪要/
+*.wav
+*.mp3
+*.m4a
+*.webm
+*.ogg
+# Dependencies / build output
+node_modules/
+dist/
+build/
+
+# Logs and OS files
+*.log
+.DS_Store
+Thumbs.db

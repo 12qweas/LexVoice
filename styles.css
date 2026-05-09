@@ -1,0 +1,2121 @@
+/* ============================================================
+   LexVoice — Obsidian Plugin Stylesheet
+   设计原则：
+   - 全部颜色走 Obsidian 主题变量（var(--color-*) / var(--text-*) / var(--background-*)）
+   - 字号统一用 --font-ui-* 系列
+   - 字重统一用 --font-medium / --font-semibold
+   - 圆角用 --radius-s/m
+   - 间距用 --size-2-* / --size-4-*
+   - 阴影用 --shadow-s/m/l
+   - 录音红色识别度通过 --color-red-rgb 落到红色家族，不引入主题外色值
+   ============================================================ */
+
+/* ============================================================
+   1. 浮窗气泡 (Bubble Widget)
+   ============================================================ */
+
+.lexvoice-bubble-wrap {
+  position: fixed;
+  z-index: var(--layer-popover, 9999);
+  filter: drop-shadow(var(--shadow-s));
+  opacity: 0;
+  transform: scale(0.92) translateX(-6px);
+  transform-origin: left center;
+  pointer-events: none;
+  transition: opacity 0.18s ease-out,
+              transform 0.22s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+  touch-action: none;
+}
+
+.lexvoice-bubble-wrap.is-visible {
+  opacity: 1;
+  transform: scale(1) translateX(0);
+  pointer-events: auto;
+}
+
+.lexvoice-bubble {
+  --lexvoice-bubble-control-size: 28px;
+  --lexvoice-bubble-control-radius: 999px;
+  --lexvoice-bubble-icon-size: 15px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: var(--size-2-3) var(--size-4-3) var(--size-2-3) var(--size-4-3);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  cursor: grab;
+  user-select: none;
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.lexvoice-bubble:active {
+  cursor: grabbing;
+}
+
+.lexvoice-bubble::before {
+  content: "";
+  position: absolute;
+  display: none;
+  width: 10px;
+  height: 10px;
+  background: inherit;
+  pointer-events: none;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.lexvoice-bubble-wrap.has-tail .lexvoice-bubble::before {
+  display: block;
+}
+
+.lexvoice-bubble-wrap.tail-left .lexvoice-bubble::before {
+  left: -5px;
+  top: 50%;
+  border-left: 1px solid var(--background-modifier-border);
+  border-bottom: 1px solid var(--background-modifier-border);
+  border-bottom-left-radius: 2px;
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.lexvoice-bubble-wrap.tail-right .lexvoice-bubble::before {
+  right: -5px;
+  top: 50%;
+  border-right: 1px solid var(--background-modifier-border);
+  border-top: 1px solid var(--background-modifier-border);
+  border-top-right-radius: 2px;
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.lexvoice-bubble-wrap.tail-top .lexvoice-bubble::before {
+  left: 34px;
+  top: -5px;
+  border-left: 1px solid var(--background-modifier-border);
+  border-top: 1px solid var(--background-modifier-border);
+  border-top-left-radius: 2px;
+  transform: rotate(45deg);
+}
+
+.lexvoice-bubble-wrap.tail-bottom .lexvoice-bubble::before {
+  left: 34px;
+  bottom: -5px;
+  border-right: 1px solid var(--background-modifier-border);
+  border-bottom: 1px solid var(--background-modifier-border);
+  border-bottom-right-radius: 2px;
+  transform: rotate(45deg);
+}
+
+/* idle: 主按钮用 Obsidian 红色家族 */
+.lexvoice-bubble.is-idle .lexvoice-bubble-main {
+  all: unset;
+  width: var(--lexvoice-bubble-control-size);
+  height: var(--lexvoice-bubble-control-size);
+  flex: 0 0 var(--lexvoice-bubble-control-size);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0;
+  line-height: 0;
+  border-radius: var(--lexvoice-bubble-control-radius);
+  background: var(--color-red);
+  color: var(--text-on-accent);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.15s ease;
+}
+
+.lexvoice-bubble-record-dot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  margin: auto;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.lexvoice-bubble.is-idle .lexvoice-bubble-main:hover {
+  transform: scale(1.1);
+  box-shadow: 0 0 0 4px rgba(var(--color-red-rgb), 0.18);
+}
+
+.lexvoice-bubble-label {
+  font-weight: var(--font-medium);
+  color: var(--text-muted);
+  white-space: nowrap;
+  padding-right: var(--size-2-1);
+}
+
+.lexvoice-bubble-chip {
+  margin-left: 2px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(var(--color-accent-rgb), 0.14);
+  color: var(--text-accent);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-medium);
+  white-space: nowrap;
+  animation: lexvoice-bubble-chip-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes lexvoice-bubble-chip-pulse {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
+}
+
+/* recording: 整体红色化 */
+.lexvoice-bubble.is-recording {
+  background: var(--color-red);
+  color: var(--text-on-accent);
+  border-color: var(--color-red);
+}
+
+.lexvoice-bubble.is-recording::before {
+  background: var(--color-red);
+  border-color: var(--color-red);
+}
+
+.lexvoice-bubble-wrap.is-recording-wrap {
+  animation: lexvoice-breath 3.8s ease-in-out infinite;
+}
+
+/* paused: 灰化 */
+.lexvoice-bubble.is-paused {
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+  border-color: var(--background-modifier-border);
+}
+
+.lexvoice-bubble.is-paused::before {
+  background: var(--background-modifier-border);
+  border-color: var(--background-modifier-border);
+}
+
+.lexvoice-bubble-jump {
+  all: unset;
+  width: var(--lexvoice-bubble-control-size);
+  height: var(--lexvoice-bubble-control-size);
+  flex: 0 0 var(--lexvoice-bubble-control-size);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--lexvoice-bubble-control-radius);
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  cursor: pointer;
+  font-size: var(--font-ui-small);
+  line-height: 1;
+  transition: background 0.12s ease, transform 0.1s ease;
+}
+
+.lexvoice-bubble-jump svg,
+.lexvoice-bubble-btn svg {
+  width: var(--lexvoice-bubble-icon-size);
+  height: var(--lexvoice-bubble-icon-size);
+  stroke-width: 2;
+}
+
+.lexvoice-bubble-jump.is-fallback-icon::before {
+  content: "";
+  width: 12px;
+  height: 15px;
+  border: 1.6px solid currentColor;
+  border-radius: 2px;
+  box-shadow: inset 0 4px 0 -2px currentColor;
+}
+
+.lexvoice-bubble-jump:hover {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  transform: scale(1.08);
+}
+
+@keyframes lexvoice-breath {
+  0%, 100% {
+    filter: drop-shadow(0 6px 14px rgba(var(--color-red-rgb), 0.18));
+  }
+  50% {
+    filter: drop-shadow(0 8px 20px rgba(var(--color-red-rgb), 0.32));
+  }
+}
+
+.lexvoice-bubble-timer {
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: var(--font-semibold);
+  letter-spacing: 0.3px;
+  min-width: 52px;
+  min-height: 26px;
+  text-align: center;
+}
+
+.lexvoice-bubble-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 0;
+  border-left: 0;
+}
+
+.lexvoice-bubble-btn {
+  all: unset;
+  width: var(--lexvoice-bubble-control-size);
+  height: var(--lexvoice-bubble-control-size);
+  flex: 0 0 var(--lexvoice-bubble-control-size);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--lexvoice-bubble-control-radius);
+  background: rgba(255, 255, 255, 0.18);
+  color: inherit;
+  cursor: pointer;
+  font-size: var(--font-ui-smaller);
+  line-height: 1;
+  transition: background 0.12s ease, transform 0.1s ease;
+}
+
+.lexvoice-bubble-btn:hover {
+  background: rgba(255, 255, 255, 0.32);
+  transform: scale(1.08);
+}
+
+.lexvoice-bubble-btn.stop {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+}
+
+.lexvoice-bubble-btn.stop svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  fill: currentColor;
+}
+
+.lexvoice-bubble-btn.stop svg * {
+  stroke: currentColor;
+  fill: currentColor;
+}
+
+.lexvoice-bubble-btn.stop:hover {
+  background: rgba(255, 255, 255, 0.26);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.42);
+}
+
+/* ============================================================
+   2. 状态栏指示
+   ============================================================ */
+
+.lexvoice-status {
+  cursor: pointer;
+}
+
+.lexvoice-status.is-recording {
+  color: var(--color-red);
+  font-weight: var(--font-semibold);
+}
+
+.lexvoice-status.is-paused {
+  color: var(--text-muted);
+}
+
+/* ============================================================
+   3. 队列 Modal
+   ============================================================ */
+
+.lexvoice-queue-actions {
+  display: flex;
+  gap: var(--size-2-2);
+  margin-bottom: var(--size-4-3);
+}
+
+.lexvoice-queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.lexvoice-queue-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--size-4-3);
+  padding: var(--size-4-2) var(--size-4-3);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+}
+
+.lexvoice-queue-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.lexvoice-queue-title {
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+  margin-bottom: var(--size-2-1);
+}
+
+.lexvoice-queue-meta {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.lexvoice-queue-error {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-error);
+  margin-top: var(--size-2-1);
+  word-break: break-word;
+}
+
+.lexvoice-queue-row-actions {
+  display: flex;
+  gap: var(--size-2-1);
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   4. 导入 Modal
+   ============================================================ */
+
+.lexvoice-import-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-1);
+  max-height: 60vh;
+  overflow-y: auto;
+  margin-bottom: var(--size-4-3);
+  padding: var(--size-2-2) 0;
+  border-top: 1px solid var(--background-modifier-border);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.lexvoice-import-row {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  padding: var(--size-2-2) var(--size-4-2);
+  border-radius: var(--radius-s);
+  transition: background 0.1s ease;
+}
+
+.lexvoice-import-row:hover {
+  background: var(--background-modifier-hover);
+}
+
+.lexvoice-import-row input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.lexvoice-import-label {
+  flex: 1;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.lexvoice-import-name {
+  font-weight: var(--font-medium);
+  color: var(--text-normal);
+  word-break: break-all;
+}
+
+.lexvoice-import-meta {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin-top: var(--size-2-1);
+}
+
+.lexvoice-import-warn {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-warning);
+  margin-top: var(--size-2-1);
+}
+
+.lexvoice-import-desc {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: var(--line-height-normal);
+  margin: 0 0 var(--size-4-2) 0;
+}
+
+.lexvoice-import-actions {
+  display: flex;
+  gap: var(--size-2-2);
+  justify-content: flex-end;
+}
+
+/* ============================================================
+   5. 实时纪要面板 (OutlineView)
+   ============================================================ */
+
+.lexvoice-outline {
+  padding: var(--size-4-3) var(--size-4-3) var(--size-4-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-3);
+  font-size: var(--font-ui-small);
+}
+
+.lexvoice-outline-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+  padding-bottom: var(--size-4-3);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.lexvoice-outline-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-2-2);
+}
+
+.lexvoice-outline-title {
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lexvoice-outline-settings-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.lexvoice-outline-settings-btn:hover {
+  color: var(--text-normal);
+}
+
+.lexvoice-outline-meta {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.lexvoice-input-meters {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.lexvoice-input-meter {
+  display: grid;
+  grid-template-columns: 22px minmax(72px, 1fr) 42px 92px;
+  align-items: center;
+  gap: var(--size-2-2);
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.lexvoice-input-meter-icon {
+  width: 22px;
+  text-align: center;
+  line-height: 1;
+}
+
+.lexvoice-input-meter-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-normal);
+}
+
+.lexvoice-input-meter-state {
+  white-space: nowrap;
+  text-align: right;
+  color: var(--text-muted);
+}
+
+.lexvoice-input-meter-bars {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  height: 28px;
+  min-width: 0;
+}
+
+.lexvoice-input-meter-bar {
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--text-faint);
+  opacity: 0.55;
+  transition: height 110ms linear, background-color 140ms ease, opacity 140ms ease;
+}
+
+.lexvoice-input-meter.is-active .lexvoice-input-meter-bar {
+  background: var(--interactive-accent);
+}
+
+.lexvoice-input-meter.is-active .lexvoice-input-meter-state {
+  color: var(--text-success);
+}
+
+.lexvoice-outline-actions {
+  display: flex;
+  gap: var(--size-2-2);
+  margin-top: var(--size-2-1);
+  flex-wrap: wrap;
+}
+
+.lexvoice-outline-actions button,
+.lexvoice-outline-control-row button {
+  height: 28px;
+}
+
+.lexvoice-outline-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+}
+
+.lexvoice-outline-section-title {
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  color: var(--text-muted);
+}
+
+.lexvoice-outline-segments {
+  display: flex;
+  flex-direction: column;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.lexvoice-outline-seg {
+  display: flex;
+  gap: var(--size-2-2);
+  padding: var(--size-2-2) 0;
+  border-radius: var(--radius-s);
+  align-items: flex-start;
+}
+
+.lexvoice-outline-seg:hover {
+  background: transparent;
+}
+
+.lexvoice-outline-seg-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-top: 7px;
+  flex-shrink: 0;
+}
+
+.lexvoice-outline-seg-dot.is-done    { background: var(--color-green); }
+.lexvoice-outline-seg-dot.is-pending { background: var(--text-faint); }
+.lexvoice-outline-seg-dot.is-failed  { background: var(--color-red); }
+
+.lexvoice-outline-seg-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.lexvoice-outline-seg-time {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  margin-bottom: var(--size-2-1);
+}
+
+.lexvoice-outline-seg-text {
+  color: var(--text-normal);
+  line-height: var(--line-height-tight);
+  word-break: break-word;
+}
+
+.lexvoice-outline-ai-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-2-2);
+}
+
+.lexvoice-outline-ai-body {
+  font-size: var(--font-ui-small);
+  line-height: var(--line-height-normal);
+  color: var(--text-normal);
+}
+
+.lexvoice-outline-ai-body ul,
+.lexvoice-outline-ai-body ol {
+  margin: 0;
+  padding-inline-start: var(--list-indent, 1.5em);
+}
+
+.lexvoice-outline-ai-body li {
+  margin: var(--size-2-1) 0;
+}
+
+.lexvoice-outline-ai-body li.lexvoice-outline-source-tagged {
+  list-style: none;
+  margin-left: calc(var(--list-indent, 1.5em) * -0.48);
+}
+
+.lexvoice-outline-source-chip {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  margin-right: var(--size-2-1);
+  vertical-align: -3px;
+  border-radius: var(--radius-s);
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--background-modifier-hover) 74%, transparent);
+  opacity: 0.82;
+}
+
+.lexvoice-outline-source-chip svg {
+  width: 11px;
+  height: 11px;
+  stroke-width: 2;
+}
+
+.lexvoice-outline-source-chip.is-mic {
+  color: color-mix(in srgb, var(--interactive-accent) 50%, var(--text-muted));
+}
+
+.lexvoice-outline-source-chip.is-computer {
+  color: color-mix(in srgb, var(--color-blue) 46%, var(--text-muted));
+}
+
+.lexvoice-outline-ai-body > ul > li {
+  margin: var(--size-2-2) 0;
+  font-weight: var(--font-semibold);
+}
+
+.lexvoice-outline-ai-body > ul > li > ul > li {
+  font-weight: var(--font-normal);
+  color: var(--text-normal);
+}
+
+.lexvoice-outline-ai-body > ul > li > ul > li > ul > li {
+  color: var(--text-muted);
+}
+
+.lexvoice-outline-empty {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.lexvoice-outline-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+  margin-top: var(--size-2-1);
+}
+
+.lexvoice-outline-control-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--size-2-2);
+}
+
+.lexvoice-outline-control-label {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.lexvoice-outline-control-row select {
+  width: 100%;
+  min-width: 0;
+  font-size: var(--font-ui-small);
+}
+
+/* === 招聘面试模式 · [!ai-eval] callout ===
+   仅声明 --callout-color 与 --callout-icon；其余样式由 Obsidian 核心派生，
+   完全跟随当前 Theme/Snippet。*/
+.callout[data-callout="ai-eval"] {
+  --callout-color: var(--color-purple-rgb);
+  --callout-icon: lucide-sparkles;
+}
+
+/* === 招聘面试模式 · 大纲面板列表项 ===
+   emoji 已承载语义识别，CSS 只走原生 text-* 三档，无硬编码色与边框 */
+.lexvoice-outline-ai-body li.lexvoice-ai-question {
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+  margin-top: var(--size-4-2);
+}
+
+.lexvoice-outline-ai-body li.lexvoice-ai-eval {
+  color: var(--text-muted);
+}
+
+.lexvoice-outline-ai-body li.lexvoice-ai-followup {
+  color: var(--text-accent);
+}
+
+
+.lexvoice-outline-recent {
+  display: flex;
+  flex-direction: column;
+}
+
+.lexvoice-outline-recent-row {
+  display: flex;
+  gap: var(--size-2-2);
+  padding: var(--size-2-2) 0;
+  border-radius: var(--radius-s);
+  align-items: center;
+  cursor: pointer;
+}
+
+.lexvoice-outline-recent-row:hover {
+  background: transparent;
+}
+
+.lexvoice-outline-recent-chip {
+  min-width: 34px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  font-weight: var(--font-medium);
+  line-height: 1.5;
+}
+
+.lexvoice-outline-recent-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.lexvoice-outline-recent-name {
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lexvoice-outline-recent-meta {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  margin-top: 1px;
+}
+
+.lexvoice-outline-queue-inbox {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-2-2);
+  padding-top: var(--size-2-2);
+  border-top: 1px solid var(--background-modifier-border);
+  margin-top: auto;
+}
+
+.lexvoice-outline-queue-text {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.lexvoice-outline-queue-inbox button {
+  padding: var(--size-2-1) var(--size-4-2);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+
+/* ============================================================
+   6. 设置页 Tab Bar
+   ============================================================ */
+
+.lexvoice-settings-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+  margin-bottom: var(--size-4-4);
+  margin-top: var(--size-2-2);
+}
+
+.lexvoice-settings-tabs button {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: var(--size-2-3) var(--size-4-4);
+  cursor: pointer;
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  margin-bottom: -1px;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.lexvoice-settings-tabs button:hover {
+  color: var(--text-normal);
+  background: transparent;
+}
+
+.lexvoice-settings-tabs button.is-active {
+  color: var(--text-normal);
+  border-bottom-color: var(--interactive-accent);
+}
+
+.lexvoice-settings-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.lexvoice-settings-content textarea {
+  resize: vertical;
+}
+
+/* 段落级 hint —— Heading 下方的简短说明，复用 Obsidian 原生 setting-item-description 灰色小字 */
+.lexvoice-section-hint {
+  margin: 0 0 var(--size-4-2) 0;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  line-height: var(--line-height-normal);
+}
+
+/* 设置页通用 textarea —— 占满宽度，原生字体 */
+.lexvoice-textarea {
+  width: 100%;
+  margin: var(--size-2-2) 0 var(--size-4-3) 0;
+  padding: var(--size-2-3);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-family: var(--font-text);
+  font-size: var(--font-ui-small);
+  line-height: var(--line-height-normal);
+  resize: vertical;
+}
+
+.lexvoice-textarea:focus {
+  border-color: var(--interactive-accent);
+  outline: none;
+}
+
+.lexvoice-textarea-mono {
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+}
+
+/* 词汇表状态行 */
+.lexvoice-vocab-status {
+  margin-top: calc(var(--size-2-2) * -1);
+  margin-bottom: var(--size-2-3);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+/* 行尾按钮组 */
+.lexvoice-button-row {
+  display: flex;
+  gap: var(--size-2-2);
+  margin-top: var(--size-4-2);
+}
+
+
+/* ============================================================
+   6.2. 设置页 · 音频路径诊断面板
+   ============================================================ */
+
+.lexvoice-diag-result:empty { display: none; }
+
+.lexvoice-diag-loading {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  padding: var(--size-2-3);
+}
+
+.lexvoice-diag-error {
+  color: var(--text-error);
+  font-size: var(--font-ui-small);
+  padding: var(--size-2-3);
+}
+
+.lexvoice-diag-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-3);
+  padding: var(--size-4-3);
+  background: var(--background-secondary);
+  border-radius: var(--radius-m);
+  margin: var(--size-2-3) 0;
+}
+
+.lexvoice-diag-row {
+  display: flex;
+  gap: var(--size-2-3);
+  align-items: flex-start;
+}
+
+.lexvoice-diag-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+.lexvoice-diag-dot.is-ok   { background: var(--color-green); }
+.lexvoice-diag-dot.is-warn { background: var(--color-orange); }
+.lexvoice-diag-dot.is-fail { background: var(--color-red); }
+
+.lexvoice-diag-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.lexvoice-diag-label {
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  color: var(--text-normal);
+}
+
+.lexvoice-diag-sub {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin-top: var(--size-2-1);
+  white-space: pre-line;
+  line-height: var(--line-height-normal);
+}
+
+.lexvoice-diag-summary {
+  margin-top: var(--size-2-3);
+  padding-top: var(--size-2-3);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.lexvoice-diag-summary-mode {
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+}
+
+.lexvoice-diag-summary-status {
+  font-size: var(--font-ui-small);
+  margin-top: var(--size-2-1);
+}
+
+.lexvoice-diag-summary-status.is-ok   { color: var(--color-green); }
+.lexvoice-diag-summary-status.is-warn { color: var(--color-orange); }
+
+.lexvoice-diag-vc-select {
+  margin-top: var(--size-2-3);
+  padding-top: var(--size-2-3);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.lexvoice-diag-vc-select select {
+  margin-top: var(--size-2-2);
+  width: 100%;
+}
+
+/* ============================================================
+   6.3. 虚拟声卡安装 Modal
+   ============================================================ */
+
+.lexvoice-vcable-modal {
+  max-width: 720px;
+}
+
+.lexvoice-vcable-desc {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  line-height: var(--line-height-normal);
+  margin: 0 0 var(--size-4-3) 0;
+}
+
+.lexvoice-vcable-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+  margin-bottom: var(--size-4-3);
+}
+
+.lexvoice-vcable-tab {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: var(--size-2-3) var(--size-4-4);
+  cursor: pointer;
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  margin-bottom: -1px;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.lexvoice-vcable-tab:hover {
+  color: var(--text-normal);
+  background: transparent;
+}
+
+.lexvoice-vcable-tab.is-active {
+  color: var(--text-normal);
+  border-bottom-color: var(--interactive-accent);
+}
+
+.lexvoice-vcable-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-3);
+}
+
+.lexvoice-vcable-step {
+  border-left: 2px solid var(--background-modifier-border);
+  padding-left: var(--size-4-3);
+}
+
+.lexvoice-vcable-step-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--size-2-2);
+  margin-bottom: var(--size-2-2);
+}
+
+.lexvoice-vcable-step-num {
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  color: var(--text-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.lexvoice-vcable-step-title {
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+}
+
+.lexvoice-vcable-step-body p,
+.lexvoice-vcable-step-body ol,
+.lexvoice-vcable-step-body ul {
+  margin: var(--size-2-1) 0;
+  font-size: var(--font-ui-small);
+  line-height: var(--line-height-normal);
+  color: var(--text-normal);
+}
+
+.lexvoice-vcable-step-body li {
+  margin: var(--size-2-1) 0;
+}
+
+.lexvoice-vcable-step-body code {
+  font-size: var(--font-ui-smaller);
+  background: var(--background-modifier-hover);
+  padding: 1px 6px;
+  border-radius: var(--radius-s);
+}
+
+.lexvoice-vcable-step-body pre {
+  margin: var(--size-2-2) 0;
+  padding: var(--size-2-3);
+  background: var(--background-secondary);
+  border-radius: var(--radius-s);
+  overflow-x: auto;
+}
+
+.lexvoice-vcable-step-body a {
+  color: var(--text-accent);
+}
+
+.lexvoice-vcable-tip {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller) !important;
+  font-style: italic;
+}
+
+.lexvoice-vcable-warn {
+  color: var(--color-orange);
+  font-size: var(--font-ui-smaller) !important;
+}
+
+/* 复用 Obsidian 原生 modal-button-container 的间距规则，仅补一道分隔线 */
+.lexvoice-vcable-actions {
+  margin-top: var(--size-4-4);
+  padding-top: var(--size-4-3);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* ============================================================
+   6.4. 设备状态条 · 录音前的硬件检测可见反馈
+   ============================================================ */
+
+.lexvoice-outline-device-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-1);
+  margin-top: var(--size-2-2);
+  padding: var(--size-2-2) var(--size-2-3);
+  background: var(--background-secondary);
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-smaller);
+}
+
+.lexvoice-outline-device-status:empty {
+  display: none;
+}
+
+.lexvoice-device-status-loading {
+  color: var(--text-muted);
+}
+
+.lexvoice-device-status-error {
+  color: var(--text-error);
+}
+
+.lexvoice-device-status-row {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+}
+
+.lexvoice-device-status-row.is-ok {
+  color: var(--text-normal);
+}
+
+.lexvoice-device-status-row.is-warn {
+  color: var(--color-orange);
+}
+
+.lexvoice-device-status-row > span:first-child {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lexvoice-device-status-btn {
+  font-size: var(--font-ui-smaller);
+  padding: 0 var(--size-2-2);
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   6.5. 招聘面试模式 · 上下文 Modal + 工作台卡片
+   ============================================================ */
+
+/* ============================================================
+   6.6. Prompt 模板管理 Modal
+   ============================================================ */
+
+.lexvoice-tpl-modal {
+  max-width: 760px;
+}
+
+.lexvoice-tpl-desc {
+  margin: 0 0 var(--size-4-3) 0;
+}
+
+.lexvoice-tpl-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+  margin-bottom: var(--size-4-3);
+}
+
+.lexvoice-tpl-tabs button {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: var(--size-2-3) var(--size-4-4);
+  cursor: pointer;
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  margin-bottom: -1px;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.lexvoice-tpl-tabs button:hover { color: var(--text-normal); background: transparent; }
+.lexvoice-tpl-tabs button.is-active { color: var(--text-normal); border-bottom-color: var(--interactive-accent); }
+
+.lexvoice-tpl-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+}
+
+.lexvoice-tpl-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+}
+
+.lexvoice-tpl-empty {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  padding: var(--size-4-3);
+  text-align: center;
+}
+
+.lexvoice-tpl-row {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  padding: var(--size-2-3) var(--size-4-2);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+}
+
+.lexvoice-tpl-row.is-active {
+  border-color: var(--interactive-accent);
+}
+
+.lexvoice-tpl-row input[type="radio"] {
+  margin: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.lexvoice-tpl-row-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.lexvoice-tpl-row-name {
+  font-weight: var(--font-medium);
+  color: var(--text-normal);
+}
+
+.lexvoice-tpl-row-sub {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin-top: var(--size-2-1);
+}
+
+.lexvoice-tpl-row-actions {
+  display: flex;
+  gap: var(--size-2-1);
+  flex-shrink: 0;
+}
+
+.lexvoice-tpl-row-actions button {
+  font-size: var(--font-ui-smaller);
+  padding: var(--size-2-1) var(--size-2-3);
+}
+
+.lexvoice-tpl-footer {
+  margin-top: var(--size-4-2);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.lexvoice-tpl-back {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--size-4-2);
+}
+
+.lexvoice-tpl-back button {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: var(--size-2-1) var(--size-2-3);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  cursor: pointer;
+}
+
+.lexvoice-tpl-back button:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.lexvoice-tpl-builtin-tag {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-accent);
+  padding: 2px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+}
+
+.lexvoice-tpl-editor {
+  display: flex;
+  flex-direction: column;
+}
+
+.lexvoice-tpl-textarea {
+  min-height: 280px;
+  margin-bottom: var(--size-4-2);
+}
+
+.lexvoice-tpl-builtin-hint {
+  margin: 0 0 var(--size-2-2) 0;
+}
+
+.lexvoice-tpl-edit-actions {
+  display: flex;
+  gap: var(--size-2-2);
+  justify-content: flex-end;
+  margin-top: var(--size-4-2);
+  padding-top: var(--size-4-2);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.lexvoice-recruit-modal {
+  max-width: 720px;
+}
+
+.lexvoice-recruit-desc {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  margin: 0 0 var(--size-4-3) 0;
+}
+
+.lexvoice-recruit-section {
+  margin-bottom: var(--size-4-3);
+}
+
+.lexvoice-recruit-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--size-2-2);
+}
+
+.lexvoice-recruit-section-head label {
+  font-weight: var(--font-medium);
+  color: var(--text-normal);
+}
+
+.lexvoice-recruit-label-strong {
+  font-weight: var(--font-semibold) !important;
+  color: var(--text-accent) !important;
+}
+
+.lexvoice-recruit-lib-btn {
+  font-size: var(--font-ui-smaller);
+  padding: var(--size-2-1) var(--size-2-3);
+}
+
+.lexvoice-recruit-textarea {
+  width: 100%;
+  min-height: 90px;
+  padding: var(--size-2-3);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-family: inherit;
+  font-size: var(--font-ui-small);
+  line-height: var(--line-height-normal);
+  resize: vertical;
+}
+
+.lexvoice-recruit-textarea-large {
+  min-height: 180px;
+}
+
+.lexvoice-recruit-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--size-2-3);
+  margin-bottom: var(--size-4-3);
+}
+
+.lexvoice-recruit-meta-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-1);
+}
+
+.lexvoice-recruit-meta-cell label {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.lexvoice-recruit-input {
+  width: 100%;
+  padding: var(--size-2-2) var(--size-2-3);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+}
+
+.lexvoice-recruit-actions {
+  display: flex;
+  gap: var(--size-2-2);
+  justify-content: flex-end;
+  margin-top: var(--size-4-4);
+  padding-top: var(--size-4-3);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.lexvoice-recruit-lib-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-1);
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.lexvoice-recruit-lib-row {
+  padding: var(--size-2-3) var(--size-4-2);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+  transition: background 0.1s ease;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.lexvoice-recruit-lib-row:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--interactive-accent);
+}
+
+.lexvoice-recruit-lib-title {
+  font-weight: var(--font-medium);
+  color: var(--text-normal);
+}
+
+.lexvoice-recruit-lib-meta {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin-top: var(--size-2-1);
+}
+
+/* 工作台招聘上下文卡片 */
+.lexvoice-recruit-card {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: var(--size-2-3) var(--size-4-2);
+  margin-top: var(--size-2-2);
+}
+
+.lexvoice-recruit-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+}
+
+.lexvoice-recruit-card-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.lexvoice-recruit-card-dot.is-ok   { background: var(--color-green); }
+.lexvoice-recruit-card-dot.is-warn { background: var(--color-orange); }
+
+.lexvoice-recruit-card-title {
+  flex: 1;
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lexvoice-recruit-card-edit {
+  font-size: var(--font-ui-smaller);
+  padding: var(--size-2-1) var(--size-2-3);
+  flex-shrink: 0;
+}
+
+.lexvoice-recruit-card-meta {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin-top: var(--size-2-1);
+}
+
+
+.lexvoice-home {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-5);
+}
+
+.lexvoice-home-head {
+  padding-bottom: var(--size-4-4);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.lexvoice-home-title-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--size-2-2);
+}
+
+.lexvoice-home-title-line h2,
+.lexvoice-home-block h3 {
+  margin: 0;
+  color: var(--text-normal);
+  letter-spacing: 0;
+}
+
+.lexvoice-home-title-line h2 {
+  font-size: 22px;
+  line-height: 1.25;
+  font-weight: var(--font-semibold);
+}
+
+.lexvoice-home-version {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.lexvoice-home-summary {
+  max-width: 820px;
+  margin-top: var(--size-2-2);
+  color: var(--text-muted);
+  line-height: var(--line-height-normal);
+  font-size: var(--font-ui-small);
+}
+
+
+.lexvoice-risk-notice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+  border: 1px solid rgba(var(--color-orange-rgb), 0.35);
+  border-radius: var(--radius-s);
+  padding: var(--size-4-3);
+  background: var(--background-secondary);
+}
+
+.lexvoice-risk-notice.is-api {
+  margin: var(--size-2-3) 0 var(--size-4-4);
+}
+
+.lexvoice-risk-title {
+  color: var(--text-warning);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+}
+
+.lexvoice-risk-body {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: var(--line-height-normal);
+}
+
+.lexvoice-home-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-2);
+  margin-top: var(--size-4-3);
+}
+
+.lexvoice-home-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+}
+
+.lexvoice-home-block h3 {
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+}
+
+.lexvoice-home-prep-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--size-4-2);
+  padding-top: var(--size-2-2);
+}
+
+.lexvoice-home-prep {
+  display: flex;
+  flex-direction: column;
+  min-height: 190px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: var(--size-4-3);
+  background: var(--background-secondary);
+}
+
+.lexvoice-home-prep-name {
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+}
+
+.lexvoice-home-prep-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-2);
+  margin-top: var(--size-2-2);
+}
+
+.lexvoice-home-chip,
+.lexvoice-home-status,
+.lexvoice-home-row-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.lexvoice-home-chip.is-required,
+.lexvoice-home-status.is-required {
+  color: var(--text-warning);
+  border-color: rgba(var(--color-orange-rgb), 0.35);
+}
+
+.lexvoice-home-chip.is-recommended {
+  color: var(--text-accent);
+  border-color: var(--background-modifier-border-hover);
+}
+
+.lexvoice-home-chip.is-cost {
+  color: var(--text-muted);
+  background: var(--background-primary);
+}
+
+.lexvoice-home-status.is-ready {
+  color: var(--text-success);
+  border-color: rgba(var(--color-green-rgb), 0.35);
+}
+
+.lexvoice-home-status.is-neutral {
+  color: var(--text-muted);
+  background: var(--background-primary);
+}
+
+.lexvoice-home-prep-desc {
+  flex: 1;
+  margin-top: var(--size-4-2);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: var(--line-height-normal);
+}
+
+.lexvoice-home-prep-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-2-2);
+  margin-top: var(--size-4-2);
+}
+
+.lexvoice-home-row-badge {
+  margin-left: var(--size-2-2);
+  color: var(--text-muted);
+  font-weight: var(--font-normal);
+  vertical-align: middle;
+}
+
+/* 路线 badge 视觉分级 —— 必填强提示，推荐次之，建议最弱 */
+.lexvoice-home-row-badge.is-required {
+  color: var(--text-warning);
+  border-color: rgba(var(--color-orange-rgb), 0.4);
+}
+
+.lexvoice-home-row-badge.is-recommended {
+  color: var(--text-accent);
+  border-color: var(--background-modifier-border-hover);
+}
+
+.lexvoice-home-row-badge.is-suggested {
+  color: var(--text-muted);
+  border-color: var(--background-modifier-border);
+}
+
+.lexvoice-home-footnote {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  padding-top: var(--size-2-2);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+@media (max-width: 760px) {
+  .lexvoice-home-prep-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .lexvoice-home-prep {
+    min-height: 0;
+  }
+
+  .lexvoice-home-prep-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .lexvoice-input-meter {
+    grid-template-columns: 22px minmax(0, 1fr) 36px 76px;
+  }
+
+  .lexvoice-input-meter-bars {
+    gap: 2px;
+  }
+
+  .lexvoice-input-meter-bar {
+    width: 2px;
+  }
+}
+
+.lexvoice-provider-panel {
+  margin: 12px 0 18px;
+  padding: 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+}
+
+.lexvoice-provider-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lexvoice-provider-title-wrap {
+  min-width: 0;
+}
+
+.lexvoice-provider-title {
+  color: var(--text-normal);
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.lexvoice-provider-subtitle {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.lexvoice-provider-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.lexvoice-provider-badge,
+.lexvoice-provider-status {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.lexvoice-provider-status.is-ready {
+  color: var(--text-success);
+  border-color: rgba(var(--color-green-rgb), 0.35);
+}
+
+.lexvoice-provider-status.is-missing {
+  color: var(--text-warning);
+  border-color: rgba(var(--color-orange-rgb), 0.35);
+}
+
+.lexvoice-provider-body {
+  margin-top: 10px;
+}
+
+.lexvoice-provider-checklist {
+  margin: 0 0 0 18px;
+  padding: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.lexvoice-provider-missing,
+.lexvoice-provider-note,
+.lexvoice-provider-price,
+.lexvoice-provider-streaming-tip {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.lexvoice-provider-missing {
+  color: var(--text-warning);
+  background: rgba(var(--color-orange-rgb), 0.08);
+}
+
+.lexvoice-provider-note {
+  color: var(--text-muted);
+  background: var(--background-primary);
+}
+
+.lexvoice-provider-price {
+  color: var(--text-accent);
+  background: rgba(var(--color-accent-rgb), 0.08);
+  font-weight: 500;
+}
+
+.lexvoice-provider-streaming-tip {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  border-left: 2px solid var(--color-accent);
+}
+
+.lexvoice-provider-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+@media (max-width: 680px) {
+  .lexvoice-provider-head {
+    flex-direction: column;
+  }
+
+  .lexvoice-provider-badges {
+    justify-content: flex-start;
+  }
+}
+
+/* HR hidden-menu unlock burst */
+.lexvoice-hr-unlock-burst {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.10);
+  animation: lexvoice-hr-burst-fade 2s ease forwards;
+}
+
+.lexvoice-hr-unlock-card {
+  position: relative;
+  z-index: 2;
+  min-width: min(360px, calc(100vw - 48px));
+  padding: 18px 22px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+  box-shadow: 0 18px 54px rgba(0, 0, 0, 0.22);
+  text-align: center;
+  animation: lexvoice-hr-card-pop 420ms cubic-bezier(0.2, 0.9, 0.2, 1.2) both;
+}
+
+.lexvoice-hr-unlock-kicker {
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.lexvoice-hr-unlock-title {
+  color: var(--text-normal);
+  font-size: var(--font-ui-large);
+  font-weight: var(--font-semibold);
+}
+
+.lexvoice-hr-unlock-copy {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.lexvoice-hr-unlock-sparks {
+  position: absolute;
+  inset: 0;
+}
+
+.lexvoice-hr-spark {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--interactive-accent);
+  box-shadow: 0 0 0 3px rgba(var(--mono-rgb-100), 0.08);
+  opacity: 0;
+  animation: lexvoice-hr-spark 1300ms ease-out var(--d) forwards;
+}
+
+.lexvoice-hr-spark:nth-child(3n) {
+  background: var(--color-yellow);
+}
+
+.lexvoice-hr-spark:nth-child(4n) {
+  background: var(--color-green);
+}
+
+@keyframes lexvoice-hr-spark {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.35);
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--x)), calc(-50% + var(--y))) scale(0.9);
+  }
+}
+
+@keyframes lexvoice-hr-card-pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes lexvoice-hr-burst-fade {
+  0%, 72% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+
+
+.lexvoice-tpl-modal {
+  max-width: 860px;
+}
+
+.lexvoice-tpl-principle {
+  padding: var(--size-4-3) var(--size-4-4);
+  margin: 0 0 var(--size-4-3) 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+}
+
+.lexvoice-tpl-principle-title,
+.lexvoice-tpl-section-title {
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+  margin-bottom: var(--size-2-2);
+}
+
+.lexvoice-tpl-principle-copy {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  line-height: 1.6;
+}
+
+.lexvoice-tpl-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+}
+
+.lexvoice-tpl-mode-pill {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  background: var(--background-secondary);
+}
+
+
+.lexvoice-scene-summary {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: var(--size-4-3);
+  background: var(--background-secondary);
+  margin-bottom: var(--size-4-3);
+}
+
+.lexvoice-scene-summary-main {
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+}
+
+.lexvoice-scene-summary-sub,
+.lexvoice-tpl-section-copy {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: var(--line-height-normal);
+}
+
+.lexvoice-tpl-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+  padding: var(--size-4-3);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+}
+
+.lexvoice-tpl-current {
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+}
+
+.lexvoice-tpl-section-copy {
+  margin-bottom: var(--size-2-2);
+}
+
+.lexvoice-tpl-row {
+  align-items: flex-start;
+}
+
+.lexvoice-tpl-row-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@media (max-width: 760px) {
+  .lexvoice-tpl-toolbar,
+  .lexvoice-tpl-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .lexvoice-tpl-row-actions {
+    justify-content: flex-start;
+  }
+}
