@@ -188,115 +188,172 @@ const LLM_SERVICE_PRESETS = [
     id: "siliconflow",
     label: "硅基流动",
     endpoint: DEFAULT_SETTINGS.llmEndpoint,
+    endpointHelp: "硅基流动的大模型对话接口地址。通常保持默认即可；LexVoice 会按 Chat Completions 请求发送。",
+    keyHelp: "填写硅基流动控制台创建的访问密钥；如果你的语音转写也用硅基流动，可以复用同一把密钥。",
     modelPlaceholder: "按硅基流动控制台的模型名称填写",
+    modelHelp: "填写硅基流动模型广场或控制台显示的完整模型标识。",
   },
   {
     id: "openai",
     label: "OpenAI",
     endpoint: "https://api.openai.com/v1",
+    endpointHelp: "OpenAI 官方 API Base URL。填写到 /v1 即可，LexVoice 会自动补全 /chat/completions。",
+    keyHelp: "填写 OpenAI 项目的 API Key。",
     modelPlaceholder: "按 OpenAI 模型名称填写",
+    modelHelp: "填写 OpenAI 平台支持的 chat/completions 模型名称。",
   },
   {
     id: "poe",
     label: "Poe",
     endpoint: "https://api.poe.com/v1",
+    endpointHelp: "Poe 的 OpenAI 兼容 API Base URL。填写到 /v1 即可，LexVoice 会自动补全 /chat/completions。",
+    keyHelp: "填写 Poe API Key。Poe 侧的模型可用性和名称以 Poe API 页面为准。",
     modelPlaceholder: "按 Poe API Key 页面或模型列表显示的名称填写",
+    modelHelp: "填写 Poe API 支持的 Bot 或模型名称，不要按其他平台的模型名猜。",
   },
   {
     id: "openrouter",
     label: "OpenRouter",
     endpoint: "https://openrouter.ai/api/v1",
+    endpointHelp: "OpenRouter 的 OpenAI 兼容 API Base URL。LexVoice 会自动附加 OpenRouter 建议的应用识别请求头。",
+    keyHelp: "填写 OpenRouter API Key。不同模型可能由不同上游提供商计费。",
     modelPlaceholder: "按 OpenRouter 模型列表填写，通常带提供商前缀",
+    modelHelp: "填写 OpenRouter 模型列表中的完整模型 ID，通常类似 provider/model。",
   },
   {
     id: "moonshot",
     label: "Moonshot / Kimi",
     endpoint: "https://api.moonshot.cn/v1",
+    endpointHelp: "Moonshot / Kimi 的 API Base URL。填写到 /v1 即可，LexVoice 会自动补全 /chat/completions。",
+    keyHelp: "填写 Moonshot 控制台创建的 API Key。",
     modelPlaceholder: "按 Moonshot 控制台的 Kimi 模型名称填写",
+    modelHelp: "填写 Moonshot 控制台当前可用的 Kimi 模型名称。",
   },
   {
     id: "dashscope",
     label: "阿里云百炼 / DashScope",
     endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    endpointHelp: "阿里云百炼 OpenAI 兼容模式地址。国内站点通常使用 dashscope.aliyuncs.com/compatible-mode/v1。",
+    keyHelp: "填写百炼控制台创建的 API Key。",
     modelPlaceholder: "按百炼控制台的模型名称填写",
+    modelHelp: "填写百炼 OpenAI 兼容模式支持的模型名称。",
   },
   {
     id: "deepseek",
     label: "DeepSeek",
     endpoint: "https://api.deepseek.com",
+    endpointHelp: "DeepSeek API Base URL。填写根地址即可，LexVoice 会自动补全 /chat/completions。",
+    keyHelp: "填写 DeepSeek 平台创建的 API Key。",
     modelPlaceholder: "按 DeepSeek 控制台的模型名称填写",
+    modelHelp: "填写 DeepSeek 控制台支持的模型名称。",
   },
   {
     id: "zhipu",
     label: "智谱 GLM",
     endpoint: "https://open.bigmodel.cn/api/paas/v4",
+    endpointHelp: "智谱开放平台 API Base URL。填写到 /api/paas/v4 即可。",
+    keyHelp: "填写智谱开放平台 API Key。",
     modelPlaceholder: "按智谱开放平台的模型名称填写",
+    modelHelp: "填写智谱开放平台支持的 GLM 模型名称。",
   },
   {
     id: "volcengine",
     label: "火山方舟",
     endpoint: "https://ark.cn-beijing.volces.com/api/v3",
+    endpointHelp: "火山方舟 OpenAI 兼容 API Base URL。不同地域可能不同，请以方舟控制台为准。",
+    keyHelp: "填写火山方舟 API Key。",
     modelPlaceholder: "填写火山方舟推理接入点或模型标识",
+    modelHelp: "火山方舟通常使用推理接入点 ID 或控制台给出的模型标识。",
   },
   {
     id: "hunyuan",
     label: "腾讯混元",
     endpoint: "https://api.hunyuan.cloud.tencent.com/v1",
+    endpointHelp: "腾讯混元 OpenAI 兼容 API Base URL。填写到 /v1 即可。",
+    keyHelp: "填写腾讯混元 API Key。",
     modelPlaceholder: "按腾讯混元控制台的模型名称填写",
+    modelHelp: "填写腾讯混元控制台支持的模型名称。",
   },
   {
     id: "gemini-openai",
     label: "Google Gemini（OpenAI 兼容）",
     endpoint: "https://generativelanguage.googleapis.com/v1beta/openai",
+    endpointHelp: "Gemini 的 OpenAI 兼容入口。填写到 /v1beta/openai 即可。",
+    keyHelp: "填写 Google AI Studio 或 Google Cloud 提供的 API Key。",
     modelPlaceholder: "按 Gemini API 的 OpenAI 兼容模型名称填写",
+    modelHelp: "填写 Gemini OpenAI 兼容接口支持的模型名称。",
   },
   {
     id: "xai",
     label: "xAI",
     endpoint: "https://api.x.ai/v1",
+    endpointHelp: "xAI API Base URL。填写到 /v1 即可。",
+    keyHelp: "填写 xAI 控制台创建的 API Key。",
     modelPlaceholder: "按 xAI 控制台的模型名称填写",
+    modelHelp: "填写 xAI 控制台支持的模型名称。",
   },
   {
     id: "groq",
     label: "Groq",
     endpoint: "https://api.groq.com/openai/v1",
+    endpointHelp: "Groq 的 OpenAI 兼容 API Base URL。填写到 /openai/v1 即可。",
+    keyHelp: "填写 Groq 控制台创建的 API Key。",
     modelPlaceholder: "按 Groq 控制台的模型名称填写",
+    modelHelp: "填写 Groq 控制台支持的模型名称。",
   },
   {
     id: "mistral",
     label: "Mistral",
     endpoint: "https://api.mistral.ai/v1",
+    endpointHelp: "Mistral API Base URL。填写到 /v1 即可。",
+    keyHelp: "填写 Mistral 控制台创建的 API Key。",
     modelPlaceholder: "按 Mistral 控制台的模型名称填写",
+    modelHelp: "填写 Mistral 控制台支持的模型名称。",
   },
   {
     id: "perplexity",
     label: "Perplexity",
     endpoint: "https://api.perplexity.ai",
+    endpointHelp: "Perplexity API Base URL。填写根地址即可，LexVoice 会自动补全 /chat/completions。",
+    keyHelp: "填写 Perplexity 控制台创建的 API Key。",
     modelPlaceholder: "按 Perplexity 控制台的模型名称填写",
+    modelHelp: "填写 Perplexity API 支持的模型名称。",
   },
   {
     id: "openai-compatible-gateway",
     label: "其他 OpenAI 兼容网关 / 中转站",
     endpoint: "",
+    endpointHelp: "填写中转站提供的 OpenAI 兼容地址。可填完整 /chat/completions，也可填 Base URL。",
+    keyHelp: "填写中转站提供的访问密钥；如果该网关不需要鉴权，可在本地服务场景下留空。",
     modelPlaceholder: "填写该中转站要求的模型名称",
+    modelHelp: "以中转站控制台或文档显示的模型名称为准。",
   },
   {
     id: "ollama",
     label: "本地 Ollama",
     endpoint: "http://127.0.0.1:11434/v1",
+    endpointHelp: "Ollama 本地 OpenAI 兼容地址。保持默认前请确认 Ollama 已启动。",
+    keyHelp: "本地 Ollama 通常不需要访问密钥。",
     modelPlaceholder: "填写本地 Ollama 已安装的模型名称",
+    modelHelp: "填写 `ollama list` 中已经安装的模型名称。",
   },
   {
     id: "lmstudio",
     label: "本地 LM Studio",
     endpoint: "http://127.0.0.1:1234/v1",
+    endpointHelp: "LM Studio 本地 OpenAI 兼容地址。保持默认前请确认本地服务器已启动。",
+    keyHelp: "本地 LM Studio 通常不需要访问密钥。",
     modelPlaceholder: "填写 LM Studio 当前加载的模型标识",
+    modelHelp: "填写 LM Studio 当前服务暴露的模型标识；不确定时查看 LM Studio Server 面板。",
   },
   {
     id: "local-openai-compatible",
     label: "本地 OpenAI 兼容服务",
     endpoint: "http://127.0.0.1:8000/v1",
+    endpointHelp: "本地 OpenAI 兼容服务地址，例如 vLLM、Xinference、llama.cpp server。请先启动服务。",
+    keyHelp: "本地服务通常可留空；如果你给服务配置了鉴权，就填写对应密钥。",
     modelPlaceholder: "填写 vLLM / Xinference / llama.cpp 等本地服务的模型名称",
+    modelHelp: "填写本地服务实际暴露的模型名称。",
   },
 ];
 
@@ -7993,8 +8050,18 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         });
       });
 
+    const llmEndpointHelp = activeLlmPreset && activeLlmPreset.endpointHelp
+      ? activeLlmPreset.endpointHelp
+      : "填写 OpenAI Chat Completions 兼容地址。可填完整 /v1/chat/completions；如果服务只提供 Base URL，填到 /v1 或根地址即可。";
+    const llmKeyHelp = activeLlmPreset && activeLlmPreset.keyHelp
+      ? activeLlmPreset.keyHelp
+      : "填写服务商或中转站提供的 API Key。本地 localhost 大模型服务可留空。";
+    const llmModelHelp = activeLlmPreset && activeLlmPreset.modelHelp
+      ? activeLlmPreset.modelHelp
+      : "填写服务要求的 model 名称；Poe、OpenRouter 等中转站请以其控制台或模型列表显示的名称为准。";
+
     new obsidian.Setting(c).setName("服务地址")
-      .setDesc("填写 OpenAI Chat Completions 兼容地址。可填完整 /v1/chat/completions；如果服务只提供 Base URL，填到 /v1 或根地址即可。")
+      .setDesc(llmEndpointHelp)
       .addText(t => t.setValue(this.plugin.settings.llmEndpoint).onChange(async v => {
         this.plugin.settings.llmEndpoint = v;
         this.plugin.settings.llmServicePreset = inferLlmServicePresetId(this.plugin.settings);
@@ -8002,7 +8069,7 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       }));
 
     const llmKeyRow = new obsidian.Setting(c).setName("访问密钥")
-      .setDesc("填写服务商或中转站提供的 API Key。本地 localhost 大模型服务可留空。")
+      .setDesc(llmKeyHelp)
       .addText(t => { t.inputEl.type = "password"; t.setValue(this.plugin.settings.llmApiKey).onChange(async v => { this.plugin.settings.llmApiKey = v; await this.plugin.saveSettings(); }); });
     const sfSpeechKey = ((this.plugin.settings.transcribeProviders || {}).siliconflow || {}).apiKey || "";
     if (sfSpeechKey && !this.plugin.settings.llmApiKey && /siliconflow\.cn/i.test(this.plugin.settings.llmEndpoint || "")) {
@@ -8015,7 +8082,7 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     }
 
     new obsidian.Setting(c).setName("模型标识")
-      .setDesc("填写服务要求的 model 名称；Poe、OpenRouter 等中转站请以其控制台或模型列表显示的名称为准。")
+      .setDesc(llmModelHelp)
       .addText(t => {
         t.setPlaceholder(activeLlmPreset && activeLlmPreset.modelPlaceholder ? activeLlmPreset.modelPlaceholder : "例如：服务商控制台显示的模型标识");
         t.setValue(this.plugin.settings.llmModel);
