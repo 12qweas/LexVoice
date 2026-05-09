@@ -75,7 +75,8 @@ const DEFAULT_SETTINGS = {
 
   llmEndpoint: "https://api.siliconflow.cn/v1/chat/completions",
   llmApiKey: "",
-  llmModel: "deepseek-ai/DeepSeek-V3.2",
+  llmModel: "",
+  llmServicePreset: "siliconflow",
 
   polishMode: "meeting",
   polishPromptInterview: "",
@@ -184,154 +185,118 @@ const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const UPDATE_PLUGIN_FILES = ["manifest.json", "main.js", "styles.css", "README.md"];
 const LLM_SERVICE_PRESETS = [
   {
-    id: "siliconflow-deepseek",
-    label: "硅基流动 · DeepSeek V3.2（推荐）",
+    id: "siliconflow",
+    label: "硅基流动",
     endpoint: DEFAULT_SETTINGS.llmEndpoint,
-    model: DEFAULT_SETTINGS.llmModel,
+    modelPlaceholder: "按硅基流动控制台的模型名称填写",
   },
   {
     id: "openai",
-    label: "OpenAI · GPT-4o mini",
-    endpoint: "https://api.openai.com/v1/chat/completions",
-    model: "gpt-4o-mini",
+    label: "OpenAI",
+    endpoint: "https://api.openai.com/v1",
+    modelPlaceholder: "按 OpenAI 模型名称填写",
   },
   {
-    id: "poe-claude",
-    label: "Poe · Claude Sonnet 4.6",
-    endpoint: "https://api.poe.com/v1/chat/completions",
-    model: "Claude-Sonnet-4.6",
+    id: "poe",
+    label: "Poe",
+    endpoint: "https://api.poe.com/v1",
+    modelPlaceholder: "按 Poe API Key 页面或模型列表显示的名称填写",
   },
   {
-    id: "openrouter-gpt",
-    label: "OpenRouter · GPT-4o mini",
-    endpoint: "https://openrouter.ai/api/v1/chat/completions",
-    model: "openai/gpt-4o-mini",
+    id: "openrouter",
+    label: "OpenRouter",
+    endpoint: "https://openrouter.ai/api/v1",
+    modelPlaceholder: "按 OpenRouter 模型列表填写，通常带提供商前缀",
   },
   {
-    id: "kimi-k2-cn",
-    label: "Kimi K2.6（Coding / Moonshot 国内）",
-    endpoint: "https://api.moonshot.cn/v1/chat/completions",
-    model: "kimi-k2.6",
+    id: "moonshot",
+    label: "Moonshot / Kimi",
+    endpoint: "https://api.moonshot.cn/v1",
+    modelPlaceholder: "按 Moonshot 控制台的 Kimi 模型名称填写",
   },
   {
-    id: "kimi-k2-global",
-    label: "Kimi K2.6（Coding / Moonshot Global）",
-    endpoint: "https://api.moonshot.ai/v1/chat/completions",
-    model: "kimi-k2.6",
+    id: "dashscope",
+    label: "阿里云百炼 / DashScope",
+    endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    modelPlaceholder: "按百炼控制台的模型名称填写",
   },
   {
-    id: "qwen-plus-cn",
-    label: "通义千问 · Qwen Plus（百炼北京）",
-    endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-    model: "qwen-plus",
+    id: "deepseek",
+    label: "DeepSeek",
+    endpoint: "https://api.deepseek.com",
+    modelPlaceholder: "按 DeepSeek 控制台的模型名称填写",
   },
   {
-    id: "qwen-plus-intl",
-    label: "通义千问 · Qwen Plus（DashScope Intl）",
-    endpoint: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
-    model: "qwen-plus",
+    id: "zhipu",
+    label: "智谱 GLM",
+    endpoint: "https://open.bigmodel.cn/api/paas/v4",
+    modelPlaceholder: "按智谱开放平台的模型名称填写",
   },
   {
-    id: "deepseek-v4-flash",
-    label: "DeepSeek V4 Flash",
-    endpoint: "https://api.deepseek.com/chat/completions",
-    model: "deepseek-v4-flash",
+    id: "volcengine",
+    label: "火山方舟",
+    endpoint: "https://ark.cn-beijing.volces.com/api/v3",
+    modelPlaceholder: "填写火山方舟推理接入点或模型标识",
   },
   {
-    id: "deepseek-v4-pro",
-    label: "DeepSeek V4 Pro",
-    endpoint: "https://api.deepseek.com/chat/completions",
-    model: "deepseek-v4-pro",
+    id: "hunyuan",
+    label: "腾讯混元",
+    endpoint: "https://api.hunyuan.cloud.tencent.com/v1",
+    modelPlaceholder: "按腾讯混元控制台的模型名称填写",
   },
   {
-    id: "zhipu-glm",
-    label: "智谱 GLM · GLM-4.7",
-    endpoint: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-    model: "glm-4.7",
+    id: "gemini-openai",
+    label: "Google Gemini（OpenAI 兼容）",
+    endpoint: "https://generativelanguage.googleapis.com/v1beta/openai",
+    modelPlaceholder: "按 Gemini API 的 OpenAI 兼容模型名称填写",
   },
   {
-    id: "doubao-seed",
-    label: "火山方舟 · Doubao Seed 1.6",
-    endpoint: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-    model: "doubao-seed-1-6-251015",
+    id: "xai",
+    label: "xAI",
+    endpoint: "https://api.x.ai/v1",
+    modelPlaceholder: "按 xAI 控制台的模型名称填写",
   },
   {
-    id: "hunyuan-turbos",
-    label: "腾讯混元 · Hunyuan TurboS",
-    endpoint: "https://api.hunyuan.cloud.tencent.com/v1/chat/completions",
-    model: "hunyuan-turbos-latest",
+    id: "groq",
+    label: "Groq",
+    endpoint: "https://api.groq.com/openai/v1",
+    modelPlaceholder: "按 Groq 控制台的模型名称填写",
   },
   {
-    id: "gemini-flash",
-    label: "Google Gemini · 2.5 Flash",
-    endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-    model: "gemini-2.5-flash",
+    id: "mistral",
+    label: "Mistral",
+    endpoint: "https://api.mistral.ai/v1",
+    modelPlaceholder: "按 Mistral 控制台的模型名称填写",
   },
   {
-    id: "anthropic-sonnet",
-    label: "Anthropic Claude · Sonnet 4.5",
-    endpoint: "https://api.anthropic.com/v1/chat/completions",
-    model: "claude-sonnet-4-5-20250929",
+    id: "perplexity",
+    label: "Perplexity",
+    endpoint: "https://api.perplexity.ai",
+    modelPlaceholder: "按 Perplexity 控制台的模型名称填写",
   },
   {
-    id: "xai-grok",
-    label: "xAI · Grok 4.20 Reasoning",
-    endpoint: "https://api.x.ai/v1/chat/completions",
-    model: "grok-4.20-reasoning",
+    id: "openai-compatible-gateway",
+    label: "其他 OpenAI 兼容网关 / 中转站",
+    endpoint: "",
+    modelPlaceholder: "填写该中转站要求的模型名称",
   },
   {
-    id: "groq-llama",
-    label: "Groq · Llama 3.3 70B",
-    endpoint: "https://api.groq.com/openai/v1/chat/completions",
-    model: "llama-3.3-70b-versatile",
-  },
-  {
-    id: "mistral-large",
-    label: "Mistral · Large Latest",
-    endpoint: "https://api.mistral.ai/v1/chat/completions",
-    model: "mistral-large-latest",
-  },
-  {
-    id: "perplexity-sonar",
-    label: "Perplexity · Sonar Pro",
-    endpoint: "https://api.perplexity.ai/chat/completions",
-    model: "sonar-pro",
-  },
-  {
-    id: "together-gptoss",
-    label: "Together AI · GPT-OSS 20B",
-    endpoint: "https://api.together.xyz/v1/chat/completions",
-    model: "openai/gpt-oss-20b",
-  },
-  {
-    id: "fireworks-llama",
-    label: "Fireworks · Llama 3.1 8B",
-    endpoint: "https://api.fireworks.ai/inference/v1/chat/completions",
-    model: "accounts/fireworks/models/llama-v3p1-8b-instruct",
-  },
-  {
-    id: "ollama-local",
+    id: "ollama",
     label: "本地 Ollama",
-    endpoint: "http://127.0.0.1:11434/v1/chat/completions",
-    model: "llama3.1:8b",
+    endpoint: "http://127.0.0.1:11434/v1",
+    modelPlaceholder: "填写本地 Ollama 已安装的模型名称",
   },
   {
-    id: "lmstudio-local",
+    id: "lmstudio",
     label: "本地 LM Studio",
-    endpoint: "http://127.0.0.1:1234/v1/chat/completions",
-    model: "local-model",
+    endpoint: "http://127.0.0.1:1234/v1",
+    modelPlaceholder: "填写 LM Studio 当前加载的模型标识",
   },
   {
-    id: "vllm-local",
-    label: "本地 vLLM / OpenAI Compatible Server",
-    endpoint: "http://127.0.0.1:8000/v1/chat/completions",
-    model: "local-model",
-  },
-  {
-    id: "xinference-local",
-    label: "本地 Xinference",
-    endpoint: "http://127.0.0.1:9997/v1/chat/completions",
-    model: "qwen3",
+    id: "local-openai-compatible",
+    label: "本地 OpenAI 兼容服务",
+    endpoint: "http://127.0.0.1:8000/v1",
+    modelPlaceholder: "填写 vLLM / Xinference / llama.cpp 等本地服务的模型名称",
   },
 ];
 
@@ -352,6 +317,27 @@ function pickDefined() {
 
 function getLlmServicePreset(id) {
   return LLM_SERVICE_PRESETS.find(p => p.id === id) || null;
+}
+
+function comparableLlmEndpoint(endpoint) {
+  return normalizeLlmEndpoint(endpoint).replace(/\/+$/, "").toLowerCase();
+}
+
+function inferLlmServicePresetId(settings) {
+  const current = comparableLlmEndpoint(settings && settings.llmEndpoint);
+  if (!current) return "";
+  const matched = LLM_SERVICE_PRESETS.find(p => p.endpoint && comparableLlmEndpoint(p.endpoint) === current);
+  return matched ? matched.id : "";
+}
+
+function getActiveLlmServicePresetId(settings) {
+  const saved = settings && settings.llmServicePreset ? settings.llmServicePreset : "";
+  const preset = getLlmServicePreset(saved);
+  if (!preset) return inferLlmServicePresetId(settings);
+  if (!preset.endpoint) return saved;
+  return comparableLlmEndpoint(preset.endpoint) === comparableLlmEndpoint(settings && settings.llmEndpoint)
+    ? saved
+    : inferLlmServicePresetId(settings);
 }
 
 const SUPPORTED_AUDIO_INPUT_MODES = new Set(["mic", "mix-virtual", "virtualCable"]);
@@ -427,6 +413,7 @@ function normalizeLexVoiceSettings(savedData) {
   s.llmEndpoint = pickDefined(composer.endpoint, raw.llmEndpoint, defaults.llmEndpoint);
   s.llmApiKey = pickDefined(composer.apiKey, raw.llmApiKey, defaults.llmApiKey);
   s.llmModel = pickDefined(composer.model, raw.llmModel, defaults.llmModel);
+  s.llmServicePreset = pickDefined(composer.servicePreset, raw.llmServicePreset, defaults.llmServicePreset);
   s.polishMode = pickDefined(composer.defaultMode, raw.polishMode, defaults.polishMode);
   s.polishPromptInterview = pickDefined(promptOverrides.interview, raw.polishPromptInterview, defaults.polishPromptInterview);
   s.polishPromptMeeting = pickDefined(promptOverrides.meeting, raw.polishPromptMeeting, defaults.polishPromptMeeting);
@@ -584,6 +571,7 @@ function serializeLexVoiceSettings(s) {
       endpoint: s.llmEndpoint,
       apiKey: s.llmApiKey,
       model: s.llmModel,
+      servicePreset: s.llmServicePreset,
       defaultMode: s.polishMode,
       modePromptOverrides: {
         interview: s.polishPromptInterview || "",
@@ -3686,10 +3674,17 @@ function isMoonshotKimiModel(endpoint, model) {
   }
 }
 
-function buildLlmHeaders(apiKey) {
+function buildLlmHeaders(apiKey, endpoint) {
   const headers = { "Content-Type": "application/json" };
   const key = String(apiKey || "").trim();
   if (key) headers.Authorization = `Bearer ${key}`;
+  try {
+    const host = new URL(normalizeLlmEndpoint(endpoint)).hostname.toLowerCase();
+    if (/(^|\.)openrouter\.ai$/.test(host)) {
+      headers["HTTP-Referer"] = "https://github.com/Lynn-x/LexVoice";
+      headers["X-OpenRouter-Title"] = "LexVoice";
+    }
+  } catch {}
   return headers;
 }
 
@@ -3734,7 +3729,7 @@ async function requestLlmChatCompletion(plugin, messages, options) {
   const payload = Object.assign(basePayload, options && options.payload ? options.payload : {});
   const res = await fetch(endpoint, {
     method: "POST",
-    headers: buildLlmHeaders(llmApiKey),
+    headers: buildLlmHeaders(llmApiKey, endpoint),
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -7573,10 +7568,10 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     });
     this.plugin.settings.activeTranscribeProvider = "siliconflow";
 
-    const llmPreset = getLlmServicePreset("siliconflow-deepseek");
+    const llmPreset = getLlmServicePreset("siliconflow");
     if (llmPreset) {
+      this.plugin.settings.llmServicePreset = llmPreset.id;
       this.plugin.settings.llmEndpoint = llmPreset.endpoint;
-      this.plugin.settings.llmModel = llmPreset.model;
     }
     if (!this.plugin.settings.llmApiKey && currentSpeech.apiKey) {
       this.plugin.settings.llmApiKey = currentSpeech.apiKey;
@@ -7645,10 +7640,10 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     const apiBtn = primary.createEl("button", { text: "配置 API" });
     apiBtn.addClass("mod-cta");
     apiBtn.onclick = () => jump("api");
-    const quickBtn = primary.createEl("button", { text: "使用推荐配置" });
+    const quickBtn = primary.createEl("button", { text: "使用入门配置" });
     quickBtn.onclick = async () => {
       await this.applyBeginnerDefaults();
-      new obsidian.Notice("已切换为推荐入门配置：硅基流动转写 + 硅基流动 DeepSeek。下一步只需填写访问密钥并测试连接。", 7000);
+      new obsidian.Notice("已切换为入门连接配置：硅基流动转写 + 硅基流动大模型服务。请填写访问密钥和模型标识后测试连接。", 7000);
       jump("api");
     };
     const aiBtn = primary.createEl("button", { text: hasLlm ? "AI 整理设置" : "配置大模型" });
@@ -7664,7 +7659,7 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         name: "语音转写服务",
         need: "必填",
         price: "云端付费 / 本地免费",
-        desc: "将录音转换为原始文字。云端方案推荐硅基流动入门；对数据本地化有要求时，可部署本地 Whisper、SenseVoice 等服务。",
+        desc: "将录音转换为原始文字。可选择云端转写服务或本地 Whisper、SenseVoice 等服务；对数据本地化有要求时优先考虑本地部署。",
         action: "配置转写服务",
         target: "api",
         status: hasSpeechProvider ? "已配置" : "未配置",
@@ -7971,30 +7966,40 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
 
     new obsidian.Setting(c).setName("AI 整理服务").setHeading();
 
+    const activeLlmPresetId = getActiveLlmServicePresetId(this.plugin.settings);
+    const activeLlmPreset = getLlmServicePreset(activeLlmPresetId);
     new obsidian.Setting(c).setName("服务预设")
-      .setDesc("用于快速填入服务地址和模型标识，不会覆盖访问密钥。推荐先用硅基流动，与默认转写服务可共用一把访问密钥。")
+      .setDesc("用于快速填入服务地址和必要的请求头适配，不会覆盖访问密钥。模型标识请按对应服务商或中转站控制台填写。")
       .addDropdown(d => {
-        d.addOption("", "选择一个预设…");
+        d.addOption("", "自定义服务…");
         for (const preset of LLM_SERVICE_PRESETS) d.addOption(preset.id, preset.label);
-        d.setValue("");
+        d.setValue(activeLlmPresetId || "");
         d.onChange(async id => {
           const preset = getLlmServicePreset(id);
-          if (!preset) return;
-          this.plugin.settings.llmEndpoint = preset.endpoint;
-          this.plugin.settings.llmModel = preset.model;
-          if (id === "siliconflow-deepseek" && !this.plugin.settings.llmApiKey) {
+          this.plugin.settings.llmServicePreset = id || "";
+          if (!preset) {
+            await this.plugin.saveSettings();
+            this.display();
+            return;
+          }
+          if (preset.endpoint) this.plugin.settings.llmEndpoint = preset.endpoint;
+          if (id === "siliconflow" && !this.plugin.settings.llmApiKey) {
             const sfKey = ((this.plugin.settings.transcribeProviders || {}).siliconflow || {}).apiKey || "";
             if (sfKey) this.plugin.settings.llmApiKey = sfKey;
           }
           await this.plugin.saveSettings();
-          new obsidian.Notice(`已应用预设：${preset.label}。请确认访问密钥后测试连接。`, 6000);
+          new obsidian.Notice(`已应用服务预设：${preset.label}。请确认访问密钥和模型标识后测试连接。`, 6000);
           this.display();
         });
       });
 
     new obsidian.Setting(c).setName("服务地址")
       .setDesc("填写 OpenAI Chat Completions 兼容地址。可填完整 /v1/chat/completions；如果服务只提供 Base URL，填到 /v1 或根地址即可。")
-      .addText(t => t.setValue(this.plugin.settings.llmEndpoint).onChange(async v => { this.plugin.settings.llmEndpoint = v; await this.plugin.saveSettings(); }));
+      .addText(t => t.setValue(this.plugin.settings.llmEndpoint).onChange(async v => {
+        this.plugin.settings.llmEndpoint = v;
+        this.plugin.settings.llmServicePreset = inferLlmServicePresetId(this.plugin.settings);
+        await this.plugin.saveSettings();
+      }));
 
     const llmKeyRow = new obsidian.Setting(c).setName("访问密钥")
       .setDesc("填写服务商或中转站提供的 API Key。本地 localhost 大模型服务可留空。")
@@ -8010,8 +8015,12 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     }
 
     new obsidian.Setting(c).setName("模型标识")
-      .setDesc("填写服务要求的 model 名称；Poe 等 OpenAI 兼容服务或其他中转站请以其控制台 / 文档显示的名称为准。")
-      .addText(t => t.setValue(this.plugin.settings.llmModel).onChange(async v => { this.plugin.settings.llmModel = v; await this.plugin.saveSettings(); }));
+      .setDesc("填写服务要求的 model 名称；Poe、OpenRouter 等中转站请以其控制台或模型列表显示的名称为准。")
+      .addText(t => {
+        t.setPlaceholder(activeLlmPreset && activeLlmPreset.modelPlaceholder ? activeLlmPreset.modelPlaceholder : "例如：服务商控制台显示的模型标识");
+        t.setValue(this.plugin.settings.llmModel);
+        t.onChange(async v => { this.plugin.settings.llmModel = v; await this.plugin.saveSettings(); });
+      });
 
     new obsidian.Setting(c).setName("大模型连通性测试")
       .setDesc("发送一条极短文本请求，验证服务地址、访问密钥和模型名称是否匹配；不会上传录音、转写文本或 Prompt。")
