@@ -2298,8 +2298,17 @@ select.lexvoice-recruit-input.dropdown {
   flex: 0 0 auto;
   border-radius: 6px;
   background: var(--background-secondary);
+  color: var(--text-muted);
+  border: 1px solid var(--background-modifier-border);
+  line-height: 1;
+  font-size: var(--font-ui-smaller);
 }
 
+.lexvoice-tpl-mode-pill svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2;
+}
 
 .lexvoice-scene-summary {
   border: 1px solid var(--background-modifier-border);

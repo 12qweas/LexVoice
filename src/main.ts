@@ -868,13 +868,13 @@ async function ensureAdapterFolder(adapter, folderPath) {
 // 用户面 5 大业务意图（recruit 走彩蛋解锁）。内部 key 保留旧字符串以避免迁移破坏老笔记 / tag / base 文件；
 // huddle 是 meeting 的子风格，不再单列在新建录音下拉，但老 huddle 笔记仍能被识别和打开。
 const MODE_META = {
-  meeting:   { prefix: "工作纪要", emoji: "📝", label: "工作纪要", goal: "适合各种规模的工作会议：决议、待办、风险、同步同事进展。" },
-  interview: { prefix: "访谈", emoji: "🎙", label: "访谈", goal: "适合外部访谈、用户调研、专家访谈，把问答转成洞察。" },
-  monologue: { prefix: "个人笔记", emoji: "💭", label: "个人笔记", goal: "适合个人口述、灵感、复盘，把碎片表达整理成可用笔记。" },
-  learning:  { prefix: "学习笔记", emoji: "📚", label: "学习笔记", goal: "适合 B 站、YouTube、课程、讲座、播客等高信息密度内容。" },
-  recruit:   { prefix: "招聘评估", emoji: "👔", label: "招聘评估" },
-  huddle:    { prefix: "圆桌讨论", emoji: "🤝", label: "圆桌讨论", goal: "保留以兼容旧笔记，新建录音请改用「工作纪要」。", legacy: true },
-  off:       { prefix: "录音", emoji: "🎙", label: "关闭（仅转写）" },
+  meeting:   { prefix: "工作纪要", emoji: "📝", icon: "briefcase", label: "工作纪要", goal: "适合各种规模的工作会议：决议、待办、风险、同步同事进展。" },
+  interview: { prefix: "访谈", emoji: "🎙", icon: "message-square", label: "访谈", goal: "适合外部访谈、用户调研、专家访谈，把问答转成洞察。" },
+  monologue: { prefix: "个人笔记", emoji: "💭", icon: "notebook", label: "个人笔记", goal: "适合个人口述、灵感、复盘，把碎片表达整理成可用笔记。" },
+  learning:  { prefix: "学习笔记", emoji: "📚", icon: "book-open", label: "学习笔记", goal: "适合 B 站、YouTube、课程、讲座、播客等高信息密度内容。" },
+  recruit:   { prefix: "招聘评估", emoji: "👔", icon: "user-check", label: "招聘评估" },
+  huddle:    { prefix: "圆桌讨论", emoji: "🤝", icon: "users", label: "圆桌讨论", goal: "保留以兼容旧笔记，新建录音请改用「工作纪要」。", legacy: true },
+  off:       { prefix: "录音", emoji: "🎙", icon: "mic", label: "关闭（仅转写）" },
 };
 
 // 新建录音下拉里出现的 4 个意图 + 1 个彩蛋；huddle 不出现（仅旧笔记兜底使用）
@@ -926,9 +926,23 @@ function getModeMeta(settings, mode) {
   const custom = getCustomPromptModeTemplate(settings, mode);
   if (custom) {
     const name = custom.name || "自定义提示词";
-    return { prefix: name, emoji: "🧩", label: "自定义提示词：" + name, goal: custom.description || "用户自定义提示词。", baseMode: custom.baseMode || "learning", custom: true };
+    return { prefix: name, emoji: "🧩", icon: "puzzle", label: "自定义提示词：" + name, goal: custom.description || "用户自定义提示词。", baseMode: custom.baseMode || "learning", custom: true };
   }
   return MODE_META.meeting;
+}
+
+function setLexVoiceModePillIcon(el, meta, fallbackMeta) {
+  const source = meta || fallbackMeta || {};
+  const fallback = fallbackMeta || {};
+  const icon = source.icon || fallback.icon || "file-text";
+  el.empty();
+  el.addClass("is-lucide");
+  try {
+    obsidian.setIcon(el, icon);
+  } catch {
+    const label = source.prefix || source.label || fallback.prefix || fallback.label || "";
+    el.setText(label ? label.trim().slice(0, 1) : "L");
+  }
 }
 
 function isKnownPolishMode(settings, mode) {
@@ -2547,6 +2561,7 @@ const VOCABULARY_SECTIONS = [
   { key: "brands", title: "品牌/机构", desc: "公司、学校、团队、客户、供应商、社区、品牌名。", placeholder: "例如：OpenAI、阿里云百炼、硅基流动" },
   { key: "projects", title: "项目/产品", desc: "项目代号、产品名、模型名、系统名、插件名。", placeholder: "例如：LexVoice、SenseVoiceSmall、Paraformer" },
   { key: "terms", title: "行业术语", desc: "专业概念、流程、缩写、技术词、业务词。", placeholder: "例如：ASR、履约保证金、灰度发布" },
+  { key: "corrections", title: "易错写法", desc: "明确写出 ASR 常见误写与标准写法。转写返回后，LexVoice 只会按这些显式规则做轻量替换。", placeholder: "例如：森斯 Voice Small => SenseVoiceSmall" },
   { key: "other", title: "其他专有名词", desc: "暂时不好归类但希望 ASR 优先识别准确的词。", placeholder: "例如：会议室名、活动名、内部简称" },
 ];
 
@@ -2567,8 +2582,35 @@ function detectVocabularySectionKey(text) {
   if (/品牌|机构|公司|组织|团队|客户|供应商|学校|社区/.test(title)) return "brands";
   if (/项目|产品|模型|系统|服务|应用|插件/.test(title)) return "projects";
   if (/行业术语|术语|专业词|业务词|缩写|英文|概念|流程/.test(title)) return "terms";
+  if (/易错|误写|错写|纠错|校正|替换|标准写法|正确写法/.test(title)) return "corrections";
   if (/其他|专有名词|专名|未分类/.test(title)) return "other";
   return "";
+}
+
+function normalizeVocabularyCorrectionSide(text) {
+  return String(text || "")
+    .trim()
+    .replace(/^\*\*(.*?)\*\*$/, "$1")
+    .replace(/^__(.*?)__$/, "$1")
+    .replace(/^[`"'「『]+/, "")
+    .replace(/[`"'」』]+$/, "")
+    .trim();
+}
+
+function normalizeVocabularyCorrectionTerm(line) {
+  let text = String(line || "").trim();
+  if (!text) return "";
+  if (text.startsWith("<!--") || text.startsWith("//") || text.startsWith(">")) return "";
+  if (text === "---" || /^\|?\s*-{3,}/.test(text)) return "";
+  text = text.replace(/^- \[[ x]\]\s+/i, "").replace(/^[-*+]\s+/, "").replace(/^\d+[\.)、]\s+/, "").trim();
+  text = text.replace(/^\*\*(.*?)\*\*$/, "$1").replace(/^__(.*?)__$/, "$1");
+  const pair = text.match(/^(.+?)\s*(?:=>|->|→|=|：|:)\s*(.+)$/);
+  if (!pair) return "";
+  const from = normalizeVocabularyCorrectionSide(pair[1]);
+  const to = normalizeVocabularyCorrectionSide(pair[2]);
+  if (!from || !to || from === to) return "";
+  if (from.length > 60 || to.length > 60) return "";
+  return `${from} => ${to}`;
 }
 
 function normalizeVocabularyTerm(line) {
@@ -2587,7 +2629,9 @@ function normalizeVocabularyTerm(line) {
 
 function addVocabularyTerm(groups, key, term) {
   const target = groups[key] ? key : "other";
-  const value = normalizeVocabularyTerm(term);
+  const value = target === "corrections"
+    ? normalizeVocabularyCorrectionTerm(term)
+    : normalizeVocabularyTerm(term);
   if (!value) return;
   if (!groups[target].includes(value)) groups[target].push(value);
 }
@@ -2630,6 +2674,30 @@ function flattenVocabularyGroups(groups) {
     }
   }
   return out;
+}
+
+function getVocabularyCorrectionPairs(groups) {
+  return ((groups && groups.corrections) || [])
+    .map(normalizeVocabularyCorrectionTerm)
+    .filter(Boolean)
+    .map((item) => {
+      const pair = item.match(/^(.+?)\s*=>\s*(.+)$/);
+      return pair ? { from: pair[1].trim(), to: pair[2].trim() } : null;
+    })
+    .filter(pair => pair && pair.from && pair.to && pair.from !== pair.to);
+}
+
+function applyVocabularyCorrections(text, groups) {
+  let output = String(text || "");
+  if (!output) return output;
+  const pairs = getVocabularyCorrectionPairs(groups)
+    .sort((a, b) => b.from.length - a.from.length);
+  for (const pair of pairs) {
+    if (!pair || !pair.from || !pair.to || pair.from === pair.to) continue;
+    const flags = /[A-Za-z]/.test(pair.from) ? "gi" : "g";
+    output = output.replace(new RegExp(escapeRegExp(pair.from), flags), pair.to);
+  }
+  return output;
 }
 
 function countVocabularyGroups(groups) {
@@ -2699,12 +2767,27 @@ async function loadVocabularyTerms(plugin) {
 
 async function loadVocabularyPrompt(plugin) {
   const groups = await loadVocabularyGroups(plugin);
+  return buildVocabularyPrompt(groups);
+}
+
+function buildVocabularyPrompt(groups) {
   const parts = [];
   for (const def of VOCABULARY_SECTIONS) {
+    if (def.key === "corrections") continue;
     const terms = groups[def.key] || [];
     if (terms.length) parts.push(`${def.title}：${terms.join("、")}`);
   }
-  return parts.join("；").slice(0, 800);
+  const correctionText = getVocabularyCorrectionPairs(groups)
+    .slice(0, 20)
+    .map(pair => `${pair.from} 应写作 ${pair.to}`)
+    .join("；");
+  if (!parts.length && !correctionText) return "";
+  const lines = [
+    "本段音频可能出现以下专有名词和标准写法。请在能听清时优先按这些写法转写；不要因为列表存在而凭空添加未听到的内容。",
+    parts.join("；"),
+    correctionText ? `易错写法参考：${correctionText}` : "",
+  ].filter(Boolean);
+  return lines.join("\n").slice(0, 800);
 }
 
 function formatVocabularyMarkdown(input, profile) {
@@ -2714,7 +2797,7 @@ function formatVocabularyMarkdown(input, profile) {
   const lines = [
     "# LexVoice 领域词汇表",
     "",
-    "> 此文件由 LexVoice 维护，**自动注入到每次 ASR 转写调用**作为 prompt 上下文，提升对人名、品牌、项目名和行业术语的识别精度。",
+    "> 此文件由 LexVoice 维护。支持 prompt / initial_prompt 的分片转写服务会把这些词作为 ASR 上下文提示；「易错写法」会在转写返回后做轻量校正。",
     "",
     `- 行业 / 角色：${(profile && profile.industry) || "（未设置）"}`,
     `- 词汇数：${total}`,
@@ -2722,6 +2805,7 @@ function formatVocabularyMarkdown(input, profile) {
     "",
     "## 编辑规则",
     "- 按分区管理；每行一个词。",
+    "- 「易错写法」请使用 `错误写法 => 标准写法`，例如 `open router => OpenRouter`。",
     "- 可以手动新增、删除或把词条移动到更准确的分区。",
     "- 以 `#` `>` `<!--` `//` 开头的行会被忽略。",
     "- 列表标记 `- *` `1.` 会被自动剥离。",
@@ -4003,7 +4087,8 @@ async function transcribeAudio(plugin, blob, mime) {
   form.append("model", p.model);
   if (p.language && p.language !== "auto") form.append("language", p.language);
   form.append("response_format", "json");
-  const promptText = await loadVocabularyPrompt(plugin);
+  const vocabularyGroups = await loadVocabularyGroups(plugin);
+  const promptText = buildVocabularyPrompt(vocabularyGroups);
   if (promptText) form.append("prompt", promptText);
   const res = await fetch(p.endpoint, {
     method: "POST",
@@ -4015,7 +4100,8 @@ async function transcribeAudio(plugin, blob, mime) {
     throw new Error(buildTranscribeHttpError(res, msg, p, blob, mime));
   }
   const data = await res.json().catch(() => ({}));
-  return (data.text || data.transcript || data.result || "").trim();
+  const rawText = (data.text || data.transcript || data.result || "").trim();
+  return applyVocabularyCorrections(rawText, vocabularyGroups).trim();
 }
 
 function normalizeLlmEndpoint(endpoint) {
@@ -9490,15 +9576,16 @@ ${currentMeta.prefix || currentMeta.label || currentMode}
 ${customPromptBrief}
 
 【任务】
-列出 30–80 个可能高频出现、且值得加入 ASR 词汇表的专有词。若用户背景为空，请根据当前默认提示词与自定义提示词推断；不要编造真实人名、真实公司或隐私信息，可以使用类别化占位词。
+列出 30–80 个可能高频出现、且值得加入 ASR 词汇表的专有词。若能推断出常见误写，也可以列出少量「易错写法 => 标准写法」。若用户背景为空，请根据当前默认提示词与自定义提示词推断；不要编造真实人名、真实公司或隐私信息，可以使用类别化占位词。
 - 人名：客户、同事、专家、讲师、候选人、常用称呼
 - 品牌/机构：公司、学校、客户、供应商、社区、品牌名
 - 项目/产品：项目代号、产品名、模型名、系统名、服务名、插件名
 - 行业术语：专业概念、业务流程词、缩写、英文混杂词
+- 易错写法：只列非常确定的标准写法映射，例如 open router => OpenRouter；不要虚构真实姓名或真实公司
 - 其他专有名词：暂时不好归类但 ASR 容易识别错的词
 
 【输出格式】
-严格只输出下面的 Markdown 结构；每行一个词，不加解释。某类没有词也保留标题。
+严格只输出下面的 Markdown 结构；每行一个词，不加解释。某类没有词也保留标题。「易错写法」只允许使用“错误写法 => 标准写法”。
 
 ## 人名
 - <词>
@@ -9511,6 +9598,9 @@ ${customPromptBrief}
 
 ## 行业术语
 - <词>
+
+## 易错写法
+- <错误写法> => <标准写法>
 
 ## 其他专有名词
 - <词>`;
@@ -10897,7 +10987,7 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
 
     new obsidian.Setting(c).setName("领域词汇表").setHeading();
     const vocabHint = c.createDiv({ cls: "setting-item-description lexvoice-section-hint" });
-    vocabHint.setText("默认保存为 LexVoice/词汇表.md。转写时会自动注入到 ASR prompt 上下文，用于提升人名、品牌名、项目名和行业术语的识别准确度。");
+    vocabHint.setText("默认保存为 LexVoice/词汇表.md。支持 prompt / initial_prompt 的分片转写服务会把词汇表作为 ASR 上下文提示；易错写法会在转写返回后做轻量校正。流式服务是否支持取决于具体接口。");
 
     const vocabPathSetting = new obsidian.Setting(c).setName("词汇表文件路径")
       .addText(t => t.setValue(this.plugin.settings.vocabularyFile || "")
@@ -11857,7 +11947,8 @@ class PromptTemplateModal extends obsidian.Modal {
     const meta = getModeMeta(this.plugin.settings, mode);
     const row = list.createDiv({ cls: "lexvoice-tpl-row" });
     if (this.plugin.settings.polishMode === mode) row.addClass("is-active");
-    const pill = row.createDiv({ cls: "lexvoice-tpl-mode-pill", text: meta.emoji || "" });
+    const pill = row.createDiv({ cls: "lexvoice-tpl-mode-pill" });
+    setLexVoiceModePillIcon(pill, meta);
     pill.setAttr("aria-hidden", "true");
     const text = row.createDiv({ cls: "lexvoice-tpl-row-meta" });
     text.createDiv({ cls: "lexvoice-tpl-row-name", text: meta.prefix || meta.label || mode });
@@ -11879,7 +11970,8 @@ class PromptTemplateModal extends obsidian.Modal {
     const baseMeta = getModeMeta(this.plugin.settings, tpl.baseMode || "learning");
     const row = list.createDiv({ cls: "lexvoice-tpl-row" });
     if (this.plugin.settings.polishMode === tpl.id) row.addClass("is-active");
-    const pill = row.createDiv({ cls: "lexvoice-tpl-mode-pill", text: meta.emoji || baseMeta.emoji || "" });
+    const pill = row.createDiv({ cls: "lexvoice-tpl-mode-pill" });
+    setLexVoiceModePillIcon(pill, meta, baseMeta);
     pill.setAttr("aria-hidden", "true");
     const text = row.createDiv({ cls: "lexvoice-tpl-row-meta" });
     text.createDiv({ cls: "lexvoice-tpl-row-name", text: tpl.name || "自定义提示词" });
