@@ -24,6 +24,20 @@ These services are not bundled with LexVoice. Their trademarks, documentation, A
 
 The README and in-app guidance may mention virtual audio tools such as VB-Cable, BlackHole, PulseAudio, and PipeWire. These tools are not bundled with LexVoice. Users should follow each project's own license and installation guidance.
 
+## Design inspiration
+
+LexVoice's HTML PPT feature was inspired by the HTML-first slide-deck workflow and design principles documented in:
+
+- Huashu Design: https://github.com/alchaincyf/huashu-design
+- Notice requested by that project: `Derived from alchaincyf/huashu-design`
+- Guizang PPT Skill: https://github.com/op7418/guizang-ppt-skill
+
+LexVoice does not bundle, copy, or redistribute Huashu Design or Guizang PPT Skill source code, scripts, assets, demos, generated media, templates, or starter components. The LexVoice HTML/PPTX renderer and prompt workflow are implemented independently for this plugin.
+
+Huashu Design is distributed under its own Personal Use License. That license applies to Huashu Design itself and any use of its protected work; LexVoice's MIT License does not grant rights to Huashu Design. If future LexVoice changes copy or adapt Huashu Design code, assets, scripts, demos, or other protected materials, those changes must be reviewed separately, carry the required notices, and obtain any authorization required by Huashu Design's license before publication.
+
+Guizang PPT Skill is distributed under the MIT License. LexVoice references its publicly documented design workflow ideas, including slide rhythm, fixed layout discipline, and visual checklist thinking, but does not copy its implementation.
+
 ## AI assistance
 
 This plugin was developed with AI-assisted programming. All third-party APIs were integrated from public documentation, not from copied source code. Any future contribution that adapts code from another project must document the source, license, and notice in this file before being merged.

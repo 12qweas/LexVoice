@@ -157,6 +157,12 @@ LexVoice 使用 MIT License 发布。详见 [LICENSE](LICENSE)。
 
 插件中提到的第三方服务、模型、适配器或工具只是可选集成或配置参考，不随 LexVoice 一起分发。详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
+### 设计借鉴与致谢
+
+LexVoice 的 HTML PPT 功能参考了 [alchaincyf/huashu-design](https://github.com/alchaincyf/huashu-design) 中 HTML 优先的幻灯片工作流和设计原则。按照该项目许可说明中的署名要求，在此显著注明：**Derived from alchaincyf/huashu-design**。
+
+LexVoice 没有打包或再分发 `huashu-design` 的源码、脚本、素材、示例或媒体文件；当前实现是为 LexVoice 独立编写的渲染器与提示词流程。相关署名和许可边界说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
 ## 已知限制
 
 - 仅支持 Obsidian 桌面端。

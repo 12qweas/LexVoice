@@ -133,6 +133,12 @@ This project is released under the MIT License. See [LICENSE](LICENSE).
 
 Third-party services and tools mentioned in the plugin are optional integrations or setup references, not bundled dependencies. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
+### Design Inspiration
+
+The HTML PPT feature was inspired by the HTML-first slide-deck workflow and design principles documented in [alchaincyf/huashu-design](https://github.com/alchaincyf/huashu-design). In the language requested by that project's license notice: **Derived from alchaincyf/huashu-design**.
+
+LexVoice does not bundle or redistribute `huashu-design` source code, scripts, assets, demos, or media. The LexVoice implementation is an independent renderer and prompt workflow written for this plugin. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the attribution and license-scope note.
+
 ## Known Limitations
 
 - Desktop only.
