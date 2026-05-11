@@ -1465,6 +1465,15 @@
   font-size: var(--font-ui-small);
 }
 
+select.lexvoice-recruit-input.dropdown {
+  min-height: 34px;
+  padding-right: calc(var(--size-4-6) + var(--size-2-2));
+  background-color: var(--background-primary);
+  background-repeat: no-repeat !important;
+  background-position: right var(--size-2-3) center !important;
+  background-size: 16px 16px !important;
+}
+
 .lexvoice-recruit-actions {
   display: flex;
   gap: var(--size-2-2);
