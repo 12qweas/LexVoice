@@ -392,13 +392,137 @@
 .lexvoice-import-list {
   display: flex;
   flex-direction: column;
-  gap: var(--size-2-1);
+  gap: var(--size-2-2);
   max-height: 60vh;
   overflow-y: auto;
   margin-bottom: var(--size-4-3);
   padding: var(--size-2-2) 0;
   border-top: 1px solid var(--background-modifier-border);
   border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.lexvoice-import-toolbar {
+  display: flex;
+  gap: var(--size-2-2);
+  align-items: center;
+  margin: var(--size-4-2) 0 var(--size-2-2);
+}
+
+.lexvoice-import-mode {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
+  gap: var(--size-4-3);
+  align-items: center;
+  padding: var(--size-3-2) var(--size-4-2);
+  margin: var(--size-4-2) 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+}
+
+.lexvoice-import-mode-title {
+  color: var(--text-normal);
+  font-weight: var(--font-semibold);
+}
+
+.lexvoice-import-mode-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-top: var(--size-2-1);
+  line-height: var(--line-height-tight);
+}
+
+.lexvoice-import-mode-hint.is-recruit {
+  color: var(--text-accent);
+}
+
+.lexvoice-import-mode-select {
+  width: 100%;
+}
+
+.lexvoice-import-section-title {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  padding: var(--size-2-2) var(--size-4-2) var(--size-2-1);
+}
+
+.lexvoice-import-batch {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  overflow: hidden;
+}
+
+.lexvoice-import-batch[open] {
+  background: var(--background-secondary);
+}
+
+.lexvoice-import-batch-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  padding: var(--size-3-2) var(--size-4-2);
+  cursor: pointer;
+  list-style: none;
+}
+
+.lexvoice-import-batch-summary::-webkit-details-marker {
+  display: none;
+}
+
+.lexvoice-import-batch-summary::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid var(--text-muted);
+  border-bottom: 1.5px solid var(--text-muted);
+  transform: rotate(-45deg);
+  transition: transform 0.12s ease;
+}
+
+.lexvoice-import-batch[open] .lexvoice-import-batch-summary::after {
+  transform: rotate(45deg);
+}
+
+.lexvoice-import-batch-summary input[type="checkbox"] {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.lexvoice-import-batch-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.lexvoice-import-batch-name {
+  color: var(--text-normal);
+  font-weight: var(--font-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lexvoice-import-batch-meta {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-top: var(--size-2-1);
+}
+
+.lexvoice-import-batch-chip {
+  color: var(--text-accent);
+  background: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: 2px 7px;
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+}
+
+.lexvoice-import-batch-files {
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--size-2-2) var(--size-2-2);
 }
 
 .lexvoice-import-row {
@@ -412,6 +536,11 @@
 
 .lexvoice-import-row:hover {
   background: var(--background-modifier-hover);
+}
+
+.lexvoice-import-row.is-compact {
+  padding: var(--size-2-1) var(--size-4-2);
+  border-radius: var(--radius-s);
 }
 
 .lexvoice-import-row input[type="checkbox"] {
@@ -454,7 +583,14 @@
 .lexvoice-import-actions {
   display: flex;
   gap: var(--size-2-2);
+  align-items: center;
   justify-content: flex-end;
+}
+
+.lexvoice-import-selection {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-right: auto;
 }
 
 /* ============================================================
@@ -754,6 +890,46 @@
   color: var(--text-accent) !important;
   border-color: var(--text-accent);
   background: var(--background-modifier-hover);
+}
+
+.lexvoice-playback-timeline {
+  --lv-timeline-line: color-mix(in srgb, var(--text-muted) 22%, transparent);
+  margin: var(--size-2-2) 0 var(--size-4-2);
+  padding-left: var(--size-4-3);
+  border-left: 1px solid var(--lv-timeline-line);
+}
+
+.lexvoice-playback-timeline ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lexvoice-playback-timeline li {
+  position: relative;
+  margin: 0 0 var(--size-3-2);
+  padding-left: var(--size-4-2);
+  color: var(--text-normal);
+  line-height: var(--line-height-normal);
+}
+
+.lexvoice-playback-timeline li::before {
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--size-4-3) - 5px);
+  top: 0.65em;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--background-primary);
+  border: 1.5px solid var(--text-muted);
+}
+
+.lexvoice-playback-timeline-range {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+  margin-right: var(--size-2-1);
 }
 
 .lexvoice-audio-modal {
