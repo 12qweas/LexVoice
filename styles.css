@@ -724,6 +724,65 @@
   font-size: var(--font-ui-smaller);
 }
 
+.lexvoice-time-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 20px;
+  padding: 1px 7px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: var(--background-secondary);
+  color: var(--text-muted) !important;
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+  text-decoration: none !important;
+  vertical-align: baseline;
+}
+
+.lexvoice-time-link::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
+  clip-path: polygon(24% 12%, 82% 50%, 24% 88%);
+}
+
+.lexvoice-time-link:hover {
+  color: var(--text-accent) !important;
+  border-color: var(--text-accent);
+  background: var(--background-modifier-hover);
+}
+
+.lexvoice-audio-modal {
+  max-width: 560px;
+}
+
+.lexvoice-audio-modal-meta {
+  margin-bottom: var(--size-4-2);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  word-break: break-all;
+}
+
+.lexvoice-audio-player-wrap audio {
+  width: 100%;
+}
+
+.lexvoice-audio-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--size-4-3);
+}
+
+.lexvoice-audio-modal-error {
+  margin-top: var(--size-2-3);
+  color: var(--text-error);
+  font-size: var(--font-ui-small);
+}
+
 .lexvoice-outline-controls {
   display: flex;
   flex-direction: column;
