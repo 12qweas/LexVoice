@@ -598,18 +598,18 @@
    ============================================================ */
 
 .lexvoice-outline {
-  padding: var(--size-4-3) var(--size-4-3) var(--size-4-4);
+  padding: var(--size-4-4) var(--size-4-4) var(--size-4-5);
   display: flex;
   flex-direction: column;
-  gap: var(--size-4-3);
+  gap: var(--size-4-4);
   font-size: var(--font-ui-small);
 }
 
 .lexvoice-outline-head {
   display: flex;
   flex-direction: column;
-  gap: var(--size-2-2);
-  padding-bottom: var(--size-4-3);
+  gap: var(--size-4-2);
+  padding-bottom: var(--size-4-4);
   border-bottom: 1px solid var(--background-modifier-border);
 }
 
@@ -727,13 +727,14 @@
 .lexvoice-outline-section {
   display: flex;
   flex-direction: column;
-  gap: var(--size-2-2);
+  gap: var(--size-4-2);
 }
 
 .lexvoice-outline-section-title {
   font-size: var(--font-ui-smaller);
   font-weight: var(--font-semibold);
   color: var(--text-muted);
+  letter-spacing: 0;
 }
 
 .lexvoice-outline-segments {
@@ -794,18 +795,41 @@
 
 .lexvoice-outline-ai-body {
   font-size: var(--font-ui-small);
-  line-height: var(--line-height-normal);
+  line-height: 1.62;
   color: var(--text-normal);
 }
 
 .lexvoice-outline-ai-body ul,
 .lexvoice-outline-ai-body ol {
   margin: 0;
-  padding-inline-start: var(--list-indent, 1.5em);
+  padding-inline-start: 1.55em;
+  position: relative;
 }
 
 .lexvoice-outline-ai-body li {
-  margin: var(--size-2-1) 0;
+  margin: 6px 0;
+  position: relative;
+  padding-inline-start: 4px;
+}
+
+.lexvoice-outline-ai-body li::marker {
+  color: var(--text-faint);
+}
+
+.lexvoice-outline-ai-body ul ul,
+.lexvoice-outline-ai-body ol ol,
+.lexvoice-outline-ai-body ul ol,
+.lexvoice-outline-ai-body ol ul {
+  margin-top: 6px;
+  margin-inline-start: 0;
+  padding-inline-start: 1.35em;
+}
+
+.lexvoice-outline-ai-body ul ul li::marker,
+.lexvoice-outline-ai-body ol ol li::marker,
+.lexvoice-outline-ai-body ul ol li::marker,
+.lexvoice-outline-ai-body ol ul li::marker {
+  color: color-mix(in srgb, var(--text-faint) 72%, transparent);
 }
 
 .lexvoice-outline-ai-body li.lexvoice-outline-source-tagged {
@@ -842,11 +866,12 @@
 }
 
 .lexvoice-outline-ai-body > ul > li {
-  margin: var(--size-2-2) 0;
+  margin: 10px 0;
   font-weight: var(--font-semibold);
 }
 
 .lexvoice-outline-ai-body > ul > li > ul > li {
+  margin: 7px 0;
   font-weight: var(--font-normal);
   color: var(--text-normal);
 }
@@ -860,12 +885,42 @@
   font-size: var(--font-ui-smaller);
 }
 
+.lexvoice-outline-player-section {
+  gap: var(--size-2-2);
+  padding: var(--size-2-3) 0 var(--size-4-3);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.lexvoice-outline-player-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--size-2-2);
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.lexvoice-outline-player-file {
+  min-width: 0;
+  max-width: 62%;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lexvoice-outline-player {
+  width: 100%;
+  height: 34px;
+}
+
 .lexvoice-time-link {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  min-height: 20px;
-  padding: 1px 7px;
+  min-height: 22px;
+  padding: 2px 8px;
   border: 1px solid var(--background-modifier-border);
   border-radius: 999px;
   background: var(--background-secondary);
@@ -892,44 +947,79 @@
   background: var(--background-modifier-hover);
 }
 
-.lexvoice-playback-timeline {
-  --lv-timeline-line: color-mix(in srgb, var(--text-muted) 22%, transparent);
-  margin: var(--size-2-2) 0 var(--size-4-2);
-  padding-left: var(--size-4-3);
-  border-left: 1px solid var(--lv-timeline-line);
+.lexvoice-outline-ai-body .lexvoice-time-link.lexvoice-outline-leading-time {
+  min-height: 20px;
+  padding: 1px 7px;
+  margin-right: 8px;
+  margin-bottom: 1px;
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--background-secondary) 86%, transparent);
 }
 
-.lexvoice-playback-timeline ul {
-  margin: 0;
-  padding: 0;
+.lexvoice-outline-ai-body li.lexvoice-outline-has-leading-time {
   list-style: none;
 }
 
-.lexvoice-playback-timeline li {
-  position: relative;
-  margin: 0 0 var(--size-3-2);
-  padding-left: var(--size-4-2);
+.lexvoice-outline-ai-body .lexvoice-time-link.lexvoice-outline-leading-time::before {
+  display: none;
+}
+
+.lexvoice-outline-ai-body .lexvoice-time-link.lexvoice-outline-secondary-time {
+  opacity: 0.72;
+}
+
+.lexvoice-playback-timeline {
+  margin: var(--size-2-2) 0 var(--size-4-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lexvoice-playback-timeline-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--background-secondary) 74%, transparent);
+  color: var(--text-muted);
+  line-height: 1.2;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.lexvoice-playback-timeline a.internal-link,
+.lexvoice-playback-timeline .internal-link {
   color: var(--text-normal);
-  line-height: var(--line-height-normal);
+  font-size: var(--font-ui-small);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-decoration: none;
 }
 
-.lexvoice-playback-timeline li::before {
-  content: "";
-  position: absolute;
-  left: calc(-1 * var(--size-4-3) - 5px);
-  top: 0.65em;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--background-primary);
-  border: 1.5px solid var(--text-muted);
+.lexvoice-playback-timeline .lexvoice-time-link::before {
+  display: none;
 }
 
-.lexvoice-playback-timeline-range {
+.lexvoice-playback-timeline-pill:hover {
+  border-color: color-mix(in srgb, var(--text-accent) 44%, var(--background-modifier-border));
+  background: var(--background-modifier-hover);
+}
+
+.lexvoice-playback-timeline-pill.is-error {
+  border-color: color-mix(in srgb, var(--text-warning) 45%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--text-warning) 8%, var(--background-secondary));
+}
+
+.lexvoice-playback-timeline-index {
   color: var(--text-faint);
   font-size: var(--font-ui-smaller);
-  font-variant-numeric: tabular-nums;
-  margin-right: var(--size-2-1);
+  white-space: nowrap;
+}
+
+.lexvoice-playback-timeline-index.is-error {
+  color: var(--text-warning);
 }
 
 .lexvoice-audio-modal {

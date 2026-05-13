@@ -125,6 +125,8 @@ const DEFAULT_SETTINGS = {
 
   enableInterimOutput: true,
   segmentIntervalMinutes: 5,
+  segmentCacheFolder: "LexVoice/.cache/segments",
+  keepSegmentAudioFiles: false,
   filterShortRecordings: true,
 
   captureMode: "mic",
@@ -456,6 +458,8 @@ function normalizeLexVoiceSettings(savedData) {
   s.selectedMicrophoneDevice = pickDefined(capture.microphoneDeviceId, raw.selectedMicrophoneDevice, defaults.selectedMicrophoneDevice);
   s.enableInterimOutput = pickDefined(capture.liveSegmentsEnabled, raw.enableInterimOutput, defaults.enableInterimOutput);
   s.segmentIntervalMinutes = pickDefined(capture.segmentMinutes, raw.segmentIntervalMinutes, defaults.segmentIntervalMinutes);
+  s.segmentCacheFolder = pickDefined(storage.segmentCachePath, raw.segmentCacheFolder, defaults.segmentCacheFolder);
+  s.keepSegmentAudioFiles = pickDefined(capture.keepSegmentAudioFiles, raw.keepSegmentAudioFiles, defaults.keepSegmentAudioFiles);
   s.filterShortRecordings = pickDefined(capture.discardVeryShortRecordings, raw.filterShortRecordings, defaults.filterShortRecordings);
 
   const speech = raw.speech || {};
@@ -630,6 +634,7 @@ function serializeLexVoiceSettings(s) {
       autoImportInbox: s.inboxAutoImport,
       archiveSubfolder: s.inboxArchiveSubfolder,
       syncQuietMs: s.inboxStabilizeDelayMs,
+      segmentCachePath: s.segmentCacheFolder,
     },
     noteNaming: {
       sessionPattern: s.noteFileNameFormatNew,
@@ -643,6 +648,7 @@ function serializeLexVoiceSettings(s) {
       microphoneDeviceId: s.selectedMicrophoneDevice,
       liveSegmentsEnabled: s.enableInterimOutput,
       segmentMinutes: s.segmentIntervalMinutes,
+      keepSegmentAudioFiles: s.keepSegmentAudioFiles === true,
       discardVeryShortRecordings: s.filterShortRecordings !== false,
     },
     speech: {
@@ -2300,27 +2306,26 @@ function buildRealtimeOutlineDetails(session) {
   ].join("\n");
 }
 
-function summarizeTimelineText(text) {
-  const clean = String(text || "")
-    .replace(/\s+/g, " ")
-    .replace(/\[\[[^\]]+\]\]/g, "")
-    .trim();
-  if (!clean) return "此段暂无有效转写";
-  const sentence = clean.split(/(?<=[。！？!?])\s*/).find(Boolean) || clean;
-  return sentence.length > 42 ? sentence.slice(0, 42).replace(/[，,。.!！?？、：:；;]\s*$/, "") + "..." : sentence;
-}
-
 function buildPlaybackTimelineDetails(session) {
   const segments = (session && Array.isArray(session.segments)) ? session.segments : [];
   if (!segments.length) return "";
   const lines = [];
   for (const s of segments) {
     if (!s || !s.audioName) continue;
-    const link = getAudioTimeLink(s.audioName, s.startOffsetMs || 0);
-    if (!link) continue;
-    const summary = s.error ? "转写失败，点击回听原始音频" : summarizeTimelineText(s.text);
-    const end = Number.isFinite(s.endOffsetMs) ? `–${formatElapsed(s.endOffsetMs)}` : "";
-    lines.push(`- ${link} <span class="lexvoice-playback-timeline-range">${end}</span> ${summary}`);
+    const audioName = String(s.audioName || "").trim();
+    const start = formatElapsed(s.startOffsetMs || 0);
+    const end = formatElapsed(s.endOffsetMs || 0);
+    const label = `${start}–${end}`;
+    const n = Number.isFinite(s.index) ? s.index + 1 : lines.length + 1;
+    const pillCls = s.error ? "lexvoice-playback-timeline-pill is-error" : "lexvoice-playback-timeline-pill";
+    const metaCls = s.error ? "lexvoice-playback-timeline-index is-error" : "lexvoice-playback-timeline-index";
+    const state = s.error ? "重试" : `段 ${n}`;
+    lines.push(
+      `<span class="${pillCls}">` +
+      `<a class="internal-link lexvoice-time-link" data-href="${escapeHtmlText(audioName)}" href="${escapeHtmlText(audioName)}">${escapeHtmlText(label)}</a>` +
+      `<span class="${metaCls}">${escapeHtmlText(state)}</span>` +
+      `</span>`
+    );
   }
   if (!lines.length) return "";
   return [
@@ -2328,13 +2333,57 @@ function buildPlaybackTimelineDetails(session) {
     `<summary>回听时间轴（${lines.length} 个节点）</summary>`,
     "",
     '<div class="lexvoice-playback-timeline">',
-    "",
-    lines.join("\n"),
-    "",
+    lines.join(""),
     "</div>",
     "",
     "</details>",
   ].join("\n");
+}
+
+function stripHtmlText(text) {
+  return String(text || "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+}
+
+function extractLexVoiceDetailsBody(markdown, summaryPattern) {
+  const text = String(markdown || "");
+  const re = /<details>\s*<summary>([\s\S]*?)<\/summary>\s*([\s\S]*?)<\/details>/gi;
+  let match;
+  while ((match = re.exec(text))) {
+    const summary = stripHtmlText(match[1]);
+    if (summaryPattern.test(summary)) return String(match[2] || "").trim();
+  }
+  return "";
+}
+
+function extractLexVoiceNotePanelData(file, markdown) {
+  const text = String(markdown || "");
+  const hasMarker = /<!--\s*lexvoice-session(?::|\s*--)/.test(text)
+    || /<!--\s*lexvoice-segments-start/.test(text);
+  const outlineRaw = extractLexVoiceDetailsBody(text, /录音中实时大纲/);
+  const outline = outlineRaw
+    .replace(/^>\s*基于录音过程中已完成的分段自动生成[^\n]*\n?/m, "")
+    .trim();
+  const timeline = extractLexVoiceDetailsBody(text, /回听时间轴/);
+  if (!hasMarker && !outline && !timeline) return null;
+  const body = text.replace(/^---\n[\s\S]*?\n---\n?/m, "");
+  const h1 = body.match(/^#\s+(.+?)\s*$/m);
+  const audioRefs = collectLexVoiceAudioRefs(text);
+  return {
+    file,
+    title: h1 ? h1[1].trim() : (file && file.basename ? file.basename : "LexVoice 纪要"),
+    outline,
+    timeline,
+    audioRefs,
+    hasMarker,
+  };
 }
 
 function buildRecordingInfoDetails(info) {
@@ -2373,6 +2422,12 @@ function getAudioTimeLink(audioName, ms) {
   return `[[${name}|${formatElapsed(ms || 0)}]]`;
 }
 
+function getAudioTimeRangeLink(audioName, startMs, endMs) {
+  const name = String(audioName || "").trim();
+  if (!name) return "";
+  return `[[${name}|${formatElapsed(startMs || 0)}–${formatElapsed(endMs || 0)}]]`;
+}
+
 function getAudioSegmentListItem(segment, index) {
   if (!segment || !segment.audioName) return "";
   const n = Number.isFinite(segment.index) ? segment.index + 1 : index + 1;
@@ -2388,19 +2443,78 @@ function getAudioSegmentListItem(segment, index) {
   ].join("\n");
 }
 
+function getSessionMasterAudioName(session) {
+  const name = String(session && session.masterAudioName ? session.masterAudioName : "").trim();
+  if (name) return name;
+  const path = String(session && session.masterAudioPath ? session.masterAudioPath : "").trim();
+  return path ? (path.split("/").pop() || path) : "";
+}
+
+function buildMasterAudioDetails(session, totalMs) {
+  const audioName = getSessionMasterAudioName(session);
+  if (!audioName) return "";
+  return [
+    "<details>",
+    `<summary>原始音频（完整录音，${formatElapsed(totalMs || 0)}）</summary>`,
+    "",
+    `![[${audioName}]]`,
+    "",
+    `回听：${getAudioTimeLink(audioName, 0)}`,
+    "",
+    "</details>",
+  ].join("\n");
+}
+
 function isTimeLabel(text) {
-  return /^(?:\d{1,2}:)?\d{1,2}:\d{2}$/.test(String(text || "").trim());
+  const time = "(?:\\d{1,2}:)?\\d{1,2}:\\d{2}";
+  return new RegExp("^" + time + "(?:\\s*[–-]\\s*" + time + ")?$").test(String(text || "").trim());
+}
+
+function safeDecodeUriText(text) {
+  try { return decodeURIComponent(String(text || "")); }
+  catch { return String(text || ""); }
+}
+
+function normalizeAudioLinkTarget(linkPath) {
+  let target = String(linkPath || "").split("#")[0].split("|")[0].trim();
+  if (!target) return "";
+  try {
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(target)) {
+      const url = new URL(target);
+      target = url.searchParams.get("file")
+        || url.searchParams.get("path")
+        || url.searchParams.get("target")
+        || url.pathname;
+    }
+  } catch {}
+  target = safeDecodeUriText(target).replace(/^\/+/, "").trim();
+  return target;
+}
+
+function getAudioLinkCandidates(linkPath) {
+  const target = normalizeAudioLinkTarget(linkPath);
+  const out = [];
+  const add = (value) => {
+    const v = obsidian.normalizePath(String(value || "").trim());
+    if (v && !out.includes(v)) out.push(v);
+  };
+  add(target);
+  add(safeDecodeUriText(target));
+  const name = (target.split("/").pop() || target).trim();
+  add(name);
+  add(safeDecodeUriText(name));
+  return out;
 }
 
 function getAudioExtFromLinkPath(linkPath) {
-  const target = String(linkPath || "").split("#")[0].split("|")[0].trim();
+  const target = normalizeAudioLinkTarget(linkPath);
   const base = target.split("/").pop() || target;
   const ext = (base.split(".").pop() || "").toLowerCase();
   return AUDIO_EXT.has(ext) ? ext : "";
 }
 
 function getAudioLinkTarget(linkPath) {
-  return String(linkPath || "").split("#")[0].split("|")[0].trim();
+  return normalizeAudioLinkTarget(linkPath);
 }
 
 function extractAudioSegmentOffsets(markdown) {
@@ -3463,9 +3577,12 @@ class RecorderService {
   constructor(plugin) {
     this.plugin = plugin;
     this.recorder = null;
+    this.masterRecorder = null;
     this.stream = null;
     this.chunks = [];
+    this.masterChunks = [];
     this.mime = "";
+    this.masterMime = "";
     this.sessionStartedAt = 0;
     this.segmentStartOffsetMs = 0;
     this.pausedFor = 0;
@@ -3514,6 +3631,7 @@ class RecorderService {
     this.sessionStartedAt = Date.now();
     this.state = "recording";
     this.startLevelMeter(this.stream);
+    this.startMasterRecorder();
     this.startNewRecorder();
     if (options && typeof options.onStreamReady === "function") {
       try { await options.onStreamReady(this.stream); }
@@ -3648,6 +3766,39 @@ class RecorderService {
     this.recorder.onerror = (e) => { console.error("[LexVoice] recorder error", e); };
     this.recorder.start(1000);
   }
+  startMasterRecorder() {
+    const opts = this.mime ? { mimeType: this.mime } : undefined;
+    this.masterRecorder = null;
+    this.masterChunks = [];
+    this.masterMime = this.mime || "";
+    try {
+      this.masterRecorder = new MediaRecorder(this.stream, opts);
+      this.masterRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) this.masterChunks.push(e.data); };
+      this.masterRecorder.onerror = (e) => { console.error("[LexVoice] master recorder error", e); };
+      this.masterRecorder.start(1000);
+    } catch (e) {
+      console.error("[LexVoice] master recorder start failed", e);
+      this.masterRecorder = null;
+      this.masterChunks = [];
+    }
+  }
+  async stopMasterRecorder(fallbackBlob, fallbackMime) {
+    const rec = this.masterRecorder;
+    const chunks = this.masterChunks || [];
+    const mime = (rec && (rec.mimeType || this.masterMime)) || this.masterMime || fallbackMime || "";
+    if (!rec) {
+      return fallbackBlob && this.segmentIndex === 0 ? { blob: fallbackBlob, mime: fallbackBlob.type || mime } : null;
+    }
+    const blob = await new Promise((resolve) => {
+      rec.onstop = () => resolve(new Blob(chunks, { type: mime }));
+      try { rec.stop(); } catch { resolve(null); }
+    });
+    this.masterRecorder = null;
+    this.masterChunks = [];
+    this.masterMime = "";
+    if (blob && blob.size > 0) return { blob, mime: blob.type || mime };
+    return fallbackBlob && this.segmentIndex === 0 ? { blob: fallbackBlob, mime: fallbackBlob.type || fallbackMime || mime } : null;
+  }
   async acquireStream(mode) {
     mode = normalizeAudioInputMode(mode);
     // 3 种音频输入：
@@ -3754,6 +3905,7 @@ class RecorderService {
   pause() {
     if (this.state !== "recording") return;
     try { this.recorder.pause(); } catch {}
+    try { if (this.masterRecorder && this.masterRecorder.state === "recording") this.masterRecorder.pause(); } catch {}
     this.pausedAt = Date.now();
     this.state = "paused";
     this.emit();
@@ -3761,6 +3913,7 @@ class RecorderService {
   resume() {
     if (this.state !== "paused") return;
     try { this.recorder.resume(); } catch {}
+    try { if (this.masterRecorder && this.masterRecorder.state === "paused") this.masterRecorder.resume(); } catch {}
     this.pausedFor += Date.now() - this.pausedAt;
     this.state = "recording";
     this.emit();
@@ -3779,6 +3932,7 @@ class RecorderService {
       rec.onstop = () => resolve(new Blob(chunksAtStop, { type: mime }));
       try { rec.stop(); } catch { resolve(null); }
     });
+    const master = await this.stopMasterRecorder(finalBlob, mime);
 
     this.stopLevelMeter();
     if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
@@ -3790,7 +3944,19 @@ class RecorderService {
     this.emit();
 
     if (this.onSegment && finalBlob) {
-      try { await this.onSegment({ blob: finalBlob, index, startOffsetMs: startOffset, endOffsetMs: elapsedAtStop, isFinal: true, ext: extFromMime(mime) }); }
+      try {
+        await this.onSegment({
+          blob: finalBlob,
+          index,
+          startOffsetMs: startOffset,
+          endOffsetMs: elapsedAtStop,
+          isFinal: true,
+          ext: extFromMime(mime),
+          masterBlob: master && master.blob,
+          masterMime: master && master.mime,
+          masterExt: extFromMime((master && master.mime) || mime),
+        });
+      }
       catch (e) { console.error("[LexVoice] onSegment(final) error", e); }
     }
     return { totalDurationMs: elapsedAtStop, segmentsEmitted: index + 1 };
@@ -6182,7 +6348,8 @@ function renderEditablePptxDeck(deck) {
 }
 
 function parseElapsedMsToken(raw) {
-  const parts = String(raw || "").trim().split(":").map((p) => Number(p));
+  const token = (String(raw || "").match(/(?:\d{1,2}:)?\d{1,2}:\d{2}/) || [""])[0];
+  const parts = token.trim().split(":").map((p) => Number(p));
   if (parts.some((p) => !Number.isFinite(p))) return 0;
   if (parts.length === 3) return Math.max(0, ((parts[0] * 60 + parts[1]) * 60 + parts[2]) * 1000);
   if (parts.length === 2) return Math.max(0, (parts[0] * 60 + parts[1]) * 1000);
@@ -7111,6 +7278,19 @@ ${snippet}`;
   }
 }
 
+function buildTitleSourceFromSegments(segments) {
+  return (segments || [])
+    .filter((s) => s && s.text && String(s.text).trim())
+    .map((s, i) => {
+      const n = Number.isFinite(s.index) ? s.index + 1 : i + 1;
+      const start = formatElapsed(s.startOffsetMs || 0);
+      const end = formatElapsed(s.endOffsetMs || 0);
+      return `段落 ${n}（${start}-${end}）：${String(s.text || "").trim()}`;
+    })
+    .join("\n\n")
+    .slice(0, 3000);
+}
+
 class TaskQueue {
   constructor(plugin) {
     this.plugin = plugin;
@@ -7212,6 +7392,12 @@ class OutlineView extends obsidian.ItemView {
     this._renderRaf = 0;
     this._lastSig = "";
     this._lastRenderedOutline = "";
+    this.showRecentHome = false;
+    this.notePanelCacheKey = "";
+    this.notePanelCacheData = undefined;
+    this.notePanelLoading = false;
+    this.inlineAudioEl = null;
+    this.inlineAudioFile = null;
   }
   getViewType() { return VIEW_TYPE_OUTLINE; }
   getDisplayText() { return "LexVoice 实时纪要"; }
@@ -7222,6 +7408,10 @@ class OutlineView extends obsidian.ItemView {
     this.render();
     // 节流：recorder 每 500ms 滴答一次。只更新计时文本，结构不变时不重建 DOM。
     this.unsubscribeRecorder = this.plugin.recorder.on(() => this.scheduleUpdate());
+    this.registerEvent(this.app.workspace.on("active-leaf-change", () => {
+      this.showRecentHome = false;
+      this.scheduleUpdate();
+    }));
     if (this.plugin.settings.enableRealtimeOutline
         && this.plugin.session
         && this.plugin.session.segments.length > 0
@@ -7264,6 +7454,7 @@ class OutlineView extends obsidian.ItemView {
     const queueN = this.plugin.queue ? this.plugin.queue.tasks.length : 0;
     const mode = session ? session.mode : getEffectivePolishMode(this.plugin.settings, this.plugin.settings.polishMode);
     const captureMode = this.plugin.settings.captureMode || "mic";
+    const activeNote = !session && !this.showRecentHome ? this.getActiveLexVoiceNoteFile() : null;
     // 招聘上下文卡片的"已填" vs "未填"也要进 signature——填完 JD 后卡片要重渲染
     const ctx = this.plugin.settings.recruitContext || {};
     const ctxFilled = (ctx.jd && ctx.jd.trim()) ? 1 : 0;
@@ -7278,6 +7469,9 @@ class OutlineView extends obsidian.ItemView {
       mode,            // ← 模式切换会触发重渲染（招聘上下文卡片显隐）
       captureMode,     // ← 音频输入方式切换会触发设备状态条重渲染
       ctxFilled,       // ← JD 填写状态变化触发卡片状态更新
+      this.showRecentHome ? 1 : 0,
+      activeNote ? activeNote.path : "",
+      activeNote ? activeNote.stat.mtime : 0,
     ].join("|");
   }
   // 仅刷新计时和"x 段"等高频文本，避免重建按钮和重绘 Markdown
@@ -7310,10 +7504,159 @@ class OutlineView extends obsidian.ItemView {
       this.renderAIOutline(root, session);
     } else {
       this.renderIdleHead(root);
-      this.renderRecent(root);
+      const activeNote = !this.showRecentHome ? this.getActiveLexVoiceNoteFile() : null;
+      if (activeNote) {
+        this.renderCompletedNote(root, activeNote);
+      } else {
+        this.renderRecent(root);
+      }
     }
     this.renderQueueInbox(root);
     this._lastSig = this.computeSignature();
+  }
+
+  getActiveLexVoiceNoteFile() {
+    const file = this.app.workspace.getActiveFile();
+    if (!(file instanceof obsidian.TFile) || file.extension !== "md") return null;
+    const mdFolder = obsidian.normalizePath(this.plugin.settings.mdFolder || DEFAULT_SETTINGS.mdFolder);
+    const path = obsidian.normalizePath(file.path);
+    if (path === mdFolder || path.startsWith(mdFolder + "/")) return file;
+    const mode = this.plugin.detectModeFromMarkdown(file);
+    return mode ? file : null;
+  }
+
+  getCompletedNotePanelData(file) {
+    const key = `${file.path}|${file.stat.mtime}`;
+    if (this.notePanelCacheKey === key && !this.notePanelLoading) return this.notePanelCacheData || null;
+    if (this.notePanelCacheKey === key && this.notePanelLoading) return undefined;
+
+    this.notePanelCacheKey = key;
+    this.notePanelCacheData = undefined;
+    this.notePanelLoading = true;
+    this.app.vault.cachedRead(file)
+      .then((content) => {
+        if (this.notePanelCacheKey !== key) return;
+        this.notePanelCacheData = extractLexVoiceNotePanelData(file, content);
+      })
+      .catch((e) => {
+        console.error("[LexVoice] read completed note outline failed", e);
+        if (this.notePanelCacheKey === key) this.notePanelCacheData = null;
+      })
+      .finally(() => {
+        if (this.notePanelCacheKey === key) {
+          this.notePanelLoading = false;
+          this.render();
+        }
+      });
+    return undefined;
+  }
+
+  renderCompletedNote(root, file) {
+    const data = this.getCompletedNotePanelData(file);
+    const head = root.createDiv({ cls: "lexvoice-outline-head lexvoice-outline-note-head" });
+    this.renderTitleRow(head, "当前纪要");
+    head.createDiv({
+      cls: "lexvoice-outline-meta",
+      text: data && data.title ? data.title : file.basename,
+    });
+    const actions = head.createDiv({ cls: "lexvoice-outline-actions" });
+    const openBtn = actions.createEl("button", { text: "打开笔记" });
+    openBtn.onclick = () => this.app.workspace.getLeaf(false).openFile(file);
+    const homeBtn = actions.createEl("button", { text: "最近记录" });
+    homeBtn.onclick = () => {
+      this.showRecentHome = true;
+      this.render();
+    };
+
+    if (data === undefined) {
+      root.createDiv({ cls: "lexvoice-outline-empty", text: "正在读取当前纪要…" });
+      return;
+    }
+    if (!data) {
+      root.createDiv({ cls: "lexvoice-outline-empty", text: "这篇笔记没有可恢复的大纲或回听时间轴。" });
+      return;
+    }
+
+    this.renderCompletedNotePlayer(root, data, file);
+
+    const outlineSec = root.createDiv({ cls: "lexvoice-outline-section" });
+    outlineSec.createDiv({ cls: "lexvoice-outline-section-title", text: "大纲" });
+    const outlineBody = outlineSec.createDiv({ cls: "lexvoice-outline-ai-body" });
+    if (data.outline) {
+      const rendered = obsidian.MarkdownRenderer.render(this.app, data.outline, outlineBody, file.path, this);
+      Promise.resolve(rendered).then(() => {
+        this.enhanceRenderedOutline(outlineBody, {
+          sourcePath: file.path,
+          onTimeLink: (payload) => this.seekInlineAudio(payload),
+        });
+      });
+    } else {
+      outlineBody.createDiv({ cls: "lexvoice-outline-empty", text: "这篇纪要没有保存实时大纲。" });
+    }
+
+    if (data.timeline) {
+      const timelineSec = root.createDiv({ cls: "lexvoice-outline-section" });
+      timelineSec.createDiv({ cls: "lexvoice-outline-section-title", text: "回听时间轴" });
+      const timelineBody = timelineSec.createDiv({ cls: "lexvoice-outline-ai-body lexvoice-outline-note-timeline" });
+      const rendered = obsidian.MarkdownRenderer.render(this.app, data.timeline, timelineBody, file.path, this);
+      Promise.resolve(rendered).then(() => this.plugin.enhanceAudioTimeLinks(timelineBody, {
+        sourcePath: file.path,
+        onTimeLink: (payload) => this.seekInlineAudio(payload),
+      }));
+    }
+  }
+
+  renderCompletedNotePlayer(root, data, sourceFile) {
+    const refs = data && Array.isArray(data.audioRefs) ? data.audioRefs : [];
+    const audioFile = refs
+      .map((ref) => this.plugin.resolveAudioLinkFile(ref, sourceFile.path))
+      .find((f) => f instanceof obsidian.TFile);
+    if (!(audioFile instanceof obsidian.TFile)) {
+      this.inlineAudioEl = null;
+      this.inlineAudioFile = null;
+      return;
+    }
+
+    const sec = root.createDiv({ cls: "lexvoice-outline-section lexvoice-outline-player-section" });
+    const titleRow = sec.createDiv({ cls: "lexvoice-outline-player-title-row" });
+    titleRow.createDiv({ cls: "lexvoice-outline-section-title", text: "完整录音" });
+    titleRow.createDiv({ cls: "lexvoice-outline-player-file", text: audioFile.name });
+
+    const player = sec.createEl("audio", {
+      cls: "lexvoice-outline-player",
+      attr: { controls: "true", preload: "metadata" },
+    });
+    try {
+      player.src = this.app.vault.getResourcePath(audioFile);
+    } catch {
+      player.src = "";
+    }
+    this.inlineAudioEl = player;
+    this.inlineAudioFile = audioFile;
+  }
+
+  seekInlineAudio(payload) {
+    const audio = this.inlineAudioEl;
+    const audioFile = this.inlineAudioFile;
+    if (!audio || !(audioFile instanceof obsidian.TFile) || !payload) return false;
+    const sameFile = payload.file instanceof obsidian.TFile
+      && obsidian.normalizePath(audioFile.path) === obsidian.normalizePath(payload.file.path);
+    const ms = sameFile
+      ? (Number.isFinite(payload.localMs) ? payload.localMs : payload.globalMs)
+      : (Number.isFinite(payload.globalMs) ? payload.globalMs : payload.localMs);
+    const seek = () => {
+      try {
+        const target = Math.max(0, Math.min(Number.isFinite(audio.duration) ? audio.duration : Number.MAX_SAFE_INTEGER, (ms || 0) / 1000));
+        audio.currentTime = target;
+        audio.play().catch(() => {});
+        audio.focus();
+      } catch (e) {
+        console.warn("[LexVoice] inline audio seek failed", e);
+      }
+    };
+    if (audio.readyState >= 1) seek();
+    else audio.addEventListener("loadedmetadata", seek, { once: true });
+    return true;
   }
 
   renderTitleRow(head, title) {
@@ -7400,7 +7743,7 @@ class OutlineView extends obsidian.ItemView {
 
   renderIdleHead(root) {
     const head = root.createDiv({ cls: "lexvoice-outline-head" });
-    this.renderTitleRow(head, "LexVoice");
+    this.renderTitleRow(head, "LexVoice 录音工作台");
 
     const controls = head.createDiv({ cls: "lexvoice-outline-controls" });
 
@@ -7485,9 +7828,12 @@ class OutlineView extends obsidian.ItemView {
     if (outlineText) {
       const isRecruit = session && session.mode === "recruit";
       if (isRecruit) body.addClass("is-recruit-mode");
-      obsidian.MarkdownRenderer.render(this.app, outlineText, body, session && session.mdPath ? session.mdPath : "", this);
-      this.decorateOutlineSourceTags(body);
-      Promise.resolve().then(() => this.decorateOutlineSourceTags(body));
+      const rendered = obsidian.MarkdownRenderer.render(this.app, outlineText, body, session && session.mdPath ? session.mdPath : "", this);
+      Promise.resolve(rendered).then(() => {
+        this.enhanceRenderedOutline(body, {
+          sourcePath: session && session.mdPath ? session.mdPath : "",
+        });
+      });
       // 招聘面试模式：给含 🤖 / ⛏ / ❓ 的列表项打 class，由 CSS 区分视觉样式
       if (isRecruit) {
         // 渲染是同步的，但有时 MarkdownRenderer 会异步插入；保险起见 microtask 后再扫一次
@@ -7501,7 +7847,7 @@ class OutlineView extends obsidian.ItemView {
           }
         };
         tagListItems();
-        Promise.resolve().then(() => { tagListItems(); this.decorateOutlineSourceTags(body); });
+        Promise.resolve(rendered).then(() => { tagListItems(); });
       }
     } else {
       const tip = session && session.mode === "recruit"
@@ -7511,6 +7857,38 @@ class OutlineView extends obsidian.ItemView {
         ? tip
         : "录音开始且产出第一段后可生成大纲。",
         cls: "lexvoice-outline-empty" });
+    }
+  }
+
+  enhanceRenderedOutline(body, opts) {
+    if (!body) return;
+    this.plugin.enhanceAudioTimeLinks(body, opts || {});
+    this.decorateOutlineSourceTags(body);
+    this.promoteOutlineTimeLinks(body);
+  }
+
+  promoteOutlineTimeLinks(body) {
+    if (!body) return;
+    const listItems = body.querySelectorAll("li");
+    for (const li of listItems) {
+      const list = li.parentElement;
+      const listParent = list ? list.parentElement : null;
+      const isTopLevel = list && listParent && /^(UL|OL)$/i.test(list.tagName || "") && !listParent.closest("li");
+      const links = Array.from(li.querySelectorAll("a.lexvoice-time-link"))
+        .filter((link) => link.closest("li") === li);
+      if (!links.length) continue;
+      if (!isTopLevel) {
+        links.forEach((link) => link.addClass("lexvoice-outline-secondary-time"));
+        continue;
+      }
+      const first = links[0];
+      if (first.classList.contains("lexvoice-outline-leading-time")) continue;
+      first.classList.add("lexvoice-outline-leading-time");
+      li.addClass("lexvoice-outline-has-leading-time");
+      const directParagraph = Array.from(li.children || []).find((child) => child && child.tagName === "P");
+      const target = directParagraph || li;
+      target.insertBefore(first, target.firstChild);
+      for (const extra of links.slice(1)) extra.addClass("lexvoice-outline-secondary-time");
     }
   }
 
@@ -7539,13 +7917,15 @@ class OutlineView extends obsidian.ItemView {
       const def = sourceDefs[match[2]];
       if (!def) continue;
       textNode.nodeValue = raw.slice(match[0].length);
+      if (match[2] === "麦克风") continue;
       const chip = document.createElement("span");
       chip.className = `lexvoice-outline-source-chip ${def.cls}`;
       chip.setAttribute("title", def.title);
       chip.setAttribute("aria-label", def.title);
       try { obsidian.setIcon(chip, def.icon); }
       catch { chip.textContent = match[2] === "麦克风" ? "M" : "C"; }
-      li.insertBefore(chip, li.firstChild);
+      if (textNode.parentNode) textNode.parentNode.insertBefore(chip, textNode);
+      else li.insertBefore(chip, li.firstChild);
       li.addClass("lexvoice-outline-source-tagged");
     }
   }
@@ -7980,35 +8360,54 @@ class LexVoicePlugin extends obsidian.Plugin {
       if (!isTimeLabel(label) || !getAudioExtFromLinkPath(linkPath)) continue;
       link.classList.add("lexvoice-time-link");
       link.setAttribute("aria-label", `LexVoice 回听 ${label}`);
-      link.addEventListener("click", (evt) => {
+      const anyLink = link;
+      if (anyLink.__lexvoiceTimeHandler) {
+        link.removeEventListener("click", anyLink.__lexvoiceTimeHandler, true);
+      }
+      const handler = (evt) => {
         evt.preventDefault();
         evt.stopPropagation();
-        this.openAudioTimeLink(linkPath, label, ctx && ctx.sourcePath).catch((e) => {
+        if (typeof evt.stopImmediatePropagation === "function") evt.stopImmediatePropagation();
+        this.openAudioTimeLink(linkPath, label, ctx && ctx.sourcePath, ctx).catch((e) => {
           console.error("[LexVoice] open audio time link failed", e);
           new obsidian.Notice(`LexVoice 回听失败：${(e && e.message) || e}`);
         });
-      });
+      };
+      anyLink.__lexvoiceTimeHandler = handler;
+      link.addEventListener("click", handler, true);
     }
   }
 
   resolveAudioLinkFile(linkPath, sourcePath) {
-    const target = getAudioLinkTarget(linkPath);
-    if (!target) return null;
-    const direct = this.app.metadataCache.getFirstLinkpathDest(target, sourcePath || "");
-    if (direct instanceof obsidian.TFile && AUDIO_EXT.has((direct.extension || "").toLowerCase())) return direct;
-    const normalized = obsidian.normalizePath(target);
-    const exact = this.app.vault.getAbstractFileByPath(normalized);
-    if (exact instanceof obsidian.TFile && AUDIO_EXT.has((exact.extension || "").toLowerCase())) return exact;
-    const name = (target.split("/").pop() || target).trim();
-    if (!name) return null;
-    return this.app.vault.getFiles().find((f) => f.name === name && AUDIO_EXT.has((f.extension || "").toLowerCase())) || null;
+    const candidates = getAudioLinkCandidates(linkPath);
+    if (!candidates.length) return null;
+    const isAudioFile = (file) => file instanceof obsidian.TFile && AUDIO_EXT.has((file.extension || "").toLowerCase());
+    for (const target of candidates) {
+      const direct = this.app.metadataCache.getFirstLinkpathDest(target, sourcePath || "");
+      if (isAudioFile(direct)) return direct;
+      const exact = this.app.vault.getAbstractFileByPath(obsidian.normalizePath(target));
+      if (isAudioFile(exact)) return exact;
+      const scoped = this.app.vault.getAbstractFileByPath(obsidian.normalizePath(`${this.settings.audioFolder}/${target.split("/").pop() || target}`));
+      if (isAudioFile(scoped)) return scoped;
+    }
+    const names = candidates.map((target) => (target.split("/").pop() || target).trim()).filter(Boolean);
+    const lowerNames = names.map((name) => name.toLowerCase());
+    const stems = names
+      .map((name) => name.replace(/\.[^.]+$/i, "").toLowerCase())
+      .filter(Boolean);
+    return this.app.vault.getFiles().find((f) => {
+      if (!AUDIO_EXT.has((f.extension || "").toLowerCase())) return false;
+      const fname = (f.name || "").toLowerCase();
+      const fbase = (f.basename || "").toLowerCase();
+      if (lowerNames.includes(fname)) return true;
+      return stems.some((stem) => fbase === stem || fbase.startsWith(stem + "-"));
+    }) || null;
   }
 
-  async openAudioTimeLink(linkPath, label, sourcePath) {
+  async resolveAudioTimeLinkContext(linkPath, label, sourcePath) {
     const file = this.resolveAudioLinkFile(linkPath, sourcePath);
     if (!(file instanceof obsidian.TFile)) {
-      new obsidian.Notice("LexVoice：找不到对应音频文件，可能已被移动或删除。", 6000);
-      return;
+      return null;
     }
     const globalMs = parseElapsedMsToken(label);
     let localMs = globalMs;
@@ -8027,7 +8426,49 @@ class LexVoicePlugin extends obsidian.Plugin {
         }
       }
     }
-    new AudioTimeModal(this.app, file, localMs, label).open();
+    return { file, globalMs, localMs, label, linkPath, sourcePath };
+  }
+
+  async openAudioTimeLink(linkPath, label, sourcePath, opts) {
+    const payload = await this.resolveAudioTimeLinkContext(linkPath, label, sourcePath);
+    if (!payload) {
+      const globalMs = parseElapsedMsToken(label);
+      const fallbackPayload = { file: null, globalMs, localMs: globalMs, label, linkPath, sourcePath };
+      if (opts && typeof opts.onTimeLink === "function") {
+        try {
+          if (opts.onTimeLink(fallbackPayload) === true) return;
+        } catch (e) {
+          console.warn("[LexVoice] inline time link fallback failed", e);
+        }
+      }
+      if (this.seekOutlineInlineAudio(fallbackPayload)) return;
+      new obsidian.Notice("LexVoice：找不到对应音频文件，可能已被移动或删除。", 6000);
+      return;
+    }
+    if (opts && typeof opts.onTimeLink === "function") {
+      try {
+        if (opts.onTimeLink(payload) === true) return;
+      } catch (e) {
+        console.warn("[LexVoice] inline time link handler failed", e);
+      }
+    }
+    if (this.seekOutlineInlineAudio(payload)) return;
+    new AudioTimeModal(this.app, payload.file, payload.localMs, label).open();
+  }
+
+  seekOutlineInlineAudio(payload) {
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_OUTLINE);
+    for (const leaf of leaves) {
+      const view = leaf && leaf.view;
+      if (view && typeof view.seekInlineAudio === "function") {
+        try {
+          if (view.seekInlineAudio(payload) === true) return true;
+        } catch (e) {
+          console.warn("[LexVoice] outline inline seek failed", e);
+        }
+      }
+    }
+    return false;
   }
 
   async loadAll() {
@@ -8586,19 +9027,9 @@ class LexVoicePlugin extends obsidian.Plugin {
       const activeProvider = (this.settings.transcribeProviders || {})[activeProviderId] || {};
       const activeProfile = this.getActiveTranscribeProfile();
       const isStreaming = activeProfile && activeProfile.transcribeMode === "streaming";
-      const quickSegmentText = "前 10 秒、1 分钟、3 分钟快速出片";
-      const segmentScheduleText = isStreaming
-        ? "流式实时转写"
-        : (this.settings.enableInterimOutput
-          ? `${quickSegmentText}，之后每 ${this.settings.segmentIntervalMinutes} 分钟`
-          : "否");
-
       const titleLine = `# ${meta.emoji} ${startedAt.format("YYYY-MM-DD HH:mm")} · ${meta.prefix}（录音中…）`;
       const header = [
         titleLine,
-        "",
-        `> [!info] 录音信息`,
-        `> 开始：${startedAt.format("YYYY-MM-DD HH:mm:ss")} · 模式：${meta.prefix} · 分段：${segmentScheduleText}`,
         "",
         `<!-- lexvoice-session:${this.session.id} -->`,
         `<!-- lexvoice-segments-start:${this.session.id} -->`,
@@ -8745,6 +9176,69 @@ class LexVoicePlugin extends obsidian.Plugin {
     return session.writeQueue;
   }
 
+  getSegmentCacheFolder() {
+    return obsidian.normalizePath(this.settings.segmentCacheFolder || DEFAULT_SETTINGS.segmentCacheFolder);
+  }
+
+  isSegmentCachePath(path) {
+    const norm = obsidian.normalizePath(path || "");
+    const folder = this.getSegmentCacheFolder();
+    return !!norm && (norm === folder || norm.startsWith(folder + "/"));
+  }
+
+  async saveMasterAudio(session, seg) {
+    if (!session || session.masterAudioPath || !seg || !seg.masterBlob) return;
+    try {
+      const ext = seg.masterExt || extFromMime(seg.masterMime || seg.masterBlob.type || "") || seg.ext || "webm";
+      await this.ensureFolder(this.settings.audioFolder);
+      const target = this.getAvailableVaultPath(obsidian.normalizePath(`${this.settings.audioFolder}/lex-${session.sessionStamp}.${ext}`));
+      if (!target) throw new Error("无法生成完整录音文件路径");
+      const ab = await seg.masterBlob.arrayBuffer();
+      await this.app.vault.createBinary(target, ab);
+      session.masterAudioPath = target;
+      session.masterAudioName = target.split("/").pop() || target;
+      const oldNames = new Set();
+      for (const item of session.segments || []) {
+        if (item.audioName) oldNames.add(item.audioName);
+        if (item.segmentAudioName) oldNames.add(item.segmentAudioName);
+        item.audioName = session.masterAudioName;
+        item.audioPath = session.masterAudioPath;
+      }
+      if (session.realtimeOutline && oldNames.size) {
+        let outline = String(session.realtimeOutline);
+        for (const oldName of oldNames) {
+          if (oldName && oldName !== session.masterAudioName) {
+            outline = outline.replace(new RegExp("\\[\\[" + escapeRegExp(oldName) + "\\|", "g"), "[[" + session.masterAudioName + "|");
+          }
+        }
+        session.realtimeOutline = outline;
+      }
+    } catch (e) {
+      console.error("[LexVoice] master audio write failed", e);
+      new obsidian.Notice(`完整录音写入失败：${(e && e.message) || e}`, 8000);
+    }
+  }
+
+  async maybeDeleteSegmentCacheFile(path) {
+    if (this.settings.keepSegmentAudioFiles === true) return;
+    if (!this.isSegmentCachePath(path)) return;
+    const file = this.app.vault.getAbstractFileByPath(obsidian.normalizePath(path));
+    if (file instanceof obsidian.TFile) {
+      try { await this.app.vault.delete(file); }
+      catch (e) { console.error("[LexVoice] segment cache cleanup failed", path, e); }
+    }
+  }
+
+  async cleanupSuccessfulSegmentAudio(session) {
+    if (!session || this.settings.keepSegmentAudioFiles === true) return;
+    if (this.settings.consolidatedLayout === false) return;
+    if (!getSessionMasterAudioName(session)) return;
+    for (const s of session.segments || []) {
+      if (!s || s.error) continue;
+      await this.maybeDeleteSegmentCacheFile(s.segmentAudioPath || s.audioPath);
+    }
+  }
+
   async processSegment(session, seg) {
     if (!session) return;
     if (this.shouldFilterShortRecording(session, seg)) {
@@ -8754,16 +9248,18 @@ class LexVoicePlugin extends obsidian.Plugin {
       return;
     }
     const segNumber = seg.index + 1;
-    const audioName = `lex-${session.sessionStamp}-seg${pad(segNumber)}.${seg.ext}`;
-    const audioPath = obsidian.normalizePath(`${this.settings.audioFolder}/${audioName}`);
+    const segmentAudioName = `lex-${session.sessionStamp}-seg${pad(segNumber)}.${seg.ext}`;
+    const segmentAudioPath = obsidian.normalizePath(`${this.getSegmentCacheFolder()}/${segmentAudioName}`);
 
     try {
+      await this.ensureFolder(this.getSegmentCacheFolder());
       const ab = await seg.blob.arrayBuffer();
-      await this.app.vault.createBinary(audioPath, ab);
+      await this.app.vault.createBinary(segmentAudioPath, ab);
     } catch (e) {
       console.error(e);
       new obsidian.Notice(`段${segNumber} 音频写入失败：${(e && e.message) || e}`);
     }
+    if (seg.isFinal) await this.saveMasterAudio(session, seg);
 
     let text = ""; let err = null;
     const activeProfile = this.getActiveTranscribeProfile();
@@ -8791,11 +9287,17 @@ class LexVoicePlugin extends obsidian.Plugin {
       } catch (e) { err = e; console.error(e); }
     }
 
+    const playbackAudioName = session.masterAudioName || segmentAudioName;
+    const playbackAudioPath = session.masterAudioPath || segmentAudioPath;
     session.segments.push({
       index: seg.index,
       startOffsetMs: seg.startOffsetMs,
       endOffsetMs: seg.endOffsetMs,
-      audioName, audioPath, text,
+      audioName: playbackAudioName,
+      audioPath: playbackAudioPath,
+      segmentAudioName,
+      segmentAudioPath,
+      text,
       error: err ? (err.message || String(err)) : null,
       isFinal: !!seg.isFinal,
     });
@@ -8805,14 +9307,14 @@ class LexVoicePlugin extends obsidian.Plugin {
         type: "transcribe",
         sessionId: session.id,
         mdPath: session.mdPath,
-        audioPath, segmentIndex: seg.index,
+        audioPath: segmentAudioPath, segmentIndex: seg.index,
         startOffsetMs: seg.startOffsetMs, endOffsetMs: seg.endOffsetMs,
-        audioName, mode: session.mode, isFinal: !!seg.isFinal,
+        audioName: segmentAudioName, mode: session.mode, isFinal: !!seg.isFinal,
         lastError: err.message || String(err),
       });
     }
 
-    const segTitle = `### 段落 ${segNumber} (${formatElapsed(seg.startOffsetMs)}–${formatElapsed(seg.endOffsetMs)}) ${getAudioTimeLink(audioName, seg.startOffsetMs)}${seg.isFinal ? " · 结束" : ""}`;
+    const segTitle = `### 段落 ${segNumber} (${formatElapsed(seg.startOffsetMs)}–${formatElapsed(seg.endOffsetMs)}) ${getAudioTimeLink(playbackAudioName, seg.startOffsetMs)}${seg.isFinal ? " · 结束" : ""}`;
     const block = [
       "",
       segTitle,
@@ -8896,13 +9398,27 @@ class LexVoicePlugin extends obsidian.Plugin {
     }
 
     if (!mergeError && polished) {
+      const beforeRenamePath = session.mdPath;
       const renamed = await this.renameMarkdownWithGeneratedTitle(session.mdPath, polished, session.mode);
       if (renamed instanceof obsidian.TFile) session.mdPath = renamed.path;
+      const renamedByPolished = renamed instanceof obsidian.TFile
+        && obsidian.normalizePath(renamed.path) !== obsidian.normalizePath(beforeRenamePath);
+      if (session.source === "import" && !renamedByPolished) {
+        const rawTitleSource = buildTitleSourceFromSegments(session.segments);
+        if (rawTitleSource) {
+          const fallbackRenamed = await this.renameMarkdownWithGeneratedTitle(session.mdPath, rawTitleSource, session.mode);
+          if (fallbackRenamed instanceof obsidian.TFile) session.mdPath = fallbackRenamed.path;
+        }
+      }
     }
 
     if (!mergeError && polished) {
       try { await this.appendDailyMeetingOverview(session, polished); }
       catch (e) { console.error("[LexVoice] daily overview failed", e); }
+    }
+
+    if (!mergeError) {
+      await this.cleanupSuccessfulSegmentAudio(session);
     }
 
     new obsidian.Notice(mergeError ? "合并润色失败，已加入重试队列" : "LexVoice 处理完成");
@@ -9130,7 +9646,8 @@ class LexVoicePlugin extends obsidian.Plugin {
     const moment = window.moment;
     const startedAt = moment(session.startedAt);
     const totalMs = session.segments.length ? session.segments[session.segments.length - 1].endOffsetMs : 0;
-    const audioRow = session.segments.map((s, i) => getAudioSegmentListItem(s, i)).filter(Boolean).join("\n");
+    const masterAudioBlock = buildMasterAudioDetails(session, totalMs);
+    const audioRow = masterAudioBlock || session.segments.map((s, i) => getAudioSegmentListItem(s, i)).filter(Boolean).join("\n");
     const realtimeOutlineBlock = buildRealtimeOutlineDetails(session);
     const playbackTimelineBlock = buildPlaybackTimelineDetails(session);
     const recordingInfoBlock = buildRecordingInfoDetails({
@@ -9169,12 +9686,12 @@ class LexVoicePlugin extends obsidian.Plugin {
       realtimeOutlineBlock ? "" : null,
       playbackTimelineBlock || null,
       playbackTimelineBlock ? "" : null,
-      "<details>",
-      `<summary>🎧 原始音频（${session.segments.length} 段，${formatElapsed(totalMs)}）</summary>`,
+      masterAudioBlock ? null : "<details>",
+      masterAudioBlock ? null : `<summary>🎧 原始音频（${session.segments.length} 段，${formatElapsed(totalMs)}）</summary>`,
       "",
       audioRow,
       "",
-      "</details>",
+      masterAudioBlock ? null : "</details>",
       "",
       "<details>",
       `<summary>📝 分段原始转写（${session.segments.length} 段）</summary>`,
@@ -9206,6 +9723,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       segmentCount: session.segments.length,
       model: this.settings.llmModel,
     });
+    const masterAudioBlock = buildMasterAudioDetails(session, totalMs);
     const block = [
       "",
       `## ✨ 整合版（${this.settings.llmModel} · ${meta.prefix}）`,
@@ -9214,6 +9732,8 @@ class LexVoicePlugin extends obsidian.Plugin {
       "",
       recordingInfoBlock || null,
       recordingInfoBlock ? "" : null,
+      masterAudioBlock || null,
+      masterAudioBlock ? "" : null,
       realtimeOutlineBlock || null,
       realtimeOutlineBlock ? "" : null,
       playbackTimelineBlock || null,
@@ -9998,6 +10518,7 @@ ${customPromptBrief}
       startedAt: startedAt.toDate().toISOString(),
       mdPath,
       mode: mode,
+      source: "import",
       segments: [],
       finalized: false,
       recruitContext,
@@ -10141,10 +10662,11 @@ ${customPromptBrief}
     const mdFile = this.app.vault.getAbstractFileByPath(task.mdPath);
     if (mdFile instanceof obsidian.TFile) {
       const cur = await this.app.vault.read(mdFile);
-      const failMark = /_\[转写失败（已进入重试队列）：[^\]]*\]_/;
+      const failMark = /_\[转写失败(?:（已进入重试队列）)?：[^\]]*\]_/;
       const next = cur.replace(failMark, text);
       if (next !== cur) await this.app.vault.modify(mdFile, next);
     }
+    await this.maybeDeleteSegmentCacheFile(task.audioPath);
   }
 
   async retryMergeTask(task) {
@@ -11139,6 +11661,10 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       .addText(t => t.setValue(String(this.plugin.settings.segmentIntervalMinutes)).onChange(async v => {
         const n = parseFloat(v); if (isFinite(n) && n >= 0.5) { this.plugin.settings.segmentIntervalMinutes = n; await this.plugin.saveSettings(); }
       }));
+
+    new obsidian.Setting(c).setName("保留后台切片音频")
+      .setDesc("默认关闭。关闭时，LexVoice 仍会后台切片转写，但最终只保留完整录音；成功处理的临时切片会自动清理，失败重试需要的切片会暂时保留。")
+      .addToggle(t => t.setValue(this.plugin.settings.keepSegmentAudioFiles === true).onChange(async v => { this.plugin.settings.keepSegmentAudioFiles = v; await this.plugin.saveSettings(); }));
 
     new obsidian.Setting(c).setName("整合版排版")
       .setDesc("录音完成后笔记重排：顶部 AI 整合内容，底部可折叠原始分段。")
