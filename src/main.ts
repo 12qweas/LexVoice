@@ -9113,7 +9113,7 @@ class OutlineView extends obsidian.ItemView {
     this.syncSessionOutline(session);
 
     if (session) {
-      if (isMeetingWorkbenchMode(session.mode)) root.addClass("has-meeting-composer");
+      root.addClass("has-meeting-composer");
       this.renderActiveHead(root, session, recInfo);
       this.renderAIOutline(root, session);
     } else {
@@ -9125,7 +9125,7 @@ class OutlineView extends obsidian.ItemView {
         this.renderRecent(root);
       }
     }
-    if (session && isMeetingWorkbenchMode(session.mode)) this.renderMeetingComposer(root, session);
+    if (session) this.renderMeetingComposer(root, session);
     this._lastSig = this.computeSignature();
   }
 
@@ -9709,7 +9709,7 @@ class OutlineView extends obsidian.ItemView {
   }
 
   renderOutlineAnnotations(parent, session) {
-    if (!session || !isMeetingWorkbenchMode(session.mode)) return;
+    if (!session) return;
     const workbench = normalizeMeetingWorkbench(session.meetingWorkbench);
     if (!workbench.entries.length && !workbench.notes && !workbench.materials.length) return;
     const wrap = parent.createDiv({ cls: "lexvoice-outline-annotations" });
@@ -9727,7 +9727,7 @@ class OutlineView extends obsidian.ItemView {
   }
 
   injectOutlineAnnotationsByTime(body, session) {
-    if (!body || !session || !isMeetingWorkbenchMode(session.mode)) return;
+    if (!body || !session) return;
     const workbench = normalizeMeetingWorkbench(session.meetingWorkbench);
     if (!workbench.entries.length) return;
     const topList = Array.from(body.children || [])
