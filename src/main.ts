@@ -2989,8 +2989,10 @@ function splitPersonFieldValue(value) {
   if (value && typeof value === "object") {
     return Object.values(value).flatMap(splitPersonFieldValue);
   }
-  return String(value || "")
-    .split(/[，,、;；/|]/)
+  const text = String(value || "").trim();
+  if (/^\[\[[\s\S]+?\]\]$/.test(text)) return [text];
+  return text
+    .split(/[，,、;；|]/)
     .map(s => s.trim())
     .filter(Boolean);
 }
@@ -3179,6 +3181,64 @@ function escapeYamlScalar(value) {
   return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
+function escapeBaseString(value) {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function makeFileWikiLink(file, label) {
+  if (!(file instanceof obsidian.TFile)) return "";
+  const target = obsidian.normalizePath(file.path || "").replace(/\.md$/i, "");
+  const text = String(label || file.basename || "").trim();
+  return text ? `[[${target}|${text}]]` : `[[${target}]]`;
+}
+
+function formatPersonRelatedBriefingsBase(mdFolder) {
+  const folder = escapeBaseString(obsidian.normalizePath(mdFolder || DEFAULT_SETTINGS.mdFolder));
+  return `## 相关纪要
+
+\`\`\`base
+filters:
+  and:
+    - file.inFolder("${folder}")
+    - file.hasLink(this.file)
+properties:
+  file.name:
+    displayName: 纪要
+  note.time:
+    displayName: 时间
+  note.mode:
+    displayName: 模式
+  note.录音主题:
+    displayName: 主题
+  note.状态:
+    displayName: 状态
+views:
+  - type: table
+    name: 相关纪要
+    order:
+      - file.name
+      - note.time
+      - note.mode
+      - note.录音主题
+      - note.状态
+    sort:
+      - property: file.mtime
+        direction: DESC
+\`\`\`
+
+上方视图由 Obsidian Bases 根据纪要里的「相关人员」链接自动聚合；LexVoice 只在用户确认人员建议后维护这些本地链接。
+`;
+}
+
+function ensurePeopleNoteRelatedBaseSection(markdown, mdFolder) {
+  const text = String(markdown || "");
+  if (/^##\s+相关纪要\s*$/m.test(text) || /file\.hasLink\(this\.file\)/.test(text)) return text;
+  const section = "\n\n" + formatPersonRelatedBriefingsBase(mdFolder).trim() + "\n";
+  const noteHeading = text.match(/^##\s+备注\s*$/m);
+  if (noteHeading) return text.slice(0, noteHeading.index).replace(/\s*$/, "") + section + "\n" + text.slice(noteHeading.index);
+  return text.replace(/\s*$/, "") + section;
+}
+
 function formatPeopleBaseYaml() {
   return `filters:
   and:
@@ -3226,7 +3286,7 @@ views:
 `;
 }
 
-function formatPeopleNoteMarkdown(name) {
+function formatPeopleNoteMarkdown(name, mdFolder = DEFAULT_SETTINGS.mdFolder) {
   const safeName = String(name || "").trim() || "未命名人员";
   return `---
 type: lexvoice-person
@@ -3249,9 +3309,11 @@ tags:
 - 组织：
 - 常用称呼：
 
-## 会议动态
+${formatPersonRelatedBriefingsBase(mdFolder).trim()}
 
-LexVoice 确认人员建议后，会把相关纪要写入属性里的「来源」。这里适合手动补充长期观察、合作背景、观点变化和需要回看的重要记录。
+## 最新动态
+
+这里适合手动补充长期观察、合作背景、观点变化和需要回看的重要记录。
 
 ## 备注
 
@@ -3434,6 +3496,19 @@ function mergeUniqueStrings(base, extra) {
   return out;
 }
 
+function mergeSourceNoteRelatedPeopleFrontmatter(frontmatter, personFiles) {
+  const fm = Object.assign({}, frontmatter || {});
+  const links = (personFiles || [])
+    .filter(file => file instanceof obsidian.TFile)
+    .map(file => makeFileWikiLink(file))
+    .filter(Boolean);
+  const merged = mergeUniqueStrings(fm["相关人员"] || fm.relatedPeople || fm.people || [], links);
+  if (merged.length) fm["相关人员"] = merged;
+  delete fm.relatedPeople;
+  delete fm.people;
+  return fm;
+}
+
 function mergePersonFrontmatter(frontmatter, suggestion, sourceFile) {
   const fm = Object.assign({}, frontmatter || {});
   fm.type = "lexvoice-person";
@@ -3442,7 +3517,7 @@ function mergePersonFrontmatter(frontmatter, suggestion, sourceFile) {
   if (!String(fm["组织"] || "").trim()) fm["组织"] = String(fm.organization || "").trim() || suggestion.organization || "";
   const aliases = mergeUniqueStrings(fm["常用称呼"] || fm.aliases || [], suggestion.aliases || []);
   if (aliases.length) fm["常用称呼"] = aliases;
-  const sourceLink = sourceFile && sourceFile.basename ? `[[${sourceFile.basename}]]` : "";
+  const sourceLink = makeFileWikiLink(sourceFile);
   const sources = mergeUniqueStrings(fm["来源"] || fm.sources || [], sourceLink ? [sourceLink] : []);
   if (sources.length) fm["来源"] = sources;
   fm["最近更新"] = new Date().toISOString().slice(0, 10);
@@ -11390,7 +11465,7 @@ ${source}`;
     const safeName = sanitizeFilename(String(name || "").trim()) || "未命名人员";
     const path = this.getAvailableVaultPath(obsidian.normalizePath(`${folder}/${safeName}.md`));
     if (!path) throw new Error("无法创建人员信息文件");
-    return await this.app.vault.create(path, formatPeopleNoteMarkdown(name || safeName));
+    return await this.app.vault.create(path, formatPeopleNoteMarkdown(name || safeName, this.settings.mdFolder));
   }
 
   getKnowledgeExtractionSourceFiles(kind) {
@@ -11513,10 +11588,23 @@ ${source}`;
     return ok;
   }
 
+  async updateSourceNoteRelatedPeopleLinks(sourceFile, personFiles) {
+    if (!(sourceFile instanceof obsidian.TFile) || !personFiles || !personFiles.length) return false;
+    const content = await this.app.vault.read(sourceFile);
+    const fm = await readFileFrontmatter(this, sourceFile) || {};
+    const next = upsertFrontmatterInMarkdown(content, mergeSourceNoteRelatedPeopleFrontmatter(fm, personFiles));
+    if (next !== content) {
+      await this.app.vault.modify(sourceFile, next);
+      return true;
+    }
+    return false;
+  }
+
   async applyPeopleDirectorySuggestions(sourceFile, suggestions) {
     await this.ensurePeopleDirectoryFiles({ overwrite: false });
     let created = 0;
     let updated = 0;
+    const linkedPeopleFiles = [];
     for (const raw of suggestions || []) {
       const suggestion = normalizePeopleSuggestion(raw);
       if (!suggestion) continue;
@@ -11526,7 +11614,9 @@ ${source}`;
       if (file instanceof obsidian.TFile) {
         const content = await this.app.vault.read(file);
         const fm = await readFileFrontmatter(this, file) || {};
-        await this.app.vault.modify(file, upsertFrontmatterInMarkdown(content, mergePersonFrontmatter(fm, suggestion, sourceFile)));
+        const body = ensurePeopleNoteRelatedBaseSection(content, this.settings.mdFolder);
+        await this.app.vault.modify(file, upsertFrontmatterInMarkdown(body, mergePersonFrontmatter(fm, suggestion, sourceFile)));
+        linkedPeopleFiles.push(file);
         updated++;
       } else {
         const folder = obsidian.normalizePath(this.settings.peopleDirectoryFolder || DEFAULT_SETTINGS.peopleDirectoryFolder);
@@ -11535,11 +11625,13 @@ ${source}`;
         const path = this.getAvailableVaultPath(obsidian.normalizePath(`${folder}/${safeName}.md`));
         if (!path) throw new Error("无法创建人员信息文件");
         const fm = mergePersonFrontmatter({ "姓名": suggestion.name }, suggestion, sourceFile);
-        const body = formatPeopleNoteMarkdown(suggestion.name);
-        await this.app.vault.create(path, upsertFrontmatterInMarkdown(body, fm));
+        const body = formatPeopleNoteMarkdown(suggestion.name, this.settings.mdFolder);
+        file = await this.app.vault.create(path, upsertFrontmatterInMarkdown(body, fm));
+        linkedPeopleFiles.push(file);
         created++;
       }
     }
+    if (linkedPeopleFiles.length) await this.updateSourceNoteRelatedPeopleLinks(sourceFile, linkedPeopleFiles);
     return { created, updated };
   }
 
@@ -13168,31 +13260,6 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         } catch (e) {
           console.error(e);
           new obsidian.Notice(`创建人员库失败：${e.message || e}`);
-        }
-      }))
-      .addButton(b => b.setButtonText("更新 Base 模板").onClick(async () => {
-        if (!window.confirm("会覆盖人员库 Base 的视图配置，但不会修改任何人员笔记。继续？")) return;
-        try {
-          const file = await this.plugin.ensurePeopleDirectoryFiles({ overwrite: true });
-          if (file instanceof obsidian.TFile) await this.plugin.app.workspace.getLeaf(false).openFile(file);
-          new obsidian.Notice("人员库 Base 模板已更新");
-          await refreshPeopleStatus();
-        } catch (e) {
-          console.error(e);
-          new obsidian.Notice(`更新人员库失败：${e.message || e}`);
-        }
-      }))
-      .addButton(b => b.setButtonText("新增人员").setCta().onClick(async () => {
-        const name = window.prompt("人员姓名");
-        if (!name || !name.trim()) return;
-        try {
-          await this.plugin.ensurePeopleDirectoryFiles({ overwrite: false });
-          const file = await this.plugin.createPeopleDirectoryNote(name.trim());
-          await this.plugin.app.workspace.getLeaf(false).openFile(file);
-          await refreshPeopleStatus();
-        } catch (e) {
-          console.error(e);
-          new obsidian.Notice(`新增人员失败：${e.message || e}`);
         }
       }))
       .addButton(b => b.setButtonText("AI 扫描纪要库").onClick(async () => {
