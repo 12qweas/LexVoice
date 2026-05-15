@@ -1,6 +1,16 @@
 // @ts-nocheck
 import * as obsidian from "obsidian";
 
+const DEFAULT_DAILY_MEETING_OVERVIEW_HEADING = "今日会议概要";
+const DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE = [
+  "### {{time}} · {{note_link}}",
+  "> 模式：{{mode}} · 时长：{{duration}} · 分段：{{segments}} · 模型：{{model}}",
+  "",
+  "- 核心信息：{{summary}}",
+  "",
+  "{{todos_block}}",
+].join("\n");
+
 const DEFAULT_SETTINGS = {
   audioFolder: "LexVoice/录音",
   mdFolder: "LexVoice/转写纪要",
@@ -158,6 +168,8 @@ const DEFAULT_SETTINGS = {
   autoOpenHtmlReportAfterGenerate: true,
   autoOpenHtmlSlideAfterGenerate: true,
   writeDailyMeetingOverview: true,
+  dailyMeetingOverviewHeading: DEFAULT_DAILY_MEETING_OVERVIEW_HEADING,
+  dailyMeetingOverviewTemplate: DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE,
 
   updateRepoUrl: "https://github.com/Lynn-x/LexVoice",
   updateBranch: "main",
@@ -657,6 +669,8 @@ function normalizeLexVoiceSettings(savedData) {
 
   const dailyNote = raw.dailyNote || {};
   s.writeDailyMeetingOverview = pickDefined(dailyNote.meetingOverviewEnabled, raw.writeDailyMeetingOverview, defaults.writeDailyMeetingOverview);
+  s.dailyMeetingOverviewHeading = String(pickDefined(dailyNote.meetingOverviewHeading, raw.dailyMeetingOverviewHeading, defaults.dailyMeetingOverviewHeading) || defaults.dailyMeetingOverviewHeading).replace(/^#+\s*/, "").trim() || defaults.dailyMeetingOverviewHeading;
+  s.dailyMeetingOverviewTemplate = String(pickDefined(dailyNote.meetingOverviewTemplate, raw.dailyMeetingOverviewTemplate, defaults.dailyMeetingOverviewTemplate) || "").trim() || defaults.dailyMeetingOverviewTemplate;
 
   const retryPolicy = raw.retryPolicy || {};
   s.maxRetries = pickDefined(retryPolicy.maxAttempts, raw.maxRetries, defaults.maxRetries);
@@ -843,6 +857,8 @@ function serializeLexVoiceSettings(s) {
     },
     dailyNote: {
       meetingOverviewEnabled: s.writeDailyMeetingOverview !== false,
+      meetingOverviewHeading: s.dailyMeetingOverviewHeading || DEFAULT_SETTINGS.dailyMeetingOverviewHeading,
+      meetingOverviewTemplate: s.dailyMeetingOverviewTemplate || DEFAULT_SETTINGS.dailyMeetingOverviewTemplate,
     },
     retryPolicy: {
       maxAttempts: s.maxRetries,
@@ -7744,29 +7760,53 @@ function makeNoteLink(path) {
   return `[[${target}|${label}]]`;
 }
 
+function renderDailyTemplate(template, vars) {
+  return String(template || DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE)
+    .replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => {
+      const value = vars && Object.prototype.hasOwnProperty.call(vars, key) ? vars[key] : "";
+      return value == null ? "" : String(value);
+    })
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function buildDailyMeetingOverviewEntry(session, polished, settings) {
   const meta = getModeMeta(settings, session.mode);
   const moment = window.moment;
   const startedAt = moment ? moment(session.startedAt) : null;
   const time = startedAt && startedAt.isValid && startedAt.isValid() ? startedAt.format("HH:mm") : "";
+  const date = startedAt && startedAt.isValid && startedAt.isValid() ? startedAt.format("YYYY-MM-DD") : "";
   const totalMs = session.segments && session.segments.length ? session.segments[session.segments.length - 1].endOffsetMs : 0;
+  const title = String(session.mdPath || "").split("/").pop().replace(/\.md$/i, "");
   const summary = extractBriefingSummary(polished) || "见完整纪要。";
   const tasks = extractActionItems(polished);
-  const lines = [
+  const vars = {
+    date,
+    time,
+    note_link: makeNoteLink(session.mdPath),
+    note_path: String(session.mdPath || ""),
+    title,
+    mode: meta.prefix,
+    duration: formatElapsed(totalMs),
+    duration_text: formatElapsed(totalMs),
+    segments: session.segments ? session.segments.length : 0,
+    model: settings.llmModel || "",
+    summary,
+    todo_count: tasks.length,
+    todos: tasks.join("\n"),
+    todos_block: tasks.length ? ["#### 待办", ...tasks].join("\n") : "",
+  };
+  const body = renderDailyTemplate(settings.dailyMeetingOverviewTemplate || DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE, vars)
+    || renderDailyTemplate(DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE, vars);
+  return [
     `<!-- lexvoice-daily-overview:${session.id} -->`,
-    `### ${time ? time + " · " : ""}${makeNoteLink(session.mdPath)}`,
-    `> 模式：${meta.prefix} · 时长：${formatElapsed(totalMs)} · 分段：${session.segments.length} · 模型：${settings.llmModel}`,
-    "",
-    `- 核心信息：${summary}`,
-  ];
-  if (tasks.length) {
-    lines.push("", "#### 待办", ...tasks);
-  }
-  lines.push(`<!-- lexvoice-daily-overview-end:${session.id} -->`);
-  return lines.join("\n");
+    body,
+    `<!-- lexvoice-daily-overview-end:${session.id} -->`,
+  ].join("\n");
 }
 
-function upsertDailyMeetingOverview(content, sessionId, entry) {
+function upsertDailyMeetingOverview(content, sessionId, entry, settings) {
   const start = `<!-- lexvoice-daily-overview:${sessionId} -->`;
   const end = `<!-- lexvoice-daily-overview-end:${sessionId} -->`;
   const startIdx = content.indexOf(start);
@@ -7775,11 +7815,12 @@ function upsertDailyMeetingOverview(content, sessionId, entry) {
     return content.slice(0, startIdx) + entry + content.slice(endIdx + end.length);
   }
 
-  const headingRe = /^##\s+今日会议概要\s*$/m;
+  const heading = String(settings && settings.dailyMeetingOverviewHeading || DEFAULT_DAILY_MEETING_OVERVIEW_HEADING).replace(/^#+\s*/, "").trim() || DEFAULT_DAILY_MEETING_OVERVIEW_HEADING;
+  const headingRe = new RegExp("^##\\s+" + escapeRegExp(heading) + "\\s*$", "m");
   const match = headingRe.exec(content);
   if (!match) {
     const sep = content.trim() ? "\n\n" : "";
-    return content.replace(/\s*$/, "") + sep + "## 今日会议概要\n\n" + entry + "\n";
+    return content.replace(/\s*$/, "") + sep + `## ${heading}\n\n` + entry + "\n";
   }
 
   const afterHeading = content.indexOf("\n", match.index) + 1;
@@ -10536,7 +10577,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     if (obsidian.normalizePath(dailyFile.path) === obsidian.normalizePath(session.mdPath)) return;
     const entry = buildDailyMeetingOverviewEntry(session, polished, this.settings);
     const cur = await this.app.vault.read(dailyFile);
-    const next = upsertDailyMeetingOverview(cur, session.id, entry);
+    const next = upsertDailyMeetingOverview(cur, session.id, entry, this.settings);
     if (next !== cur) await this.app.vault.modify(dailyFile, next);
   }
 
@@ -12524,6 +12565,33 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     new obsidian.Setting(c).setName("写入今日会议概要到日记")
       .setDesc("Obsidian 日记已启用时，处理完成后写入纪要链接和概要；识别到待办时使用 - [ ] 任务语法写入。当日日记不存在时，会按日记插件配置的路径与模板自动创建。")
       .addToggle(t => t.setValue(this.plugin.settings.writeDailyMeetingOverview !== false).onChange(async v => { this.plugin.settings.writeDailyMeetingOverview = v; await this.plugin.saveSettings(); }));
+
+    new obsidian.Setting(c).setName("日记写入标题")
+      .setDesc("LexVoice 会在当日日记中找到或创建这个二级标题，并把每次整理完成后的概要写到标题下方。")
+      .addText(t => t
+        .setPlaceholder(DEFAULT_DAILY_MEETING_OVERVIEW_HEADING)
+        .setValue(this.plugin.settings.dailyMeetingOverviewHeading || DEFAULT_DAILY_MEETING_OVERVIEW_HEADING)
+        .onChange(async v => {
+          this.plugin.settings.dailyMeetingOverviewHeading = v.replace(/^#+\s*/, "").trim() || DEFAULT_DAILY_MEETING_OVERVIEW_HEADING;
+          await this.plugin.saveSettings();
+        }));
+
+    const dailyTplSetting = new obsidian.Setting(c)
+      .setName("日记写入模板")
+      .setDesc("用于控制每条概要写入日记的格式。可用占位符：{{date}}、{{time}}、{{note_link}}、{{title}}、{{mode}}、{{duration}}、{{segments}}、{{model}}、{{summary}}、{{todos}}、{{todos_block}}、{{todo_count}}。");
+    dailyTplSetting.addButton(b => b.setButtonText("恢复默认").onClick(async () => {
+      this.plugin.settings.dailyMeetingOverviewTemplate = DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE;
+      await this.plugin.saveSettings();
+      this.display();
+    }));
+    const dailyTplTa = c.createEl("textarea", { cls: "lexvoice-textarea lexvoice-textarea-mono" });
+    dailyTplTa.rows = 8;
+    dailyTplTa.value = this.plugin.settings.dailyMeetingOverviewTemplate || DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE;
+    dailyTplTa.placeholder = DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE;
+    dailyTplTa.addEventListener("change", async () => {
+      this.plugin.settings.dailyMeetingOverviewTemplate = dailyTplTa.value.trim() || DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE;
+      await this.plugin.saveSettings();
+    });
 
     new obsidian.Setting(c).setName("悬浮气泡")
       .setDesc("常驻停靠显示，可拖动到任意位置；关闭此项才隐藏悬浮气泡。")
