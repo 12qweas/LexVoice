@@ -2451,6 +2451,59 @@ select.lexvoice-recruit-input.dropdown {
   justify-content: flex-end;
 }
 
+.lexvoice-people-suggestion-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-3);
+  margin-top: var(--size-4-3);
+  max-height: 58vh;
+  overflow: auto;
+  padding-right: var(--size-2-1);
+}
+
+.lexvoice-people-suggestion-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  padding: var(--size-4-3);
+}
+
+.lexvoice-people-suggestion-top {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  margin-bottom: var(--size-4-2);
+}
+
+.lexvoice-people-suggestion-ignore {
+  margin-left: auto;
+}
+
+.lexvoice-people-suggestion-badge {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.lexvoice-people-suggestion-note {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  margin: var(--size-4-2) 0;
+}
+
+.lexvoice-consent-list {
+  margin: var(--size-4-3) 0;
+  padding-left: 1.35em;
+  color: var(--text-muted);
+}
+
+.lexvoice-consent-list li {
+  margin: 0 0 var(--size-2-3);
+}
+
 @media (max-width: 760px) {
   .lexvoice-tpl-toolbar,
   .lexvoice-tpl-row {
