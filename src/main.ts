@@ -14,6 +14,7 @@ const DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE = [
 const DEFAULT_SETTINGS = {
   audioFolder: "LexVoice/录音",
   mdFolder: "LexVoice/转写纪要",
+  meetingMaterialsFolder: "LexVoice/会议资料",
   htmlReportFolder: "LexVoice/HTML报告",
   htmlSlideFolder: "LexVoice/HTML幻灯片",
   pptxSlideFolder: "LexVoice/PPT",
@@ -100,6 +101,7 @@ const DEFAULT_SETTINGS = {
   polishPromptInterview: "",
   polishPromptMeeting: "",
   polishPromptHuddle: "",
+  polishPromptSeminar: "",
   polishPromptMonologue: "",
   polishPromptLearning: "",
   polishPromptRecruit: "",
@@ -133,6 +135,7 @@ const DEFAULT_SETTINGS = {
   peopleContextMode: "privacy",
   peopleHotwordsConsentAt: "",
   peopleSuggestionIgnores: [],
+  peopleSuggestionCache: { pending: [] },
   knowledgeExtractionHistory: { vocabulary: {}, people: {} },
 
   inboxFolder: "",
@@ -221,6 +224,7 @@ const SHORT_RECORDING_FILTER_MS = 3000;
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const UPDATE_PLUGIN_FILES = ["manifest.json", "main.js", "styles.css", "README.md"];
 const KNOWLEDGE_EXTRACTION_BATCH_LIMIT = 20;
+const PEOPLE_SUGGESTION_CACHE_LIMIT = 500;
 const LLM_SERVICE_PRESETS = [
   {
     id: "siliconflow",
@@ -557,6 +561,11 @@ function audioInputModeLabel(mode) {
   return labels[normalizeAudioInputMode(mode)] || labels.mic;
 }
 
+function resolveRuntimeAudioInputMode(mode) {
+  const normalized = normalizeAudioInputMode(mode || "mic");
+  return isLexVoiceMobileRuntime() ? "mic" : normalized;
+}
+
 function normalizeLexVoiceSettings(savedData) {
   const saved = isRecord(savedData) ? savedData : {};
   const raw = isRecord(saved.settings) ? saved.settings : saved;
@@ -566,6 +575,7 @@ function normalizeLexVoiceSettings(savedData) {
   const storage = raw.storage || {};
   s.audioFolder = pickDefined(storage.recordingLibraryPath, raw.audioFolder, defaults.audioFolder);
   s.mdFolder = pickDefined(storage.briefingNotePath, raw.mdFolder, defaults.mdFolder);
+  s.meetingMaterialsFolder = obsidian.normalizePath(pickDefined(storage.meetingMaterialPath, raw.meetingMaterialsFolder, defaults.meetingMaterialsFolder));
   s.htmlReportFolder = pickDefined(storage.htmlReportPath, raw.htmlReportFolder, defaults.htmlReportFolder);
   s.htmlSlideFolder = pickDefined(storage.htmlSlidePath, raw.htmlSlideFolder, defaults.htmlSlideFolder);
   s.pptxSlideFolder = pickDefined(storage.pptxPath, raw.pptxSlideFolder, defaults.pptxSlideFolder);
@@ -624,6 +634,7 @@ function normalizeLexVoiceSettings(savedData) {
   s.polishPromptInterview = pickDefined(promptOverrides.interview, raw.polishPromptInterview, defaults.polishPromptInterview);
   s.polishPromptMeeting = pickDefined(promptOverrides.meeting, raw.polishPromptMeeting, defaults.polishPromptMeeting);
   s.polishPromptHuddle = pickDefined(promptOverrides.huddle, raw.polishPromptHuddle, defaults.polishPromptHuddle);
+  s.polishPromptSeminar = pickDefined(promptOverrides.seminar, raw.polishPromptSeminar, defaults.polishPromptSeminar);
   s.polishPromptMonologue = pickDefined(promptOverrides.monologue, raw.polishPromptMonologue, defaults.polishPromptMonologue);
   s.polishPromptLearning = pickDefined(promptOverrides.learning, raw.polishPromptLearning, defaults.polishPromptLearning);
   s.polishPromptRecruit = pickDefined(promptOverrides.recruit, raw.polishPromptRecruit, defaults.polishPromptRecruit);
@@ -657,6 +668,7 @@ function normalizeLexVoiceSettings(savedData) {
   s.peopleContextMode = normalizePeopleContextMode(pickDefined(vocabulary.peopleContextMode, raw.peopleContextMode, defaults.peopleContextMode));
   s.peopleHotwordsConsentAt = String(pickDefined(vocabulary.peopleHotwordsConsentAt, raw.peopleHotwordsConsentAt, defaults.peopleHotwordsConsentAt) || "");
   s.peopleSuggestionIgnores = normalizePeopleSuggestionIgnores(pickDefined(vocabulary.peopleSuggestionIgnores, raw.peopleSuggestionIgnores, defaults.peopleSuggestionIgnores));
+  s.peopleSuggestionCache = normalizePeopleSuggestionCache(pickDefined(vocabulary.peopleSuggestionCache, raw.peopleSuggestionCache, defaults.peopleSuggestionCache));
   s.knowledgeExtractionHistory = normalizeKnowledgeExtractionHistory(pickDefined(vocabulary.extractionHistory, raw.knowledgeExtractionHistory, defaults.knowledgeExtractionHistory));
 
   const views = raw.views || {};
@@ -703,12 +715,12 @@ function normalizeLexVoiceSettings(savedData) {
   s.lastUpdateError = pickDefined(updates.lastError, raw.lastUpdateError, defaults.lastUpdateError);
   s.installedUpdateVersion = pickDefined(updates.installedVersion, raw.installedUpdateVersion, defaults.installedUpdateVersion);
 
-  // Prompt 模板管理：5 种模式各有一个 builtin 模板（prompt 留空表示用内置 MERGE_PROMPTS），
+  // Prompt 模板管理：每种内置模式各有一个 builtin 模板（prompt 留空表示用内置 MERGE_PROMPTS），
   // 用户可在此基础上新建变体。从旧的 polishPromptX 字段迁移：
   // 若旧字段非空且尚无对应 builtin，则保留为 builtin 的覆盖文本
   const tplBag = isRecord(raw.promptTemplates) ? raw.promptTemplates : {};
   const activeBag = isRecord(raw.activeTemplateByMode) ? raw.activeTemplateByMode : {};
-  const PROMPT_MODES = ["learning", "interview", "meeting", "huddle", "monologue", "recruit"];
+  const PROMPT_MODES = ["learning", "interview", "meeting", "seminar", "huddle", "monologue", "recruit"];
   s.promptTemplates = {};
   s.activeTemplateByMode = {};
   for (const m of PROMPT_MODES) {
@@ -771,6 +783,7 @@ function serializeLexVoiceSettings(s) {
     storage: {
       recordingLibraryPath: s.audioFolder,
       briefingNotePath: s.mdFolder,
+      meetingMaterialPath: s.meetingMaterialsFolder || DEFAULT_SETTINGS.meetingMaterialsFolder,
       htmlReportPath: s.htmlReportFolder,
       htmlSlidePath: s.htmlSlideFolder,
       pptxPath: s.pptxSlideFolder,
@@ -814,6 +827,7 @@ function serializeLexVoiceSettings(s) {
         interview: s.polishPromptInterview || "",
         meeting: s.polishPromptMeeting || "",
         huddle: s.polishPromptHuddle || "",
+        seminar: s.polishPromptSeminar || "",
         monologue: s.polishPromptMonologue || "",
         learning: s.polishPromptLearning || "",
         recruit: s.polishPromptRecruit || "",
@@ -845,6 +859,7 @@ function serializeLexVoiceSettings(s) {
       peopleContextMode: normalizePeopleContextMode(s.peopleContextMode),
       peopleHotwordsConsentAt: s.peopleHotwordsConsentAt || "",
       peopleSuggestionIgnores: normalizePeopleSuggestionIgnores(s.peopleSuggestionIgnores),
+      peopleSuggestionCache: normalizePeopleSuggestionCache(s.peopleSuggestionCache),
       extractionHistory: normalizeKnowledgeExtractionHistory(s.knowledgeExtractionHistory),
     },
     views: {
@@ -1031,21 +1046,22 @@ async function ensureAdapterFolder(adapter, folderPath) {
 }
 
 
-// 用户面 5 大业务意图（recruit 走彩蛋解锁）。内部 key 保留旧字符串以避免迁移破坏老笔记 / tag / base 文件；
+// 用户面内置业务意图（recruit 走彩蛋解锁）。内部 key 保留旧字符串以避免迁移破坏老笔记 / tag / base 文件；
 // huddle 是 meeting 的子风格，不再单列在新建录音下拉，但老 huddle 笔记仍能被识别和打开。
 const MODE_META = {
   meeting:   { prefix: "工作纪要", emoji: "📝", icon: "briefcase", label: "工作纪要", goal: "适合各种规模的工作会议：决议、待办、风险、同步同事进展。" },
   interview: { prefix: "访谈", emoji: "🎙", icon: "message-square", label: "访谈", goal: "适合外部访谈、用户调研、专家访谈，把问答转成洞察。" },
   monologue: { prefix: "个人笔记", emoji: "💭", icon: "notebook", label: "个人笔记", goal: "适合个人口述、灵感、复盘，把碎片表达整理成可用笔记。" },
   learning:  { prefix: "学习笔记", emoji: "📚", icon: "book-open", label: "学习笔记", goal: "适合 B 站、YouTube、课程、讲座、播客等高信息密度内容。" },
+  seminar:   { prefix: "研讨会", emoji: "🧠", icon: "landmark", label: "研讨会", goal: "适合学术研讨、主题沙龙、圆桌论坛，把观点、争议、证据和后续问题整理清楚。" },
   recruit:   { prefix: "招聘评估", emoji: "👔", icon: "user-check", label: "招聘评估" },
   huddle:    { prefix: "圆桌讨论", emoji: "🤝", icon: "users", label: "圆桌讨论", goal: "保留以兼容旧笔记，新建录音请改用「工作纪要」。", legacy: true },
   off:       { prefix: "录音", emoji: "🎙", icon: "mic", label: "关闭（仅转写）" },
 };
 
-// 新建录音下拉里出现的 4 个意图 + 1 个彩蛋；huddle 不出现（仅旧笔记兜底使用）
-const STANDARD_POLISH_MODES = ["meeting", "interview", "monologue", "learning"];
-const ALL_POLISH_MODES = ["meeting", "interview", "monologue", "learning", "recruit"];
+// 新建录音下拉里出现的公开意图 + 1 个彩蛋；huddle 不出现（仅旧笔记兜底使用）
+const STANDARD_POLISH_MODES = ["meeting", "seminar", "interview", "monologue", "learning"];
+const ALL_POLISH_MODES = ["meeting", "seminar", "interview", "monologue", "learning", "recruit"];
 
 function isRecruitFeatureUnlocked(settings) {
   return !!(settings && settings.recruitFeatureUnlocked);
@@ -1130,6 +1146,7 @@ function legacyPromptFieldForMode(mode) {
     interview: "polishPromptInterview",
     meeting: "polishPromptMeeting",
     huddle: "polishPromptHuddle",
+    seminar: "polishPromptSeminar",
     monologue: "polishPromptMonologue",
     learning: "polishPromptLearning",
     recruit: "polishPromptRecruit",
@@ -1579,6 +1596,10 @@ const FRONTMATTER_SCHEMA = {
 参会人:
   - <姓名 1；不确定时用中性角色如 "业务需求方" 或写 "未提及">
   - <姓名 2>`,
+  seminar: `主题: <一句话主题>
+研讨对象: <理论 / 议题 / 案例 / 文本 / 项目；未提及写 "未提及">
+参与者:
+  - <姓名或角色；不确定时用 "发言人A（推断）" 或写 "未提及">`,
   huddle: `议题: <一句话议题>
 当事人: <决策当事人>
 参谋:
@@ -1903,6 +1924,90 @@ const MODE_BODIES = {
 - ❌ 把「讨论了」当作「决定了」
 - ❌ 没出现的待办为对称感凑出来
 - ❌ 议题机械按发言时序排（要按主题归并）`,
+
+  seminar: `## §0 适用判断
+本模式适用于学术研讨、读书会、主题沙龙、专业论坛、圆桌研讨、课程讨论和跨团队方法论讨论。它的重点不是记录谁安排了什么，而是把围绕同一主题展开的观点、争议、证据、案例、概念框架和后续问题整理清楚。
+
+适合：
+- 多人围绕一个理论、文本、案例、议题或研究问题进行讨论
+- 内容中存在不同立场、解释路径、方法分歧或概念辨析
+- 用户希望后续形成研究笔记、课程笔记、议题综述或写作素材
+- 讨论中穿插 PPT、论文、报告、案例材料或现场补充信息
+
+不适合：
+- 纯执行同步、明确待办推进（应使用工作纪要）
+- 一问一答式外部访谈（应使用访谈）
+- 单人学习视频或课程听讲（应使用学习笔记）
+- 单人自我整理（应使用个人笔记）
+
+## §1 角色与观点识别
+- 优先识别发言人的观点功能，而不是强行逐句分配姓名：提出问题者 / 补充案例者 / 反驳者 / 总结者 / 方法论提供者 / 主持推进者。
+- 如果出现明确姓名或称呼，可以保留；不确定时写「某位发言人」或中性角色，不要编造身份。
+- 重点是观点之间的关系：支持、补充、反驳、转向、概念澄清、方法限制。
+- 不做声纹识别声明，不在正文反复标注「推断」；不确定的身份直接弱化为角色。
+
+## §2 输出结构
+
+### 顶部速览
+
+> [!abstract] 研讨摘要
+> 用 180–280 字说明本次研讨围绕什么对象展开、核心问题是什么、主要观点谱系是什么、最有价值的争议或启发是什么、还有哪些问题没有闭合。不要写成会议流水账。
+
+> [!important] 核心判断
+> 用 1–3 条写出本次研讨最值得带走的判断。每条都要有内容，不要写「大家进行了深入讨论」这类空话。
+
+### 一、问题意识
+说明这场研讨真正想处理的问题是什么。不是复述标题，而是提炼背后的问题张力：
+- 为什么这个议题值得讨论
+- 讨论对象本身有什么难点
+- 参与者隐含的共同关切是什么
+
+### 二、观点谱系
+按观点之间的关系组织，而不是按发言顺序组织。每个观点用三级标题。
+
+#### <观点或立场>
+用散文段落说明：
+- 这个观点主张什么
+- 它依赖什么前提
+- 它用什么案例、事实、文本、数据或经验支撑
+- 它和其他观点的关系：支持 / 补充 / 修正 / 反驳 / 转向
+
+如果出现有信号量的原话，用普通引用：
+
+> 「<关键原话>」
+
+### 三、争议与分歧
+只写真实出现的分歧。不要为了完整性编造争议。
+
+每个分歧写成：
+- **争议点**：双方到底在争什么
+- **分歧根源**：概念定义不同 / 证据标准不同 / 价值排序不同 / 方法路径不同 / 经验样本不同
+- **当前状态**：已经形成共识 / 暂时悬置 / 需要更多材料 / 需要下一轮讨论
+
+### 四、概念、方法与案例
+整理值得沉淀的概念、方法框架、案例和材料线索。
+
+- **概念 / 术语**：解释其在本次讨论中的具体含义，不要只写词典定义
+- **方法 / 框架**：说明能用来分析什么问题，边界在哪里
+- **案例 / 材料**：说明它被用来支撑哪个观点
+
+### 五、后续问题
+列出 3–8 个真正值得继续追问的问题。问题要能推动下一次研讨、阅读或写作，不要写泛泛的「继续研究」。
+
+### 六、可转化为笔记的条目
+把适合沉淀到知识库的内容写成短条目：
+- **条目标题**：<概念 / 判断 / 案例 / 问题>
+- 摘要：<2–4 句>
+- 可放入：<主题 / 项目 / 课程 / 论文 / 案例库>
+- 标签建议：#研讨 #观点谱系 #<具体主题>
+
+## §3 写作要求
+- 不要按「发言人 A 说、发言人 B 说」机械排列；除非身份对观点责任很关键。
+- 不把研讨会写成工作会议纪要；待办只在真实出现时写，且用 Markdown todo 语法。
+- 保留观点的锋利度：谁反驳了什么、哪里有张力、哪个概念被重新定义，都要写清楚。
+- 对不确定的材料来源写「转写中未充分说明」，不要补资料。
+- 允许有理论性，但必须落回转写中出现的具体表达、案例或材料。
+- 主体内容以散文段落为主，列表用于观点谱系、争议点和概念条目，不要大量堆 callout。`,
 
   huddle: `## §0 适用判断
 本模式典型适用于：2–5 人内部小会，多方贡献观点，有现实推进目标（决策/谈判准备/复盘/选项权衡）。
@@ -2271,6 +2376,7 @@ const POLISH_PROMPTS = {
   learning: buildPrompt(MODE_BODIES.learning, false, "learning"),
   interview: buildPrompt(MODE_BODIES.interview, false, "interview"),
   meeting: buildPrompt(MODE_BODIES.meeting, false, "meeting"),
+  seminar: buildPrompt(MODE_BODIES.seminar, false, "seminar"),
   huddle: buildPrompt(MODE_BODIES.huddle, false, "huddle"),
   monologue: buildPrompt(MODE_BODIES.monologue, false, "monologue"),
   recruit: buildPrompt(MODE_BODIES.recruit, false, "recruit"),
@@ -2324,12 +2430,17 @@ const MERGE_PROMPTS = {
   learning: buildPrompt(MODE_BODIES.learning, true, "learning"),
   interview: buildPrompt(MODE_BODIES.interview, true, "interview"),
   meeting: buildPrompt(MODE_BODIES.meeting, true, "meeting"),
+  seminar: buildPrompt(MODE_BODIES.seminar, true, "seminar"),
   huddle: buildPrompt(MODE_BODIES.huddle, true, "huddle"),
   monologue: buildPrompt(MODE_BODIES.monologue, true, "monologue"),
   recruit: buildPrompt(MODE_BODIES.recruit, true, "recruit"),
 };
 
 // 实时大纲：归并到共同上层概念，层级由内容涌现，不强加结构
+const REALTIME_OUTLINE_MAX_SEGMENTS = 36;
+const REALTIME_OUTLINE_MAX_TRANSCRIPT_CHARS = 18000;
+const REALTIME_OUTLINE_MAX_PREVIOUS_CHARS = 9000;
+
 function buildSourceAwareOutlineInstruction(captureMode) {
   const mode = normalizeAudioInputMode(captureMode || "mic");
   if (mode === "mic") {
@@ -2350,11 +2461,50 @@ function buildSourceAwareOutlineInstruction(captureMode) {
 `;
 }
 
-function buildRealtimeOutlineTranscript(segments) {
-  return (segments || [])
+function getSessionLatestSegmentEndMs(session) {
+  const segments = session && Array.isArray(session.segments) ? session.segments : [];
+  let latest = 0;
+  for (const s of segments) {
+    const end = Number(s && (s.endOffsetMs ?? s.startOffsetMs)) || 0;
+    if (end > latest) latest = end;
+  }
+  return latest;
+}
+
+function buildRealtimeWorkbenchEntryBlock(entry) {
+  const lines = [`【会中批注｜${formatElapsed(entry.atMs || 0)}｜用户手动补充】`];
+  if (entry.text) lines.push(String(entry.text).trim());
+  for (const item of entry.materials || []) {
+    const name = item.name || String(item.path || "").split("/").pop() || item.path;
+    const kind = item.kind ? ` · ${item.kind}` : "";
+    lines.push(`- 附件：[[${item.path}|${name}]]${kind}`);
+  }
+  return lines.join("\n");
+}
+
+function buildRealtimeOutlineTranscript(segments, meetingWorkbench) {
+  const validSegments = (segments || [])
     .filter((s) => s && s.text && String(s.text).trim())
-    .map((s, i) => {
-      const n = Number.isFinite(s.index) ? s.index + 1 : i + 1;
+    .map((s, i) => Object.assign({ _validIndex: i }, s));
+  if (!validSegments.length) return "";
+  const firstStart = Math.min(...validSegments.map(s => Number(s.startOffsetMs) || 0));
+  const lastEnd = Math.max(...validSegments.map(s => Number(s.endOffsetMs ?? s.startOffsetMs) || 0));
+  const workbench = normalizeMeetingWorkbench(meetingWorkbench);
+  const events = [];
+  for (const s of validSegments) {
+    events.push({ type: "segment", atMs: Number(s.startOffsetMs) || 0, segment: s });
+  }
+  for (const entry of workbench.entries) {
+    const atMs = Number(entry.atMs) || 0;
+    if (atMs < firstStart || atMs > lastEnd) continue;
+    events.push({ type: "manual", atMs, entry });
+  }
+  events.sort((a, b) => (a.atMs - b.atMs) || (a.type === "segment" ? -1 : 1));
+  return events
+    .map((event, i) => {
+      if (event.type === "manual") return buildRealtimeWorkbenchEntryBlock(event.entry);
+      const s = event.segment;
+      const n = Number.isFinite(s.index) ? s.index + 1 : (Number(s._validIndex) || 0) + 1;
       const start = formatElapsed(s.startOffsetMs || 0);
       const end = formatElapsed(s.endOffsetMs || 0);
       const anchor = getAudioTimeLink(s.audioName, s.startOffsetMs || 0);
@@ -2366,6 +2516,46 @@ function buildRealtimeOutlineTranscript(segments) {
     .join("\n\n");
 }
 
+function selectRealtimeOutlineSegments(segments, maxSegments = REALTIME_OUTLINE_MAX_SEGMENTS, maxChars = REALTIME_OUTLINE_MAX_TRANSCRIPT_CHARS) {
+  const valid = (segments || []).filter((s) => s && s.text && String(s.text).trim());
+  const selected = [];
+  let chars = 0;
+  for (let i = valid.length - 1; i >= 0; i--) {
+    const s = valid[i];
+    const chunk = String(s.text || "").trim();
+    const nextChars = chars + chunk.length;
+    if (selected.length >= maxSegments) break;
+    if (selected.length > 0 && nextChars > maxChars) break;
+    selected.unshift(s);
+    chars = nextChars;
+  }
+  return {
+    segments: selected,
+    usedCount: selected.length,
+    omittedBeforeCount: Math.max(0, valid.length - selected.length),
+    totalTextCount: valid.length,
+    approxChars: chars,
+  };
+}
+
+function buildRollingOutlineContext(previousOutline, omittedBeforeCount) {
+  const outline = String(previousOutline || "").trim();
+  if (!outline || !omittedBeforeCount) return "";
+  const clipped = outline.length > REALTIME_OUTLINE_MAX_PREVIOUS_CHARS
+    ? outline.slice(-REALTIME_OUTLINE_MAX_PREVIOUS_CHARS)
+    : outline;
+  return [
+    "【上一版实时大纲】",
+    "下面的大纲是较早段落已经整理出的上下文。请以它为基础，结合后面提供的最近转写窗口，输出一份更新后的完整大纲；不要只输出新增内容，也不要机械保留已经不重要的旧细节。",
+    "",
+    clipped,
+    "",
+    `【最近转写窗口】`,
+    `为控制长录音的上下文长度，较早的 ${omittedBeforeCount} 段已由上一版大纲承接；下面只提供最近窗口的转写。`,
+    "",
+  ].join("\n");
+}
+
 function buildOutlineAudioAnchorInstruction() {
   return `【回听锚点】
 转写内容按段落提供，并在段落信息里带有 Obsidian 音频回听链接，例如 \`[[音频文件.webm|12:34]]\`。
@@ -2373,6 +2563,7 @@ function buildOutlineAudioAnchorInstruction() {
 - 只复制输入中已经出现的链接，不要编造文件名或时间。
 - 子条目通常不重复放链接；除非它是关键原话或独立证据点。
 - 无法明确对应时不要放链接，宁可留空。
+- 如出现 \`【会中批注】\`，它是用户手动补充的现场想法或材料，不是音频转写原文；可用于对应时间附近的议题命名和上下文理解，但不要把未在音频中出现的内容写成已发言事实。
 `;
 }
 
@@ -2463,6 +2654,158 @@ function buildRealtimeOutlineDetails(session) {
     "> 基于录音过程中已完成的分段自动生成，正文纪要以最终整理为准。时间标记可用于快速回听对应片段。",
     "",
     outline,
+    "",
+    "</details>",
+  ].join("\n");
+}
+
+function isMeetingWorkbenchMode(mode) {
+  return mode === "meeting" || mode === "seminar" || mode === "huddle";
+}
+
+function isLexVoiceMobileRuntime() {
+  return !!(obsidian.Platform && (obsidian.Platform.isMobile || obsidian.Platform.isMobileApp));
+}
+
+function normalizeMeetingMaterials(materials, limit = 30) {
+  const normalized = [];
+  const seen = new Set();
+  for (const item of (Array.isArray(materials) ? materials : [])) {
+    if (!item || typeof item !== "object") continue;
+    const path = obsidian.normalizePath(item.path || "");
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    normalized.push({
+      path,
+      name: String(item.name || path.split("/").pop() || "").trim(),
+      kind: String(item.kind || item.type || "").trim(),
+      addedAt: String(item.addedAt || ""),
+    });
+  }
+  return normalized.slice(-limit);
+}
+
+function normalizeMeetingWorkbench(value) {
+  const raw = value && typeof value === "object" ? value : {};
+  const entries = [];
+  for (const item of (Array.isArray(raw.entries) ? raw.entries : [])) {
+    if (!item || typeof item !== "object") continue;
+    const text = String(item.text || "").trim();
+    const materials = normalizeMeetingMaterials(item.materials, 12);
+    if (!text && !materials.length) continue;
+    const createdAt = String(item.createdAt || item.addedAt || "");
+    const atMs = Math.max(0, Number(item.atMs ?? item.offsetMs ?? 0) || 0);
+    entries.push({
+      id: String(item.id || `meeting-entry-${entries.length}-${atMs}-${createdAt || "time"}`),
+      atMs,
+      createdAt,
+      source: String(item.source || (materials.length && !text ? "material" : "manual")),
+      text,
+      materials,
+    });
+  }
+  return {
+    notes: String(raw.notes || "").trim(),
+    draft: String(raw.draft || ""),
+    materials: normalizeMeetingMaterials(raw.materials, 30),
+    entries: entries.slice(-100),
+  };
+}
+
+function hasMeetingWorkbenchContent(value) {
+  const workbench = normalizeMeetingWorkbench(value);
+  return !!(workbench.notes || workbench.materials.length || workbench.entries.length);
+}
+
+function isImageMeetingMaterial(item) {
+  const path = String((item && item.path) || "").toLowerCase();
+  const kind = String((item && item.kind) || "").toLowerCase();
+  return kind === "image" || /\.(png|jpe?g|webp|gif|bmp|svg)$/.test(path);
+}
+
+function buildMeetingWorkbenchPrompt(value) {
+  const workbench = normalizeMeetingWorkbench(value);
+  if (!hasMeetingWorkbenchContent(workbench)) return "";
+  const lines = [
+    "## 会中补充材料（用户在 LexVoice 侧边栏手动提供）",
+    "",
+    "这些内容不是音频转写原文，而是用户在会议过程中补充的背景、零散想法或演示资料。整理纪要时请作为辅助上下文使用：",
+    "- 音频转写仍然是事实主线；补充材料用于识别议题、PPT 结构、上下文和用户特别关注点。",
+    "- 如果补充材料和转写冲突，以转写中明确出现的讨论为准，并避免把未讨论的材料硬写成会议结论。",
+    "- 如果用户上传的是 PPT、图片或 PDF，当前只提供文件名和链接；可以基于文件名、用户备注和转写内容判断关联主题，不要虚构图片/PPT 里的具体文字。",
+    "",
+  ];
+  if (workbench.notes) {
+    lines.push("### 用户零散记录", workbench.notes, "");
+  }
+  if (workbench.entries.length) {
+    lines.push("### 用户补充");
+    for (const entry of workbench.entries) {
+      const time = formatElapsed(entry.atMs || 0);
+      const text = entry.text ? ` ${entry.text}` : "";
+      lines.push(`- [${time}]${text}`);
+      for (const item of entry.materials || []) {
+        const name = item.name || item.path.split("/").pop() || item.path;
+        const kind = item.kind ? ` · ${item.kind}` : "";
+        lines.push(`  - 附件：[[${item.path}|${name}]]${kind}`);
+      }
+    }
+    lines.push("");
+  }
+  if (workbench.materials.length) {
+    lines.push("### 用户补充附件");
+    for (const item of workbench.materials) {
+      const name = item.name || item.path.split("/").pop() || item.path;
+      const kind = item.kind ? ` · ${item.kind}` : "";
+      lines.push(`- [[${item.path}|${name}]]${kind}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n").trim();
+}
+
+function buildMeetingWorkbenchDetails(session) {
+  const workbench = normalizeMeetingWorkbench(session && session.meetingWorkbench);
+  if (!hasMeetingWorkbenchContent(workbench)) return "";
+  const lines = [];
+  if (workbench.notes) {
+    lines.push("#### 会中零散记录", "", workbench.notes, "");
+  }
+  if (workbench.entries.length) {
+    lines.push("#### 用户补充", "");
+    for (const entry of workbench.entries) {
+      const text = entry.text ? ` ${entry.text}` : "";
+      lines.push(`- ${formatElapsed(entry.atMs || 0)}${text}`);
+      for (const item of entry.materials || []) {
+        const name = item.name || item.path.split("/").pop() || item.path;
+        const kind = item.kind ? ` · ${item.kind}` : "";
+        if (isImageMeetingMaterial(item)) {
+          lines.push(`  - [[${item.path}|${name}]]${kind}`, `  ![[${item.path}]]`);
+        } else {
+          lines.push(`  - [[${item.path}|${name}]]${kind}`);
+        }
+      }
+    }
+    lines.push("");
+  }
+  if (workbench.materials.length) {
+    lines.push("#### 补充材料", "");
+    for (const item of workbench.materials) {
+      const name = item.name || item.path.split("/").pop() || item.path;
+      const kind = item.kind ? ` · ${item.kind}` : "";
+      if (isImageMeetingMaterial(item)) {
+        lines.push(`- [[${item.path}|${name}]]${kind}`, `![[${item.path}]]`, "");
+      } else {
+        lines.push(`- [[${item.path}|${name}]]${kind}`);
+      }
+    }
+    lines.push("");
+  }
+  return [
+    "<details>",
+    "<summary>会中补充材料</summary>",
+    "",
+    lines.join("\n").trim(),
     "",
     "</details>",
   ].join("\n");
@@ -2775,6 +3118,16 @@ function pickMimeType() {
   for (const c of candidates) if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(c)) return c;
   return "";
 }
+
+function assertAudioCaptureSupported() {
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function") {
+    throw new Error("当前 Obsidian 环境不支持麦克风录音。请升级 Obsidian，或在桌面端使用 LexVoice。");
+  }
+  if (typeof MediaRecorder === "undefined") {
+    throw new Error("当前 Obsidian 环境不支持 MediaRecorder，暂时无法直接录音。可以先用系统录音后导入音频处理。");
+  }
+}
+
 function extFromMime(mime) {
   if (!mime) return "webm";
   if (mime.includes("webm")) return "webm";
@@ -3075,20 +3428,31 @@ async function readFileFrontmatter(plugin, file) {
   }
 }
 
-async function loadPeopleDirectory(plugin) {
+async function loadPeopleDirectory(plugin, options = {}) {
   const folder = obsidian.normalizePath(plugin.settings.peopleDirectoryFolder || DEFAULT_SETTINGS.peopleDirectoryFolder);
   const files = plugin.app.vault.getMarkdownFiles()
     .filter(file => {
       const path = obsidian.normalizePath(file.path || "");
       return path === folder || path.startsWith(folder + "/");
     });
+  const stamp = files
+    .map(file => `${obsidian.normalizePath(file.path || "")}:${file.stat && file.stat.mtime || 0}:${file.stat && file.stat.size || 0}`)
+    .sort()
+    .join("|");
+  if (!options.force && plugin._peopleDirectoryCache
+    && plugin._peopleDirectoryCache.folder === folder
+    && plugin._peopleDirectoryCache.stamp === stamp) {
+    return plugin._peopleDirectoryCache.items || [];
+  }
   const entries = [];
   for (const file of files) {
     const fm = await readFileFrontmatter(plugin, file);
     const item = personEntryFromFrontmatter(fm, file);
     if (item) entries.push(item);
   }
-  return dedupePeopleEntries(entries);
+  const items = dedupePeopleEntries(entries);
+  plugin._peopleDirectoryCache = { folder, stamp, items, loadedAt: Date.now() };
+  return items;
 }
 
 function hasPeopleHotwordsConsent(settings) {
@@ -3364,21 +3728,41 @@ function getPeopleSuggestionIgnoreTerms(suggestion) {
   return Array.from(new Set(terms));
 }
 
+function makeStoredPeopleSuggestionForIgnore(raw, normalized) {
+  const base = normalized || normalizePeopleSuggestion(raw);
+  if (!base) return null;
+  const sourcePath = obsidian.normalizePath(raw && raw.sourcePath || "");
+  const sourceBasename = String(raw && raw.sourceBasename || (sourcePath.split("/").pop() || "").replace(/\.md$/i, "") || "").trim();
+  return Object.assign({}, base, {
+    sourcePath,
+    sourceBasename,
+    cacheKey: String(raw && (raw.cacheKey || raw.key) || ""),
+    matchPath: String(raw && raw.matchPath || (raw && raw.match && raw.match.path) || ""),
+  });
+}
+
 function normalizePeopleSuggestionIgnoreRecord(item) {
   if (!item) return null;
   const rawTerms = [];
   let name = "";
   let ignoredAt = "";
+  let rawSuggestion = null;
   if (typeof item === "string") {
     name = item.trim();
     rawTerms.push(name);
   } else if (typeof item === "object") {
     name = String(item.name || item.label || item.key || "").trim();
     ignoredAt = String(item.ignoredAt || "").trim();
+    rawSuggestion = item.suggestion && typeof item.suggestion === "object" ? item.suggestion : item;
     if (Array.isArray(item.terms)) rawTerms.push(...item.terms);
     rawTerms.push(item.key, item.name, item.label);
     if (Array.isArray(item.aliases)) rawTerms.push(...item.aliases);
     if (Array.isArray(item["常用称呼"])) rawTerms.push(...item["常用称呼"]);
+  }
+  const suggestion = makeStoredPeopleSuggestionForIgnore(rawSuggestion || { name }, normalizePeopleSuggestion(rawSuggestion || { name }));
+  if (suggestion) {
+    rawTerms.push(suggestion.name);
+    if (Array.isArray(suggestion.aliases)) rawTerms.push(...suggestion.aliases);
   }
   const terms = Array.from(new Set(rawTerms
     .map(normalizePersonLookupText)
@@ -3387,8 +3771,9 @@ function normalizePeopleSuggestionIgnoreRecord(item) {
   return {
     key: terms[0],
     terms,
-    name: name || terms[0],
+    name: name || (suggestion && suggestion.name) || terms[0],
     ignoredAt,
+    suggestion,
   };
 }
 
@@ -3419,6 +3804,7 @@ function addPeopleSuggestionIgnore(settings, suggestion) {
   if (!settings || !normalized) return false;
   const terms = getPeopleSuggestionIgnoreTerms(normalized);
   if (!terms.length) return false;
+  const storedSuggestion = makeStoredPeopleSuggestionForIgnore(suggestion, normalized);
   const current = normalizePeopleSuggestionIgnores(settings.peopleSuggestionIgnores);
   const primaryKey = normalizePersonLookupText(normalized.name) || terms[0];
   const existing = current.find(record => record.key === primaryKey || (record.terms || []).some(term => terms.includes(term)));
@@ -3426,16 +3812,162 @@ function addPeopleSuggestionIgnore(settings, suggestion) {
     existing.terms = Array.from(new Set([...(existing.terms || []), ...terms]));
     existing.name = existing.name || normalized.name;
     existing.ignoredAt = new Date().toISOString();
+    if (storedSuggestion) existing.suggestion = Object.assign({}, existing.suggestion || {}, storedSuggestion);
   } else {
     current.push({
       key: primaryKey,
       terms,
       name: normalized.name,
       ignoredAt: new Date().toISOString(),
+      suggestion: storedSuggestion,
     });
   }
   settings.peopleSuggestionIgnores = current.slice(-300);
   return true;
+}
+
+function removePeopleSuggestionIgnores(settings, suggestions) {
+  if (!settings) return 0;
+  const current = normalizePeopleSuggestionIgnores(settings.peopleSuggestionIgnores);
+  const keys = new Set();
+  const terms = new Set();
+  for (const item of suggestions || []) {
+    if (!item) continue;
+    if (item.ignoreKey) keys.add(String(item.ignoreKey));
+    if (item.key) keys.add(String(item.key));
+    for (const term of (item.ignoreTerms || [])) {
+      const normalized = normalizePersonLookupText(term);
+      if (normalized) terms.add(normalized);
+    }
+    for (const term of getPeopleSuggestionIgnoreTerms(item)) {
+      if (term) terms.add(term);
+    }
+  }
+  if (!keys.size && !terms.size) return 0;
+  const next = current.filter(record => {
+    if (keys.has(record.key)) return false;
+    return !(record.terms || []).some(term => terms.has(term));
+  });
+  settings.peopleSuggestionIgnores = next;
+  return current.length - next.length;
+}
+
+function getPeopleSuggestionCacheKey(sourcePath, suggestion) {
+  const normalized = normalizePeopleSuggestion(suggestion);
+  if (!normalized) return "";
+  const terms = getPeopleSuggestionIgnoreTerms(normalized);
+  const nameKey = normalizePersonLookupText(normalized.name) || terms[0] || "";
+  if (!nameKey) return "";
+  return `${obsidian.normalizePath(sourcePath || normalized.sourcePath || "")}::${nameKey}`;
+}
+
+function normalizePeopleSuggestionCacheRecord(item) {
+  if (!item || typeof item !== "object") return null;
+  const rawSuggestion = item.suggestion && typeof item.suggestion === "object" ? item.suggestion : item;
+  const normalized = normalizePeopleSuggestion(rawSuggestion);
+  if (!normalized) return null;
+  const sourcePath = obsidian.normalizePath(item.sourcePath || rawSuggestion.sourcePath || "");
+  const sourceBasename = String(item.sourceBasename || rawSuggestion.sourceBasename || (sourcePath.split("/").pop() || "").replace(/\.md$/i, "") || "").trim();
+  const key = String(item.key || item.id || rawSuggestion.cacheKey || getPeopleSuggestionCacheKey(sourcePath, normalized) || "").trim();
+  if (!key) return null;
+  const matchPath = String(item.matchPath || rawSuggestion.matchPath || "").trim();
+  const suggestion = Object.assign({}, normalized, {
+    sourcePath,
+    sourceBasename,
+    cacheKey: key,
+    matchPath,
+  });
+  return {
+    key,
+    sourcePath,
+    sourceBasename,
+    sourceMtime: Number(item.sourceMtime) || 0,
+    sourceSize: Number(item.sourceSize) || 0,
+    createdAt: String(item.createdAt || new Date().toISOString()),
+    updatedAt: String(item.updatedAt || item.createdAt || new Date().toISOString()),
+    suggestion,
+  };
+}
+
+function normalizePeopleSuggestionCache(value) {
+  const raw = Array.isArray(value)
+    ? value
+    : (value && Array.isArray(value.pending) ? value.pending : []);
+  const pending = [];
+  const seen = new Set();
+  for (const item of raw) {
+    const record = normalizePeopleSuggestionCacheRecord(item);
+    if (!record || seen.has(record.key)) continue;
+    seen.add(record.key);
+    pending.push(record);
+  }
+  return { pending: pending.slice(-PEOPLE_SUGGESTION_CACHE_LIMIT) };
+}
+
+function makePeopleSuggestionCacheRecord(file, suggestion) {
+  const normalized = normalizePeopleSuggestion(suggestion);
+  if (!normalized) return null;
+  const sourcePath = file instanceof obsidian.TFile ? obsidian.normalizePath(file.path || "") : obsidian.normalizePath(suggestion && suggestion.sourcePath || "");
+  const sourceBasename = file instanceof obsidian.TFile ? file.basename : String(suggestion && suggestion.sourceBasename || "").trim();
+  const key = getPeopleSuggestionCacheKey(sourcePath, normalized);
+  if (!key) return null;
+  return normalizePeopleSuggestionCacheRecord({
+    key,
+    sourcePath,
+    sourceBasename,
+    sourceMtime: file instanceof obsidian.TFile ? Number(file.stat && file.stat.mtime) || 0 : Number(suggestion && suggestion.sourceMtime) || 0,
+    sourceSize: file instanceof obsidian.TFile ? Number(file.stat && file.stat.size) || 0 : Number(suggestion && suggestion.sourceSize) || 0,
+    createdAt: suggestion && suggestion.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    suggestion: Object.assign({}, normalized, {
+      sourcePath,
+      sourceBasename,
+      matchPath: suggestion && suggestion.matchPath || "",
+    }),
+  });
+}
+
+function isPeopleSuggestionCacheRecordCurrent(plugin, record) {
+  if (!record || !record.sourcePath) return true;
+  const file = plugin && plugin.app && plugin.app.vault && plugin.app.vault.getAbstractFileByPath(record.sourcePath);
+  if (!(file instanceof obsidian.TFile)) return false;
+  const mtime = Number(file.stat && file.stat.mtime) || 0;
+  const size = Number(file.stat && file.stat.size) || 0;
+  if (record.sourceMtime && record.sourceMtime !== mtime) return false;
+  if (record.sourceSize && record.sourceSize !== size) return false;
+  return true;
+}
+
+function peopleSuggestionRecordToSuggestion(record) {
+  if (!record) return null;
+  const suggestion = normalizePeopleSuggestion(Object.assign({}, record.suggestion || {}, {
+    sourcePath: record.sourcePath,
+    sourceBasename: record.sourceBasename,
+  }));
+  if (!suggestion) return null;
+  suggestion.cacheKey = record.key;
+  suggestion.sourcePath = record.sourcePath;
+  suggestion.sourceBasename = record.sourceBasename;
+  suggestion.matchPath = record.suggestion && record.suggestion.matchPath || "";
+  suggestion.selected = true;
+  return suggestion;
+}
+
+function peopleSuggestionIgnoreRecordToSuggestion(record) {
+  const normalizedRecord = normalizePeopleSuggestionIgnoreRecord(record);
+  if (!normalizedRecord) return null;
+  const suggestion = normalizePeopleSuggestion(normalizedRecord.suggestion || { name: normalizedRecord.name });
+  if (!suggestion) return null;
+  const stored = normalizedRecord.suggestion || {};
+  suggestion.sourcePath = stored.sourcePath || "";
+  suggestion.sourceBasename = stored.sourceBasename || "";
+  suggestion.cacheKey = stored.cacheKey || "";
+  suggestion.matchPath = stored.matchPath || "";
+  suggestion.ignoreKey = normalizedRecord.key;
+  suggestion.ignoreTerms = normalizedRecord.terms || [];
+  suggestion.ignoredAt = normalizedRecord.ignoredAt || "";
+  suggestion.selected = false;
+  return suggestion;
 }
 
 function findMatchingPersonEntry(people, suggestion) {
@@ -3696,6 +4228,9 @@ const MODE_PREFIX_TO_KEY = {
   // 旧 prefix
   "访谈": "interview",
   "会议": "meeting",
+  "研讨会": "seminar",
+  "研讨": "seminar",
+  "沙龙": "seminar",
   "小会": "huddle",
   "手记": "monologue",
   "学习": "learning",
@@ -3703,6 +4238,8 @@ const MODE_PREFIX_TO_KEY = {
   "讨论": "huddle",
   // 新 prefix
   "工作纪要": "meeting",
+  "学术研讨": "seminar",
+  "主题沙龙": "seminar",
   "访谈调研": "interview",
   "个人笔记": "monologue",
   "学习记录": "learning",
@@ -3724,7 +4261,7 @@ function getRecentNotes(plugin, limit) {
     const t = moment(stamp, m[2] ? "YYYY-MM-DD HHmm" : "YYYY-MM-DD", true);
     if (!t.isValid()) continue;
     let mode = "off";
-    const tagMatch = f.basename.match(/·\s*(访谈|会议|小会|手记)/);
+    const tagMatch = f.basename.match(/·\s*(访谈|会议|研讨会|研讨|沙龙|小会|手记|学习记录|学习|个人笔记|招聘评估)/);
     if (tagMatch) mode = MODE_PREFIX_TO_KEY[tagMatch[1]] || "off";
     items.push({
       file: f,
@@ -4476,8 +5013,10 @@ class RecorderService {
   }
   async start(options) {
     if (this.state !== "idle") return;
-    const captureMode = (options && options.captureMode) || "mic";
+    assertAudioCaptureSupported();
+    const captureMode = resolveRuntimeAudioInputMode((options && options.captureMode) || "mic");
     this.stream = await this.acquireStream(captureMode);
+    if (!this.stream) throw new Error("未取得可用的麦克风录音流。请检查系统麦克风权限。");
     this.mime = pickMimeType();
     this.segmentIndex = 0;
     this.segmentStartOffsetMs = 0;
@@ -4661,7 +5200,7 @@ class RecorderService {
     return fallbackBlob && this.segmentIndex === 0 ? { blob: fallbackBlob, mime: fallbackBlob.type || fallbackMime || mime } : null;
   }
   async acquireStream(mode) {
-    mode = normalizeAudioInputMode(mode);
+    mode = resolveRuntimeAudioInputMode(mode);
     // 3 种音频输入：
     //   mic                 — 仅麦克风（默认）
     //   virtualCable        — 仅电脑音频（一个被识别为虚拟设备的 audioinput）
@@ -4672,13 +5211,18 @@ class RecorderService {
     let micStream = null, virtStream = null;
 
     if (wantMic) {
-      const realMicId = await pickRealMicrophoneId(this.plugin.settings.selectedMicrophoneDevice || "");
-      if (realMicId === "") {
-        throw new Error("未检测到真实麦克风。\n\n如果 Windows 默认输入被设为 CABLE Output，LexVoice 不会把它当作麦克风使用。请到 Windows「声音」设置把输入设备改回真实麦克风，或在 LexVoice「进阶 → 音频设备检测」中选择优先使用的麦克风。");
+      let audioConstraints;
+      if (isLexVoiceMobileRuntime()) {
+        audioConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+      } else {
+        const realMicId = await pickRealMicrophoneId(this.plugin.settings.selectedMicrophoneDevice || "");
+        if (realMicId === "") {
+          throw new Error("未检测到真实麦克风。\n\n如果 Windows 默认输入被设为 CABLE Output，LexVoice 不会把它当作麦克风使用。请到 Windows「声音」设置把输入设备改回真实麦克风，或在 LexVoice「进阶 → 音频设备检测」中选择优先使用的麦克风。");
+        }
+        audioConstraints = realMicId
+          ? { deviceId: { exact: realMicId }, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+          : { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
       }
-      const audioConstraints = realMicId
-        ? { deviceId: { exact: realMicId }, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-        : { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
       micStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
     }
 
@@ -7945,6 +8489,7 @@ const FRONTMATTER_CONTENT_KEYS = {
   learning: ["主题", "来源", "语言"],
   interview: ["主题", "受访者", "访问者"],
   meeting: ["主题", "参会人"],
+  seminar: ["主题", "研讨对象", "参与者"],
   huddle: ["议题", "当事人", "参谋"],
   monologue: ["主题"],
   recruit: ["候选人", "应聘岗位", "轮次", "录用建议"],
@@ -8138,6 +8683,7 @@ function inferModeFromLegacyNote(filename, content) {
       if (m === "学习" || m === "学习记录") return "learning";
       if (m === "访谈" || m === "访谈调研") return "interview";
       if (m === "会议" || m === "工作纪要") return "meeting";
+      if (m === "研讨" || m === "研讨会" || m === "学术研讨" || m === "主题沙龙") return "seminar";
       if (m === "小会" || m === "讨论" || m === "圆桌讨论") return "huddle";
       if (m === "独白" || m === "手记" || m === "个人笔记") return "monologue";
       if (m === "面试" || m === "招聘" || m === "招聘评估") return "recruit";
@@ -8147,6 +8693,7 @@ function inferModeFromLegacyNote(filename, content) {
   // 2. 文件名前缀（"访谈-xxx"、"面试-xxx"等）
   if (/(?:^|·\s*)面试|招聘/i.test(filename)) return "recruit";
   if (/(?:^|·\s*)学习|视频|课程|讲座/i.test(filename)) return "learning";
+  if (/(?:^|·\s*)研讨|沙龙|论坛/i.test(filename)) return "seminar";
   if (/(?:^|·\s*)访谈/i.test(filename)) return "interview";
   if (/(?:^|·\s*)小会|圆桌/i.test(filename)) return "huddle";
   if (/(?:^|·\s*)独白|(?:^|·\s*)手记|个人笔记/i.test(filename)) return "monologue";
@@ -8158,6 +8705,7 @@ function inferModeFromLegacyNote(filename, content) {
     const h1 = h1Match[1];
     if (/🧑‍💼|面试|招聘/.test(h1)) return "recruit";
     if (/📚|学习|视频|课程|讲座/.test(h1)) return "learning";
+    if (/研讨|沙龙|论坛/.test(h1)) return "seminar";
     if (/🎤|访谈/.test(h1)) return "interview";
     if (/🤝|小会/.test(h1)) return "huddle";
     if (/💭|独白|手记/.test(h1)) return "monologue";
@@ -8170,6 +8718,7 @@ function inferModeFromLegacyNote(filename, content) {
     const h2 = h2Match[1];
     if (/面试|招聘/.test(h2)) return "recruit";
     if (/学习|视频|课程|讲座/.test(h2)) return "learning";
+    if (/研讨|沙龙|论坛/.test(h2)) return "seminar";
     if (/访谈/.test(h2)) return "interview";
     if (/小会/.test(h2)) return "huddle";
     if (/会议/.test(h2)) return "meeting";
@@ -8179,6 +8728,7 @@ function inferModeFromLegacyNote(filename, content) {
   // 5. 内容包含特征性段落
   if (/候选人画像|JD\s*匹配度|录用建议/.test(content)) return "recruit";
   if (/学习要点|可收纳卡片|概念与术语|学习材料/.test(content)) return "learning";
+  if (/观点谱系|研讨摘要|问题意识|争议与分歧/.test(content)) return "seminar";
   if (/受访者|访问者/.test(content)) return "interview";
   if (/参谋.*戳破|认知提醒/.test(content)) return "huddle";
   if (/参会人/.test(content)) return "meeting";
@@ -8192,7 +8742,7 @@ function inferTopicFromFilename(filename) {
   // 去掉 "YYYY-MM-DD HHmm · " 或 "YYYY-MM-DD · " 或 "YYYY-MM-DD HHmm "
   stem = stem.replace(/^\d{4}-\d{2}-\d{2}(?:\s+\d{4})?\s*·?\s*/, "");
   // 去掉模式标签前缀（"访谈-"、"面试-"、"会议-"等）
-  stem = stem.replace(/^(访谈|面试|招聘|会议|小会|独白|手记|纪要)\s*[-—－]?\s*/, "");
+  stem = stem.replace(/^(访谈|面试|招聘|会议|研讨|研讨会|沙龙|论坛|小会|独白|手记|纪要)\s*[-—－]?\s*/, "");
   return stem.trim();
 }
 
@@ -8251,6 +8801,8 @@ async function polishTranscript(plugin, transcript, mode, recruitContext, sessio
   userPrompt = userPrompt.replace("{{STRUCTURE_INSTRUCTION}}", "");
   const metaPrefix = buildSessionMetaPrefix(sessionMeta, mode);
   if (metaPrefix) userPrompt = metaPrefix + "\n\n---\n\n" + userPrompt;
+  const meetingWorkbenchPrompt = buildMeetingWorkbenchPrompt(sessionMeta && sessionMeta.meetingWorkbench);
+  if (meetingWorkbenchPrompt) userPrompt = meetingWorkbenchPrompt + "\n\n---\n\n" + userPrompt;
   const peopleContext = await buildPeopleContextForLlm(plugin);
   if (peopleContext) userPrompt = peopleContext + "\n\n---\n\n" + userPrompt;
   if (mode === "recruit" && recruitContext) {
@@ -8284,6 +8836,8 @@ async function mergeAndPolish(plugin, segments, mode, recruitContext, sessionMet
   }
   const metaPrefix = buildSessionMetaPrefix(computedMeta, mode);
   if (metaPrefix) userPrompt = metaPrefix + "\n\n---\n\n" + userPrompt;
+  const meetingWorkbenchPrompt = buildMeetingWorkbenchPrompt(computedMeta && computedMeta.meetingWorkbench);
+  if (meetingWorkbenchPrompt) userPrompt = meetingWorkbenchPrompt + "\n\n---\n\n" + userPrompt;
   const peopleContext = await buildPeopleContextForLlm(plugin);
   if (peopleContext) userPrompt = peopleContext + "\n\n---\n\n" + userPrompt;
   if (mode === "recruit" && recruitContext) {
@@ -8507,6 +9061,15 @@ class OutlineView extends obsidian.ItemView {
     // 招聘上下文卡片的"已填" vs "未填"也要进 signature——填完 JD 后卡片要重渲染
     const ctx = this.plugin.settings.recruitContext || {};
     const ctxFilled = (ctx.jd && ctx.jd.trim()) ? 1 : 0;
+    const workbench = session ? normalizeMeetingWorkbench(session.meetingWorkbench) : null;
+    const workbenchSig = workbench
+      ? [
+          workbench.entries.length,
+          workbench.entries.map(item => `${item.id}:${item.source || ""}:${item.atMs || 0}:${item.text.length}:${(item.materials || []).map(m => m.path).join(",")}`).join(";"),
+          workbench.materials.length,
+          workbench.materials.map(item => item.path).join(","),
+        ].join(":")
+      : "";
     return [
       session ? session.id : "idle",
       recState,
@@ -8518,6 +9081,7 @@ class OutlineView extends obsidian.ItemView {
       mode,            // ← 模式切换会触发重渲染（招聘上下文卡片显隐）
       captureMode,     // ← 音频输入方式切换会触发设备状态条重渲染
       ctxFilled,       // ← JD 填写状态变化触发卡片状态更新
+      workbenchSig,
       this.showRecentHome ? 1 : 0,
       activeNote ? activeNote.path : "",
       activeNote ? activeNote.stat.mtime : 0,
@@ -8541,6 +9105,7 @@ class OutlineView extends obsidian.ItemView {
     if (!root) return;
     root.empty();
     root.addClass("lexvoice-outline");
+    root.removeClass("has-meeting-composer");
     this._lastRenderedOutline = "";
 
     const session = this.plugin.session;
@@ -8548,8 +9113,8 @@ class OutlineView extends obsidian.ItemView {
     this.syncSessionOutline(session);
 
     if (session) {
+      if (isMeetingWorkbenchMode(session.mode)) root.addClass("has-meeting-composer");
       this.renderActiveHead(root, session, recInfo);
-      if (session.segments.length > 0) this.renderSegments(root, session);
       this.renderAIOutline(root, session);
     } else {
       this.renderIdleHead(root);
@@ -8560,7 +9125,7 @@ class OutlineView extends obsidian.ItemView {
         this.renderRecent(root);
       }
     }
-    this.renderQueueInbox(root);
+    if (session && isMeetingWorkbenchMode(session.mode)) this.renderMeetingComposer(root, session);
     this._lastSig = this.computeSignature();
   }
 
@@ -8791,8 +9356,9 @@ class OutlineView extends obsidian.ItemView {
   }
 
   renderIdleHead(root) {
-    const head = root.createDiv({ cls: "lexvoice-outline-head" });
-    this.renderTitleRow(head, "LexVoice 录音工作台");
+    const head = root.createDiv({ cls: "lexvoice-outline-head is-idle" });
+    const isMobile = isLexVoiceMobileRuntime();
+    this.renderTitleRow(head, isMobile ? "LexVoice 移动录音" : "LexVoice 录音工作台");
 
     const controls = head.createDiv({ cls: "lexvoice-outline-controls" });
 
@@ -8818,31 +9384,259 @@ class OutlineView extends obsidian.ItemView {
     const capRow = controls.createDiv({ cls: "lexvoice-outline-control-row" });
     capRow.createEl("span", { cls: "lexvoice-outline-control-label", text: "音频输入" });
     const capSelect = capRow.createEl("select", { cls: "dropdown" });
-    const capOpts = [
-      ["mic", "仅麦克风"],
-      ["mix-virtual", "麦克风 + 电脑音频（会议/讲解）"],
-      ["virtualCable", "仅电脑音频（视频/课程）"],
-    ];
-    const currentInputMode = normalizeAudioInputMode(this.plugin.settings.captureMode || "mic");
+    const capOpts = isMobile
+      ? [["mic", "仅麦克风（手机端）"]]
+      : [
+          ["mic", "仅麦克风"],
+          ["mix-virtual", "麦克风 + 电脑音频（会议/讲解）"],
+          ["virtualCable", "仅电脑音频（视频/课程）"],
+        ];
+    const currentInputMode = resolveRuntimeAudioInputMode(this.plugin.settings.captureMode || "mic");
     for (const [v, t] of capOpts) {
       const opt = capSelect.createEl("option", { value: v, text: t });
       if (currentInputMode === v) opt.selected = true;
     }
+    capSelect.disabled = isMobile;
     capSelect.addEventListener("change", async () => {
-      this.plugin.settings.captureMode = normalizeAudioInputMode(capSelect.value);
+      this.plugin.settings.captureMode = resolveRuntimeAudioInputMode(capSelect.value);
       await this.plugin.saveSettings();
       this.scheduleUpdate();
     });
+    if (isMobile) {
+      capRow.createSpan({
+        cls: "setting-item-description",
+        text: "手机端用于现场麦克风采集；电脑音频和虚拟声卡请在桌面端使用。",
+      });
+    }
 
     // 设备状态条：根据当前音频输入方式检测对应硬件，给出可见反馈
     const devStatus = controls.createDiv({ cls: "lexvoice-outline-device-status" });
     this.renderDeviceStatus(devStatus, currentInputMode);
 
     const actions = head.createDiv({ cls: "lexvoice-outline-actions" });
-    const startBtn = actions.createEl("button", { text: "● 开始录音", cls: "mod-cta" });
+    const startBtn = actions.createEl("button", { text: isMobile ? "● 开始麦克风录音" : "● 开始录音", cls: "mod-cta" });
     startBtn.onclick = () => this.plugin.startRecording();
     const importBtn = actions.createEl("button", { text: "导入音频" });
     importBtn.onclick = () => new ImportAudioModal(this.app, this.plugin).open();
+  }
+
+  getMeetingMaterialsFolder(session) {
+    const base = obsidian.normalizePath(this.plugin.settings.meetingMaterialsFolder || DEFAULT_SETTINGS.meetingMaterialsFolder);
+    const stamp = session && session.sessionStamp ? session.sessionStamp : "meeting";
+    return obsidian.normalizePath(`${base}/${stamp}`);
+  }
+
+  renderMeetingComposer(root, session) {
+    if (!session.meetingWorkbench) session.meetingWorkbench = { notes: "", draft: "", materials: [], entries: [] };
+    const workbench = normalizeMeetingWorkbench(session.meetingWorkbench);
+    session.meetingWorkbench = workbench;
+    const isMobile = isLexVoiceMobileRuntime();
+    const composer = root.createDiv({ cls: "lexvoice-meeting-composer" });
+    if (isMobile) composer.addClass("is-mobile");
+    const textarea = composer.createEl("textarea", {
+      cls: "lexvoice-meeting-composer-input",
+      attr: { rows: "1", "aria-label": "会中补充" },
+    });
+    textarea.placeholder = isMobile ? "补充一句…" : "记一条会中想法…";
+    textarea.value = workbench.draft || "";
+    textarea.addEventListener("input", () => {
+      session.meetingWorkbench.draft = textarea.value;
+    });
+    textarea.addEventListener("keydown", (evt) => {
+      if (evt.key === "Enter" && !evt.shiftKey && !evt.isComposing) {
+        evt.preventDefault();
+        this.addMeetingWorkbenchTextEntry(session, textarea.value);
+      }
+    });
+
+    const actions = composer.createDiv({ cls: "lexvoice-meeting-composer-actions" });
+    this.createMeetingMaterialInput(actions, session, {
+      label: "拍照",
+      icon: "camera",
+      accept: "image/*",
+      kind: "image",
+      capture: true,
+      multiple: false,
+      iconOnly: true,
+    });
+    if (isMobile) {
+      this.createMeetingMaterialInput(actions, session, {
+        label: "相册",
+        icon: "image-plus",
+        accept: "image/*",
+        kind: "image",
+        capture: false,
+        multiple: true,
+        iconOnly: true,
+      });
+    }
+    this.createMeetingMaterialInput(actions, session, {
+      label: isMobile ? "文件" : "附件",
+      icon: "paperclip",
+      accept: ".ppt,.pptx,.pdf,.key,.pages,.md,.txt,image/*",
+      kind: "file",
+      capture: false,
+      multiple: true,
+      iconOnly: true,
+    });
+    const sendBtn = actions.createEl("button", { cls: "clickable-icon lexvoice-meeting-send", attr: { "aria-label": "发送到会中时间线", title: "发送" } });
+    try { obsidian.setIcon(sendBtn, "send-horizontal"); } catch { sendBtn.setText("发"); }
+    sendBtn.onclick = () => this.addMeetingWorkbenchTextEntry(session, textarea.value);
+  }
+
+  renderOutlineAnnotationEntry(parent, session, entry, options = {}) {
+    const source = entry.source || ((entry.materials && entry.materials.length && !entry.text) ? "material" : "manual");
+    const latestEnd = getSessionLatestSegmentEndMs(session);
+    const isIntegrated = latestEnd > 0 && (Number(entry.atMs) || 0) <= latestEnd;
+    const asListItem = !!(options && options.asListItem);
+    const container = asListItem
+      ? parent.createEl("li", { cls: "lexvoice-outline-annotation-li" })
+      : parent;
+    const row = container.createDiv({ cls: `lexvoice-outline-annotation is-${source} ${isIntegrated ? "is-integrated" : "is-pending"}` });
+    row.createDiv({ cls: `lexvoice-outline-annotation-time is-${source}`, text: formatElapsed(entry.atMs || 0) });
+    const body = row.createDiv({ cls: "lexvoice-outline-annotation-body" });
+    if (entry.text) body.createDiv({ cls: "lexvoice-outline-annotation-text", text: entry.text });
+    if (entry.materials && entry.materials.length) {
+      const materials = body.createDiv({ cls: "lexvoice-outline-annotation-materials" });
+      for (const item of entry.materials) this.renderMeetingMaterialChip(materials, item);
+    }
+    const removeBtn = row.createEl("button", { cls: "clickable-icon lexvoice-outline-annotation-remove", attr: { "aria-label": "移除这条补充", title: "移除" } });
+    try { obsidian.setIcon(removeBtn, "x"); } catch { removeBtn.setText("×"); }
+    removeBtn.onclick = () => {
+      const current = normalizeMeetingWorkbench(session.meetingWorkbench);
+      session.meetingWorkbench = normalizeMeetingWorkbench(Object.assign({}, current, {
+        entries: current.entries.filter(item => item.id !== entry.id),
+      }));
+      this.render();
+    };
+    return container;
+  }
+
+  renderMeetingMaterialChip(parent, item) {
+    const chip = parent.createDiv({ cls: "lexvoice-meeting-material-chip" });
+    const icon = chip.createSpan({ cls: "lexvoice-meeting-material-icon" });
+    try { obsidian.setIcon(icon, isImageMeetingMaterial(item) ? "image" : "paperclip"); }
+    catch { icon.setText(isImageMeetingMaterial(item) ? "图" : "文"); }
+    const label = chip.createSpan({ cls: "lexvoice-meeting-material-name", text: item.name || item.path });
+    label.setAttr("title", item.path || item.name || "");
+    chip.onclick = () => {
+      const file = this.plugin.app.vault.getAbstractFileByPath(item.path);
+      if (file instanceof obsidian.TFile) this.plugin.app.workspace.getLeaf(false).openFile(file);
+      else new obsidian.Notice("找不到这个材料文件");
+    };
+  }
+
+  createMeetingMaterialInput(parent, session, options) {
+    const input = parent.createEl("input", {
+      attr: { type: "file", accept: options.accept || "" },
+    });
+    input.addClass("lexvoice-hidden-file-input");
+    if (options.multiple !== false) input.setAttr("multiple", "true");
+    if (options.capture) input.setAttr("capture", "environment");
+    const cls = options.iconOnly ? "clickable-icon lexvoice-meeting-attach" : "";
+    const btn = parent.createEl("button", { text: options.label || "添加材料", cls, attr: { title: options.label || "添加材料", "aria-label": options.label || "添加材料" } });
+    if (options.icon) {
+      btn.empty();
+      try { obsidian.setIcon(btn, options.icon); } catch {}
+      if (!options.iconOnly) btn.createSpan({ text: options.label || "添加材料" });
+    }
+    btn.onclick = () => input.click();
+    input.addEventListener("change", async () => {
+      try {
+        await this.addMeetingMaterialFiles(session, Array.from(input.files || []), options.kind || "");
+      } finally {
+        input.value = "";
+      }
+    });
+  }
+
+  async addMeetingMaterialFiles(session, files, kind) {
+    if (!session || !files || !files.length) return;
+    const folder = this.getMeetingMaterialsFolder(session);
+    await this.plugin.ensureFolder(folder);
+    const current = normalizeMeetingWorkbench(session.meetingWorkbench);
+    const added = [];
+    for (const file of files) {
+      if (!file) continue;
+      const safeName = sanitizeFilename(file.name || "meeting-material") || "meeting-material";
+      const targetPath = this.plugin.getAvailableVaultPath(obsidian.normalizePath(`${folder}/${safeName}`));
+      if (!targetPath) continue;
+      await this.plugin.app.vault.createBinary(targetPath, await file.arrayBuffer());
+      added.push({
+        path: targetPath,
+        name: file.name || targetPath.split("/").pop() || targetPath,
+        kind: kind || (String(file.type || "").startsWith("image/") ? "image" : "file"),
+        addedAt: new Date().toISOString(),
+      });
+    }
+    if (added.length) {
+      const entry = {
+        id: genId(),
+        atMs: this.getMeetingWorkbenchOffsetMs(),
+        createdAt: new Date().toISOString(),
+        source: kind === "image" ? "image" : "material",
+        text: kind === "image" ? "添加了图片/照片" : "添加了附件",
+        materials: added,
+      };
+      session.meetingWorkbench = normalizeMeetingWorkbench(Object.assign({}, current, {
+        entries: current.entries.concat(entry),
+      }));
+      new obsidian.Notice(`已添加 ${added.length} 个会中材料`);
+      this.maybeRefreshMeetingWorkbenchOutline(session, entry);
+    }
+    this.render();
+  }
+
+  getMeetingWorkbenchOffsetMs() {
+    const info = this.plugin.recorder && this.plugin.recorder.getInfo ? this.plugin.recorder.getInfo() : {};
+    return Math.max(0, Number(info.elapsed) || 0);
+  }
+
+  maybeRefreshMeetingWorkbenchOutline(session, entry) {
+    if (!session || !this.plugin.settings.enableRealtimeOutline) return;
+    if (!session.segments || !session.segments.length) return;
+    const latestEnd = getSessionLatestSegmentEndMs(session);
+    if (!latestEnd || (Number(entry && entry.atMs) || 0) > latestEnd) return;
+    setTimeout(() => this.refreshAIOutline({ silent: true }), 80);
+  }
+
+  addMeetingWorkbenchEntry(session, entry) {
+    if (!session) return;
+    const current = normalizeMeetingWorkbench(session.meetingWorkbench);
+    const nextEntry = Object.assign({
+      id: genId(),
+      atMs: this.getMeetingWorkbenchOffsetMs(),
+      createdAt: new Date().toISOString(),
+      source: "manual",
+      text: "",
+      materials: [],
+    }, entry || {});
+    session.meetingWorkbench = normalizeMeetingWorkbench(Object.assign({}, current, {
+      draft: current.draft,
+      entries: current.entries.concat(nextEntry),
+    }));
+    this.render();
+    this.maybeRefreshMeetingWorkbenchOutline(session, nextEntry);
+  }
+
+  addMeetingWorkbenchTextEntry(session, text) {
+    const value = String(text || "").trim();
+    if (!value) return;
+    const current = normalizeMeetingWorkbench(session.meetingWorkbench);
+    const entry = {
+      id: genId(),
+      atMs: this.getMeetingWorkbenchOffsetMs(),
+      createdAt: new Date().toISOString(),
+      source: "manual",
+      text: value,
+      materials: [],
+    };
+    session.meetingWorkbench = normalizeMeetingWorkbench(Object.assign({}, current, {
+      draft: "",
+      entries: current.entries.concat(entry),
+    }));
+    this.render();
+    this.maybeRefreshMeetingWorkbenchOutline(session, entry);
   }
 
   renderSegments(root, session) {
@@ -8885,6 +9679,7 @@ class OutlineView extends obsidian.ItemView {
         this.enhanceRenderedOutline(body, {
           sourcePath: session && session.mdPath ? session.mdPath : "",
         });
+        this.injectOutlineAnnotationsByTime(body, session);
       });
       // 招聘面试模式：给含 🤖 / ⛏ / ❓ 的列表项打 class，由 CSS 区分视觉样式
       if (isRecruit) {
@@ -8909,6 +9704,59 @@ class OutlineView extends obsidian.ItemView {
         ? tip
         : "录音开始且产出第一段后可生成大纲。",
         cls: "lexvoice-outline-empty" });
+      this.renderOutlineAnnotations(body, session);
+    }
+  }
+
+  renderOutlineAnnotations(parent, session) {
+    if (!session || !isMeetingWorkbenchMode(session.mode)) return;
+    const workbench = normalizeMeetingWorkbench(session.meetingWorkbench);
+    if (!workbench.entries.length && !workbench.notes && !workbench.materials.length) return;
+    const wrap = parent.createDiv({ cls: "lexvoice-outline-annotations" });
+    if (workbench.notes || workbench.materials.length) {
+      const legacy = wrap.createDiv({ cls: "lexvoice-outline-annotation is-manual is-pending" });
+      legacy.createDiv({ cls: "lexvoice-outline-annotation-time is-manual", text: "补充" });
+      const body = legacy.createDiv({ cls: "lexvoice-outline-annotation-body" });
+      if (workbench.notes) body.createDiv({ cls: "lexvoice-outline-annotation-text", text: workbench.notes });
+      if (workbench.materials.length) {
+        const materials = body.createDiv({ cls: "lexvoice-outline-annotation-materials" });
+        for (const item of workbench.materials) this.renderMeetingMaterialChip(materials, item);
+      }
+    }
+    for (const entry of workbench.entries) this.renderOutlineAnnotationEntry(wrap, session, entry);
+  }
+
+  injectOutlineAnnotationsByTime(body, session) {
+    if (!body || !session || !isMeetingWorkbenchMode(session.mode)) return;
+    const workbench = normalizeMeetingWorkbench(session.meetingWorkbench);
+    if (!workbench.entries.length) return;
+    const topList = Array.from(body.children || [])
+      .find((child) => child && /^(UL|OL)$/i.test(child.tagName || ""));
+    if (!topList) {
+      this.renderOutlineAnnotations(body, session);
+      return;
+    }
+    const timedItems = Array.from(topList.children || [])
+      .filter((child) => child && /^(LI)$/i.test(child.tagName || ""))
+      .map((li) => {
+        const links = Array.from(li.querySelectorAll("a.lexvoice-time-link"))
+          .filter((link) => link.closest("li") === li);
+        const leading = links.find((link) => link.classList.contains("lexvoice-outline-leading-time")) || links[0];
+        const ms = leading ? parseElapsedMsToken((leading.textContent || "").trim()) : NaN;
+        return { li, ms: Number.isFinite(ms) ? ms : null };
+      })
+      .filter((item) => item.ms !== null);
+    if (!timedItems.length) {
+      this.renderOutlineAnnotations(body, session);
+      return;
+    }
+    const entries = workbench.entries.slice().sort((a, b) => (a.atMs || 0) - (b.atMs || 0));
+    for (const entry of entries) {
+      const node = this.renderOutlineAnnotationEntry(topList, session, entry, { asListItem: true });
+      const atMs = Number(entry.atMs) || 0;
+      const anchor = timedItems.find((item) => item.ms > atMs);
+      if (anchor && anchor.li && node) topList.insertBefore(node, anchor.li);
+      else if (node) topList.appendChild(node);
     }
   }
 
@@ -8933,6 +9781,7 @@ class OutlineView extends obsidian.ItemView {
         links.forEach((link) => link.addClass("lexvoice-outline-secondary-time"));
         continue;
       }
+      list.addClass("lexvoice-outline-time-rail");
       const first = links[0];
       if (first.classList.contains("lexvoice-outline-leading-time")) continue;
       first.classList.add("lexvoice-outline-leading-time");
@@ -9135,18 +9984,10 @@ class OutlineView extends obsidian.ItemView {
     this.outlineRunning = true;
     this.render();
     try {
-      const transcript = buildRealtimeOutlineTranscript(session.segments);
-      if (!transcript.trim()) throw new Error("当前没有可整理的转写内容");
-      const meta = getModeMeta(this.plugin.settings, session.mode);
-      const sys = "你是结构化思考助手。任务不是复述，而是把零散的发言归并到共同的上一级概念之下。层级深度由材料决定，不预设。克制——不堆砌符号、不强加分析维度、不过度抽象。";
-      const user = applyBriefingLanguageInstruction(buildOutlinePrompt(meta.prefix, session.mode, transcript, session.captureMode), this.plugin.settings);
-      const result = await callLlm(this.plugin, sys, user, { timeoutMs: 45000 });
+      const result = await this.plugin.generateRealtimeOutlineForSession(session, { timeoutMs: 45000 });
       if (this.outlineRunSeq !== runId) return;
       this.aiOutline = result;
       this.lastOutlineSegmentCount = session.segments.length;
-      session.realtimeOutline = result;
-      session.realtimeOutlineSegmentCount = session.segments.length;
-      session.realtimeOutlineUpdatedAt = new Date().toISOString();
       this.outlineErrorCount = 0;
     } catch (e) {
       console.error(e);
@@ -9156,6 +9997,7 @@ class OutlineView extends obsidian.ItemView {
         errorCount: this.outlineErrorCount,
         segmentCount: session.segments.length,
         lastOutlineSegmentCount: this.lastOutlineSegmentCount,
+        window: session.realtimeOutlineWindow || null,
         mode: session.mode,
         captureMode: session.captureMode,
         error: diagnosticError(e),
@@ -10090,13 +10932,94 @@ class LexVoicePlugin extends obsidian.Plugin {
     this.outlineRefreshTimer = window.setTimeout(() => {
       this.outlineRefreshTimer = null;
       const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_OUTLINE);
+      let handledByView = false;
       for (const leaf of leaves) {
         const v = leaf.view;
         if (v && typeof v.refreshAIOutline === "function") {
+          handledByView = true;
           v.refreshAIOutline({ silent: true });
         }
       }
+      if (!handledByView) this.refreshRealtimeOutlineInBackground({ silent: true });
     }, delay);
+  }
+
+  async refreshRealtimeOutlineInBackground(opts = {}) {
+    const session = this.session;
+    if (!session || !session.segments || !session.segments.length) return;
+    if (this._backgroundOutlineRunning) {
+      this._backgroundOutlineQueued = true;
+      return;
+    }
+    if (opts.silent && session.realtimeOutlineSegmentCount >= session.segments.length) return;
+    this._backgroundOutlineRunning = true;
+    try {
+      await this.generateRealtimeOutlineForSession(session, { timeoutMs: 45000 });
+      this.refreshOutlineView();
+    } catch (e) {
+      console.error("[LexVoice] background realtime outline failed", e);
+      await this.logDiagnostic("error", "outline.background_generate_failed", "后台实时大纲生成失败", {
+        silent: !!opts.silent,
+        segmentCount: session.segments.length,
+        lastOutlineSegmentCount: session.realtimeOutlineSegmentCount || 0,
+        window: session.realtimeOutlineWindow || null,
+        mode: session.mode,
+        captureMode: session.captureMode,
+        error: diagnosticError(e),
+      });
+    } finally {
+      this._backgroundOutlineRunning = false;
+      if (this._backgroundOutlineQueued) {
+        this._backgroundOutlineQueued = false;
+        if (this.session && this.session.segments.length > (this.session.realtimeOutlineSegmentCount || 0)) {
+          setTimeout(() => this.refreshRealtimeOutlineInBackground({ silent: true }), 200);
+        }
+      }
+    }
+  }
+
+  async generateRealtimeOutlineForSession(session, opts = {}) {
+    if (!session || !session.segments || !session.segments.length) return "";
+    const windowed = selectRealtimeOutlineSegments(session.segments);
+    const transcript = buildRealtimeOutlineTranscript(windowed.segments, session.meetingWorkbench);
+    if (!transcript.trim()) throw new Error("当前没有可整理的转写内容");
+    const meta = getModeMeta(this.settings, session.mode);
+    const sys = "你是结构化思考助手。任务不是复述，而是把零散的发言归并到共同的上一级概念之下。层级深度由材料决定，不预设。克制——不堆砌符号、不强加分析维度、不过度抽象。";
+    const rollingContext = buildRollingOutlineContext(session.realtimeOutline, windowed.omittedBeforeCount);
+    const user = applyBriefingLanguageInstruction(
+      buildOutlinePrompt(meta.prefix, session.mode, rollingContext + transcript, session.captureMode),
+      this.settings
+    );
+    const result = await callLlm(this, sys, user, { timeoutMs: opts.timeoutMs || 45000 });
+    session.realtimeOutline = result;
+    session.realtimeOutlineSegmentCount = session.segments.length;
+    session.realtimeOutlineUpdatedAt = new Date().toISOString();
+    session.realtimeOutlineWindow = {
+      usedCount: windowed.usedCount,
+      omittedBeforeCount: windowed.omittedBeforeCount,
+      totalTextCount: windowed.totalTextCount,
+      approxChars: windowed.approxChars,
+    };
+    return result;
+  }
+
+  async ensureRealtimeOutlineForFinalNote(session) {
+    if (!this.settings.enableRealtimeOutline) return;
+    if (!session || !session.segments || !session.segments.length) return;
+    const hasTranscript = session.segments.some(s => s && s.text && String(s.text).trim());
+    if (!hasTranscript) return;
+    if (session.realtimeOutline && session.realtimeOutlineSegmentCount >= session.segments.length) return;
+    try {
+      await this.generateRealtimeOutlineForSession(session, { timeoutMs: 45000 });
+    } catch (e) {
+      console.error("[LexVoice] final realtime outline failed", e);
+      await this.logDiagnostic("warn", "outline.final_generate_failed", "最终纪要写入前生成实时大纲失败", {
+        segmentCount: session.segments.length,
+        mode: session.mode,
+        captureMode: session.captureMode,
+        error: diagnosticError(e),
+      });
+    }
   }
 
   async openOutlineView() {
@@ -10106,7 +11029,9 @@ class LexVoicePlugin extends obsidian.Plugin {
       this.syncBubbleVisibility();
       return;
     }
-    const leaf = this.app.workspace.getRightLeaf(false);
+    const leaf = isLexVoiceMobileRuntime()
+      ? this.app.workspace.getLeaf(true)
+      : (this.app.workspace.getRightLeaf(false) || this.app.workspace.getLeaf(true));
     await leaf.setViewState({ type: VIEW_TYPE_OUTLINE, active: true });
     this.app.workspace.revealLeaf(leaf);
     this.syncBubbleVisibility();
@@ -10188,6 +11113,10 @@ class LexVoicePlugin extends obsidian.Plugin {
       const mdPath = obsidian.normalizePath(`${this.settings.mdFolder}/${mdName}.md`);
 
       const meta = getModeMeta(this.settings, mode);
+      const oneShotMode = this._oneShotCaptureMode;
+      const requestedCaptureMode = oneShotMode || this.settings.captureMode || "mic";
+      const captureMode = resolveRuntimeAudioInputMode(requestedCaptureMode);
+      const forcedMobileMic = isLexVoiceMobileRuntime() && normalizeAudioInputMode(requestedCaptureMode) !== "mic";
       this.session = {
         id: genId(),
         sessionStamp,
@@ -10198,7 +11127,8 @@ class LexVoicePlugin extends obsidian.Plugin {
         writeQueue: Promise.resolve(),
         finalized: false,
         recruitContext: this._currentRecruitContext || null,
-        captureMode: normalizeAudioInputMode(this._oneShotCaptureMode || this.settings.captureMode || "mic"),
+        captureMode,
+          meetingWorkbench: { notes: "", draft: "", materials: [], entries: [] },
       };
       this._currentRecruitContext = null;
 
@@ -10224,9 +11154,6 @@ class LexVoicePlugin extends obsidian.Plugin {
           : 0);
 
       const sessionRef = this.session;
-      const oneShotMode = this._oneShotCaptureMode;
-      const requestedCaptureMode = oneShotMode || this.settings.captureMode || "mic";
-      const captureMode = normalizeAudioInputMode(requestedCaptureMode);
       sessionRef.captureMode = captureMode;
       this._oneShotCaptureMode = null;
       if (!oneShotMode && this.settings.captureMode !== captureMode) {
@@ -10288,6 +11215,12 @@ class LexVoicePlugin extends obsidian.Plugin {
           ? `🎙 录音中（${modeLabel}），启动期快速出片，之后每 ${this.settings.segmentIntervalMinutes} 分钟即时转写`
           : `🎙 录音中（${modeLabel}），停止时统一处理`);
       new obsidian.Notice(noticeText);
+      if (forcedMobileMic) {
+        new obsidian.Notice("移动端暂只支持麦克风录音；电脑音频/虚拟声卡请在桌面端使用。", 8000);
+      }
+      if (isLexVoiceMobileRuntime()) {
+        new obsidian.Notice("手机端录音时请保持 Obsidian 在前台，锁屏或切后台可能中断录音。", 8000);
+      }
     } catch (e) {
       console.error(e);
       await this.logDiagnostic("error", "recording.start_failed", "无法开始录音", {
@@ -10557,10 +11490,12 @@ class LexVoicePlugin extends obsidian.Plugin {
 
     let polished = ""; let mergeError = null;
     try {
+      await this.ensureRealtimeOutlineForFinalNote(session);
       const lastSeg = session.segments[session.segments.length - 1];
       const sessionMeta = {
         startedAt: session.startedAt,
         duration: lastSeg ? formatElapsed(lastSeg.endOffsetMs || 0) : "",
+        meetingWorkbench: normalizeMeetingWorkbench(session.meetingWorkbench),
       };
       polished = await mergeAndPolish(this, session.segments.map(s => ({
         index: s.index, startOffsetMs: s.startOffsetMs, endOffsetMs: s.endOffsetMs, text: s.text,
@@ -10592,6 +11527,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         sessionMeta: {
           startedAt: session.startedAt,
           duration: lastSeg ? formatElapsed(lastSeg.endOffsetMs || 0) : "",
+          meetingWorkbench: normalizeMeetingWorkbench(session.meetingWorkbench),
         },
         lastError: mergeError.message || String(mergeError),
       });
@@ -10856,6 +11792,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     const audioRow = masterAudioBlock || session.segments.map((s, i) => getAudioSegmentListItem(s, i)).filter(Boolean).join("\n");
     const realtimeOutlineBlock = buildRealtimeOutlineDetails(session);
     const playbackTimelineBlock = buildPlaybackTimelineDetails(session);
+    const meetingWorkbenchBlock = buildMeetingWorkbenchDetails(session);
     const recordingInfoBlock = buildRecordingInfoDetails({
       startedAt: session.startedAt,
       totalMs,
@@ -10888,6 +11825,8 @@ class LexVoicePlugin extends obsidian.Plugin {
       "",
       recordingInfoBlock || null,
       recordingInfoBlock ? "" : null,
+      meetingWorkbenchBlock || null,
+      meetingWorkbenchBlock ? "" : null,
       realtimeOutlineBlock || null,
       realtimeOutlineBlock ? "" : null,
       playbackTimelineBlock || null,
@@ -10930,6 +11869,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       model: this.settings.llmModel,
     });
     const masterAudioBlock = buildMasterAudioDetails(session, totalMs);
+    const meetingWorkbenchBlock = buildMeetingWorkbenchDetails(session);
     const block = [
       "",
       `## ✨ 整合版（${this.settings.llmModel} · ${meta.prefix}）`,
@@ -10940,6 +11880,8 @@ class LexVoicePlugin extends obsidian.Plugin {
       recordingInfoBlock ? "" : null,
       masterAudioBlock || null,
       masterAudioBlock ? "" : null,
+      meetingWorkbenchBlock || null,
+      meetingWorkbenchBlock ? "" : null,
       realtimeOutlineBlock || null,
       realtimeOutlineBlock ? "" : null,
       playbackTimelineBlock || null,
@@ -11503,6 +12445,115 @@ ${source}`;
     this.settings.knowledgeExtractionHistory = history;
   }
 
+  invalidatePeopleDirectoryCache() {
+    this._peopleDirectoryCache = null;
+  }
+
+  async getCachedPeopleDirectorySuggestions() {
+    const cache = normalizePeopleSuggestionCache(this.settings.peopleSuggestionCache);
+    const people = await loadPeopleDirectory(this);
+    const keptRecords = [];
+    const suggestions = [];
+    let changed = false;
+    for (const record of cache.pending) {
+      if (!isPeopleSuggestionCacheRecordCurrent(this, record) || isPeopleSuggestionIgnored(this.settings, record.suggestion)) {
+        changed = true;
+        continue;
+      }
+      const item = peopleSuggestionRecordToSuggestion(record);
+      if (!item) {
+        changed = true;
+        continue;
+      }
+      item.match = findMatchingPersonEntry(people, item);
+      item.matchPath = (item.match && item.match.path) || item.matchPath || "";
+      keptRecords.push(Object.assign({}, record, {
+        suggestion: Object.assign({}, record.suggestion || {}, { matchPath: item.matchPath }),
+      }));
+      suggestions.push(item);
+    }
+    if (changed || keptRecords.length !== cache.pending.length) {
+      this.settings.peopleSuggestionCache = { pending: keptRecords };
+      await this.saveSettings();
+    }
+    return suggestions;
+  }
+
+  cachePeopleDirectorySuggestions(sourceFile, suggestions) {
+    const cache = normalizePeopleSuggestionCache(this.settings.peopleSuggestionCache);
+    const byKey = new Map(cache.pending.map(record => [record.key, record]));
+    let added = 0;
+    for (const raw of suggestions || []) {
+      if (isPeopleSuggestionIgnored(this.settings, raw)) continue;
+      const record = makePeopleSuggestionCacheRecord(sourceFile, raw);
+      if (!record) continue;
+      const existing = byKey.get(record.key);
+      byKey.set(record.key, Object.assign({}, existing || {}, record, {
+        createdAt: existing && existing.createdAt ? existing.createdAt : record.createdAt,
+        updatedAt: new Date().toISOString(),
+      }));
+      if (!existing) added++;
+    }
+    this.settings.peopleSuggestionCache = { pending: Array.from(byKey.values()).slice(-PEOPLE_SUGGESTION_CACHE_LIMIT) };
+    return added;
+  }
+
+  removeCachedPeopleSuggestions(suggestions) {
+    const cache = normalizePeopleSuggestionCache(this.settings.peopleSuggestionCache);
+    const keys = new Set();
+    for (const item of suggestions || []) {
+      const key = item && (item.cacheKey || item.key || getPeopleSuggestionCacheKey(item.sourcePath || "", item));
+      if (key) keys.add(String(key));
+    }
+    if (!keys.size) return 0;
+    const pending = cache.pending.filter(record => !keys.has(record.key));
+    this.settings.peopleSuggestionCache = { pending };
+    return cache.pending.length - pending.length;
+  }
+
+  clearPeopleSuggestionCache() {
+    this.settings.peopleSuggestionCache = { pending: [] };
+  }
+
+  async openCachedPeopleDirectorySuggestions() {
+    const suggestions = await this.getCachedPeopleDirectorySuggestions();
+    if (!suggestions.length) {
+      new obsidian.Notice("当前没有待确认的人员建议");
+      return false;
+    }
+    new PeopleDirectorySuggestionModal(this.app, this, null, suggestions, {
+      fromCache: true,
+      cachedCount: suggestions.length,
+    }).open();
+    return true;
+  }
+
+  async openIgnoredPeopleDirectorySuggestions() {
+    const records = normalizePeopleSuggestionIgnores(this.settings.peopleSuggestionIgnores);
+    if (!records.length) {
+      new obsidian.Notice("当前没有已忽略的人员建议");
+      return false;
+    }
+    const people = await loadPeopleDirectory(this);
+    const suggestions = records
+      .map(record => peopleSuggestionIgnoreRecordToSuggestion(record))
+      .filter(Boolean)
+      .map(item => {
+        item.match = findMatchingPersonEntry(people, item);
+        item.matchPath = (item.match && item.match.path) || item.matchPath || "";
+        return item;
+      });
+    if (!suggestions.length) {
+      new obsidian.Notice("已忽略列表里没有可编辑的人员建议");
+      return false;
+    }
+    new PeopleDirectorySuggestionModal(this.app, this, null, suggestions, {
+      fromIgnored: true,
+      ignoredCount: records.length,
+    }).open();
+    return true;
+  }
+
   async extractVocabularyFromLibrary() {
     if (!this.settings.llmApiKey && !isLocalLlmEndpoint(this.settings.llmEndpoint)) {
       new obsidian.Notice("请先配置大模型服务");
@@ -11535,6 +12586,14 @@ ${source}`;
   }
 
   async suggestPeopleDirectoryFromLibrary() {
+    const cached = await this.getCachedPeopleDirectorySuggestions();
+    if (cached.length) {
+      new PeopleDirectorySuggestionModal(this.app, this, null, cached, {
+        fromCache: true,
+        cachedCount: cached.length,
+      }).open();
+      return;
+    }
     if (!this.settings.llmApiKey && !isLocalLlmEndpoint(this.settings.llmEndpoint)) {
       new obsidian.Notice("请先配置大模型服务");
       return;
@@ -11547,24 +12606,23 @@ ${source}`;
     }
     new obsidian.Notice(`LexVoice：正在扫描 ${batch.length} 篇纪要提取人员信息…`);
     try {
-      const suggestions = [];
-      let processedWithoutSuggestions = 0;
+      let cachedCount = 0;
+      let processed = 0;
       let failed = 0;
       for (const file of batch) {
         try {
           const markdown = await this.app.vault.cachedRead(file);
           const items = await generatePeopleDirectorySuggestions(this, file, markdown);
-          if (items.length) suggestions.push(...items);
-          else {
-            this.markKnowledgeExtractionSource("people", file);
-            processedWithoutSuggestions++;
-          }
+          cachedCount += this.cachePeopleDirectorySuggestions(file, items);
+          this.markKnowledgeExtractionSource("people", file);
+          processed++;
         } catch (e) {
           failed++;
           console.error("[LexVoice] library people extraction failed", file && file.path, e);
         }
       }
-      if (processedWithoutSuggestions) await this.saveSettings();
+      await this.saveSettings();
+      const suggestions = await this.getCachedPeopleDirectorySuggestions();
       if (!suggestions.length) {
         const suffix = failed ? `，失败 ${failed}` : "";
         new obsidian.Notice(`没有新的人员建议（已忽略的建议不会重复显示）${suffix}`);
@@ -11572,7 +12630,8 @@ ${source}`;
       }
       if (failed) new obsidian.Notice(`人员扫描完成，${failed} 篇读取或提取失败，可稍后重试。`, 8000);
       const modal = new PeopleDirectorySuggestionModal(this.app, this, null, suggestions, {
-        scannedCount: batch.length,
+        scannedCount: processed,
+        cachedCount,
         remainingCount: Math.max(0, all.length - batch.length),
       });
       modal.open();
@@ -11584,8 +12643,26 @@ ${source}`;
 
   async ignorePeopleDirectorySuggestion(suggestion) {
     const ok = addPeopleSuggestionIgnore(this.settings, suggestion);
-    if (ok) await this.saveSettings();
+    if (ok) {
+      this.removeCachedPeopleSuggestions([suggestion]);
+      await this.saveSettings();
+    }
     return ok;
+  }
+
+  removePeopleDirectorySuggestionIgnores(suggestions) {
+    return removePeopleSuggestionIgnores(this.settings, suggestions);
+  }
+
+  async restoreIgnoredPeopleDirectorySuggestion(suggestion) {
+    const removed = this.removePeopleDirectorySuggestionIgnores([suggestion]);
+    if (!removed) return 0;
+    const sourceFile = suggestion && suggestion.sourcePath
+      ? this.app.vault.getAbstractFileByPath(obsidian.normalizePath(suggestion.sourcePath))
+      : null;
+    this.cachePeopleDirectorySuggestions(sourceFile instanceof obsidian.TFile ? sourceFile : null, [suggestion]);
+    await this.saveSettings();
+    return removed;
   }
 
   async updateSourceNoteRelatedPeopleLinks(sourceFile, personFiles) {
@@ -11631,7 +12708,10 @@ ${source}`;
         created++;
       }
     }
-    if (linkedPeopleFiles.length) await this.updateSourceNoteRelatedPeopleLinks(sourceFile, linkedPeopleFiles);
+    if (linkedPeopleFiles.length) {
+      await this.updateSourceNoteRelatedPeopleLinks(sourceFile, linkedPeopleFiles);
+      this.invalidatePeopleDirectoryCache();
+    }
     return { created, updated };
   }
 
@@ -11685,6 +12765,10 @@ ${source}`;
       "课程笔记": "learning",
       "访谈": "interview",
       "访谈调研": "interview",
+      "研讨": "seminar",
+      "研讨会": "seminar",
+      "学术研讨": "seminar",
+      "主题沙龙": "seminar",
       "会议": "meeting",
       "工作纪要": "meeting",
       "小会": "huddle",
@@ -12465,6 +13549,13 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
   }
 
   async autoConfigureAudioInput() {
+    if (isLexVoiceMobileRuntime()) {
+      this.plugin.settings.selectedVirtualDevice = "";
+      this.plugin.settings.captureMode = "mic";
+      await this.plugin.saveSettings();
+      new obsidian.Notice("移动端已使用麦克风录音。电脑音频和虚拟声卡采集请在桌面端配置。", 7000);
+      return;
+    }
     const info = await enumerateAudioDevices();
     const virtual = info.virtualCables && info.virtualCables[0];
     const hasMic = info.mics && info.mics.length > 0;
@@ -12646,6 +13737,16 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         .setPlaceholder("LexVoice/转写纪要")
         .setValue(this.plugin.settings.mdFolder)
         .onChange(async v => { this.plugin.settings.mdFolder = v.trim() || DEFAULT_SETTINGS.mdFolder; await this.plugin.saveSettings(); }));
+
+    new obsidian.Setting(c).setName("LexVoice 会中材料文件夹")
+      .setDesc("vault 内相对路径。录音侧边栏添加的图片、PPT、PDF 等补充材料会复制到这里，并按本次录音建立子文件夹。")
+      .addText(t => t
+        .setPlaceholder("LexVoice/会议资料")
+        .setValue(this.plugin.settings.meetingMaterialsFolder || DEFAULT_SETTINGS.meetingMaterialsFolder)
+        .onChange(async v => {
+          this.plugin.settings.meetingMaterialsFolder = obsidian.normalizePath(v.trim() || DEFAULT_SETTINGS.meetingMaterialsFolder);
+          await this.plugin.saveSettings();
+        }));
 
     new obsidian.Setting(c).setName("笔记文件名格式")
       .setDesc("每次录音生成一篇独立笔记。使用 moment.js 格式占位符，例如 YYYY-MM-DD HHmm。")
@@ -13266,9 +14367,34 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         await this.plugin.suggestPeopleDirectoryFromLibrary();
       }));
 
+    const pendingPeopleSuggestions = normalizePeopleSuggestionCache(this.plugin.settings.peopleSuggestionCache).pending;
+    new obsidian.Setting(c).setName("待确认人员建议")
+      .setDesc(`当前 ${pendingPeopleSuggestions.length} 条。AI 扫描得到的建议会先暂存在这里，保存、忽略或清空后才会移除。`)
+      .addButton(b => b.setButtonText("查看建议")
+        .setDisabled(!pendingPeopleSuggestions.length)
+        .onClick(async () => {
+          await this.plugin.openCachedPeopleDirectorySuggestions();
+          this.display();
+        }))
+      .addButton(b => b.setButtonText("清空建议")
+        .setDisabled(!pendingPeopleSuggestions.length)
+        .onClick(async () => {
+          if (!confirm("清空待确认人员建议？这不会删除人员资料，也不会修改纪要。")) return;
+          this.plugin.clearPeopleSuggestionCache();
+          await this.plugin.saveSettings();
+          new obsidian.Notice("已清空待确认人员建议");
+          this.display();
+        }));
+
     const ignoredPeopleSuggestions = normalizePeopleSuggestionIgnores(this.plugin.settings.peopleSuggestionIgnores);
     new obsidian.Setting(c).setName("已忽略的人员建议")
-      .setDesc(`当前 ${ignoredPeopleSuggestions.length} 条。清空后，下次扫描纪要库时会重新显示这些建议。`)
+      .setDesc(`当前 ${ignoredPeopleSuggestions.length} 条。可查看、恢复到待确认，或直接编辑后保存进人员库。`)
+      .addButton(b => b.setButtonText("查看已忽略")
+        .setDisabled(!ignoredPeopleSuggestions.length)
+        .onClick(async () => {
+          await this.plugin.openIgnoredPeopleDirectorySuggestions();
+          this.display();
+        }))
       .addButton(b => b.setButtonText("清空忽略")
         .setDisabled(!ignoredPeopleSuggestions.length)
         .onClick(async () => {
@@ -13709,7 +14835,8 @@ class PeopleDirectorySuggestionModal extends obsidian.Modal {
     this.plugin = plugin;
     this.sourceFile = sourceFile;
     this.options = options || {};
-    this.suggestions = (suggestions || []).map(item => Object.assign({ selected: true }, item, {
+    const defaultSelected = this.options.fromIgnored ? false : true;
+    this.suggestions = (suggestions || []).map(item => Object.assign({ selected: defaultSelected }, item, {
       matchPath: (item.match && item.match.path) || item.matchPath || "",
     }));
     this.rows = [];
@@ -13722,6 +14849,10 @@ class PeopleDirectorySuggestionModal extends obsidian.Modal {
       cls: "setting-item-description",
       text: this.sourceFile
         ? "LexVoice 只会发送当前笔记内容到已配置的大模型，用于生成候选人员建议；已有人员库仅在本地用于匹配和去重，不随请求发送。保存前需要确认姓名、称呼、角色和组织关系是否准确。"
+        : this.options.fromIgnored
+          ? `这里是已忽略的 ${this.options.ignoredCount || this.suggestions.length} 条人员建议。误操作的建议可以先恢复到待确认，也可以直接修改后保存进人员库；保存后会自动移出忽略列表。`
+        : this.options.fromCache
+          ? `这里是上次扫描后尚未处理的 ${this.options.cachedCount || this.suggestions.length} 条人员建议。保存、忽略或清空前，它们会保留在本地设置中，方便稍后继续处理。`
         : `LexVoice 已扫描转写纪要库中的 ${this.options.scannedCount || 0} 篇笔记，只显示需要确认的人员建议。已有人员库仅在本地用于匹配和去重，不随请求发送。${this.options.remainingCount ? `本轮后仍有 ${this.options.remainingCount} 篇待扫描。` : ""}`,
     });
 
@@ -13732,28 +14863,46 @@ class PeopleDirectorySuggestionModal extends obsidian.Modal {
       const top = box.createDiv({ cls: "lexvoice-people-suggestion-top" });
       const checkbox = top.createEl("input", { type: "checkbox" });
       checkbox.checked = item.selected !== false;
-      top.createSpan({ text: item.matchPath ? "更新已有人员" : "新建人员", cls: "lexvoice-people-suggestion-badge" });
+      top.createSpan({ text: this.options.fromIgnored ? "已忽略" : (item.matchPath ? "更新已有人员" : "新建人员"), cls: "lexvoice-people-suggestion-badge" });
       top.createSpan({ text: `置信度：${item.confidence || "中"}`, cls: "setting-item-description" });
       if (item.matchPath) top.createSpan({ text: ` · ${item.matchPath}`, cls: "setting-item-description" });
       if (!this.sourceFile && item.sourceBasename) top.createSpan({ text: ` · 来源：${item.sourceBasename}`, cls: "setting-item-description" });
       let rowRef = null;
-      const ignoreBtn = top.createEl("button", { text: "忽略" });
+      const ignoreBtn = top.createEl("button", { text: this.options.fromIgnored ? "恢复待确认" : "忽略" });
       ignoreBtn.addClass("lexvoice-people-suggestion-ignore");
-      ignoreBtn.onclick = async () => {
-        try {
-          const ok = await this.plugin.ignorePeopleDirectorySuggestion(item);
-          if (!ok) {
-            new obsidian.Notice("这条建议暂时无法忽略");
-            return;
+      if (this.options.fromIgnored) {
+        ignoreBtn.onclick = async () => {
+          try {
+            const removed = await this.plugin.restoreIgnoredPeopleDirectorySuggestion(item);
+            if (!removed) {
+              new obsidian.Notice("这条建议暂时无法恢复");
+              return;
+            }
+            this.rows = this.rows.filter(row => row !== rowRef);
+            box.remove();
+            new obsidian.Notice(`已恢复到待确认：${item.name || "这条建议"}`);
+          } catch (e) {
+            console.error("[LexVoice] restore ignored people suggestion failed", e);
+            new obsidian.Notice(`恢复失败：${(e && e.message) || e}`, 8000);
           }
-          this.rows = this.rows.filter(row => row !== rowRef);
-          box.remove();
-          new obsidian.Notice(`已忽略：${item.name || "这条建议"}`);
-        } catch (e) {
-          console.error("[LexVoice] ignore people suggestion failed", e);
-          new obsidian.Notice(`忽略失败：${(e && e.message) || e}`, 8000);
-        }
-      };
+        };
+      } else {
+        ignoreBtn.onclick = async () => {
+          try {
+            const ok = await this.plugin.ignorePeopleDirectorySuggestion(item);
+            if (!ok) {
+              new obsidian.Notice("这条建议暂时无法忽略");
+              return;
+            }
+            this.rows = this.rows.filter(row => row !== rowRef);
+            box.remove();
+            new obsidian.Notice(`已忽略：${item.name || "这条建议"}`);
+          } catch (e) {
+            console.error("[LexVoice] ignore people suggestion failed", e);
+            new obsidian.Notice(`忽略失败：${(e && e.message) || e}`, 8000);
+          }
+        };
+      }
 
       let nameInput;
       let aliasInput;
@@ -13815,6 +14964,9 @@ class PeopleDirectorySuggestionModal extends obsidian.Modal {
           if (normalized) {
             normalized.sourcePath = row.item.sourcePath || "";
             normalized.sourceBasename = row.item.sourceBasename || "";
+            normalized.cacheKey = row.item.cacheKey || "";
+            normalized.ignoreKey = row.item.ignoreKey || "";
+            normalized.ignoreTerms = row.item.ignoreTerms || [];
           }
           return normalized;
         })
@@ -13839,6 +14991,8 @@ class PeopleDirectorySuggestionModal extends obsidian.Modal {
           updated += result.updated;
           if (file instanceof obsidian.TFile) this.plugin.markKnowledgeExtractionSource("people", file);
         }
+        if (this.options.fromIgnored) this.plugin.removePeopleDirectorySuggestionIgnores(selected);
+        else this.plugin.removeCachedPeopleSuggestions(selected);
         await this.plugin.saveSettings();
         new obsidian.Notice(`人员信息表已更新：新建 ${created}，更新 ${updated}`);
         this.close();

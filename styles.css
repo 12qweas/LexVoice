@@ -605,11 +605,18 @@
   font-size: var(--font-ui-small);
 }
 
+.lexvoice-outline.has-meeting-composer {
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
 .lexvoice-outline-head {
+  --lexvoice-outline-form-label-width: 76px;
+  --lexvoice-outline-form-column-gap: var(--size-4-2);
   display: flex;
   flex-direction: column;
-  gap: var(--size-4-2);
-  padding-bottom: var(--size-4-4);
+  gap: var(--size-4-3);
+  padding-bottom: var(--size-4-5);
   border-bottom: 1px solid var(--background-modifier-border);
 }
 
@@ -715,13 +722,13 @@
 .lexvoice-outline-actions {
   display: flex;
   gap: var(--size-2-2);
-  margin-top: var(--size-2-1);
+  margin-top: 0;
   flex-wrap: wrap;
 }
 
 .lexvoice-outline-actions button,
 .lexvoice-outline-control-row button {
-  height: 28px;
+  height: 32px;
 }
 
 .lexvoice-outline-section {
@@ -735,6 +742,476 @@
   font-weight: var(--font-semibold);
   color: var(--text-muted);
   letter-spacing: 0;
+}
+
+.lexvoice-hidden-file-input {
+  display: none;
+}
+
+.lexvoice-meeting-workbench {
+  padding: var(--size-2-2) 0 var(--size-4-2);
+}
+
+.lexvoice-meeting-workbench-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--size-2-2);
+}
+
+.lexvoice-meeting-workbench-hint {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: var(--line-height-tight);
+  text-align: right;
+}
+
+.lexvoice-meeting-workbench-notes {
+  width: 100%;
+  min-height: 74px;
+  resize: vertical;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  padding: 8px 10px;
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+}
+
+.lexvoice-meeting-workbench-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-2);
+}
+
+.lexvoice-meeting-workbench-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+}
+
+.lexvoice-meeting-workbench-actions svg {
+  width: 14px;
+  height: 14px;
+}
+
+.lexvoice-outline-annotations {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0 0 var(--size-4-2);
+}
+
+.lexvoice-outline-annotation {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 28px;
+  align-items: flex-start;
+  gap: var(--size-2-2);
+  padding: 6px 4px;
+  border-radius: 12px;
+}
+
+.lexvoice-outline-annotation.is-pending {
+  background: color-mix(in srgb, var(--background-secondary) 54%, transparent);
+}
+
+.lexvoice-outline-annotation.is-integrated {
+  background: color-mix(in srgb, var(--text-accent) 5%, transparent);
+}
+
+.lexvoice-outline-annotation-time {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  min-height: 22px;
+  padding: 1px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+}
+
+.lexvoice-outline-annotation-time.is-manual {
+  border-color: color-mix(in srgb, var(--text-accent) 28%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--text-accent) 10%, var(--background-primary));
+  color: var(--text-accent);
+}
+
+.lexvoice-outline-annotation-time.is-image,
+.lexvoice-outline-annotation-time.is-material {
+  border-color: color-mix(in srgb, var(--color-orange, #d97706) 30%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--color-orange, #d97706) 12%, var(--background-primary));
+  color: color-mix(in srgb, var(--color-orange, #d97706) 72%, var(--text-normal));
+}
+
+.lexvoice-outline-annotation-body {
+  min-width: 0;
+}
+
+.lexvoice-outline-annotation-text {
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.lexvoice-outline-annotation-materials {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.lexvoice-outline-annotation-remove {
+  opacity: 0.55;
+}
+
+.lexvoice-outline-annotation-remove:hover {
+  opacity: 1;
+}
+
+.lexvoice-outline-ai-body li.lexvoice-outline-annotation-li {
+  list-style: none;
+  padding-left: 0;
+  margin: 4px 0;
+}
+
+.lexvoice-outline-ai-body li.lexvoice-outline-annotation-li::marker {
+  content: "";
+}
+
+.lexvoice-outline-ai-body li.lexvoice-outline-annotation-li > .lexvoice-outline-annotation {
+  margin-left: 0;
+}
+
+.lexvoice-meeting-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: var(--size-2-3);
+}
+
+.lexvoice-meeting-buffer-empty {
+  padding: 4px 10px 0;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.45;
+}
+
+.lexvoice-meeting-entry {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 28px;
+  align-items: flex-start;
+  gap: var(--size-2-2);
+  padding: 6px 4px;
+  border-radius: 12px;
+}
+
+.lexvoice-meeting-entry.is-pending {
+  background: color-mix(in srgb, var(--background-secondary) 54%, transparent);
+}
+
+.lexvoice-meeting-entry.is-integrated {
+  background: color-mix(in srgb, var(--text-accent) 5%, transparent);
+}
+
+.lexvoice-meeting-entry-time {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  min-height: 22px;
+  padding: 1px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+}
+
+.lexvoice-meeting-entry-time.is-manual {
+  border-color: color-mix(in srgb, var(--text-accent) 28%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--text-accent) 10%, var(--background-primary));
+  color: var(--text-accent);
+}
+
+.lexvoice-meeting-entry-time.is-image,
+.lexvoice-meeting-entry-time.is-material {
+  border-color: color-mix(in srgb, var(--color-orange, #d97706) 30%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--color-orange, #d97706) 12%, var(--background-primary));
+  color: color-mix(in srgb, var(--color-orange, #d97706) 72%, var(--text-normal));
+}
+
+.lexvoice-meeting-entry-body {
+  min-width: 0;
+}
+
+.lexvoice-meeting-entry-text {
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.lexvoice-meeting-entry-materials {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.lexvoice-meeting-entry-remove {
+  opacity: 0.55;
+}
+
+.lexvoice-meeting-entry-remove:hover {
+  opacity: 1;
+}
+
+.lexvoice-meeting-legacy {
+  border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 55%, transparent);
+  padding-top: var(--size-2-2);
+}
+
+.lexvoice-meeting-legacy-title {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-bottom: var(--size-2-2);
+}
+
+.lexvoice-meeting-composer {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--size-2-3);
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+  border-radius: 24px;
+  background: color-mix(in srgb, var(--background-primary) 92%, var(--background-secondary));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.lexvoice-outline.has-meeting-composer .lexvoice-meeting-composer {
+  margin-top: auto;
+}
+
+.lexvoice-meeting-composer.is-mobile {
+  margin-bottom: max(0px, env(safe-area-inset-bottom));
+  padding: 8px;
+  border-radius: 25px;
+}
+
+.lexvoice-meeting-composer-input {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  min-height: 34px;
+  max-height: 96px;
+  resize: none;
+  overflow-y: auto;
+  border: 0;
+  border-radius: 17px;
+  background: transparent;
+  color: var(--text-normal);
+  padding: 7px 10px;
+  font-size: var(--font-ui-small);
+  line-height: 1.45;
+  box-shadow: none;
+}
+
+.lexvoice-meeting-composer-input:hover,
+.lexvoice-meeting-composer-input:focus,
+.lexvoice-meeting-composer-input:focus-visible {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+}
+
+.lexvoice-meeting-composer.is-mobile .lexvoice-meeting-composer-input {
+  min-height: 40px;
+  border-radius: 20px;
+  font-size: 16px;
+  padding: 8px 10px;
+}
+
+.lexvoice-meeting-composer-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+}
+
+.lexvoice-meeting-attach,
+.lexvoice-meeting-send {
+  width: 34px;
+  height: 34px;
+  border-radius: 17px;
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.lexvoice-meeting-composer.is-mobile .lexvoice-meeting-attach,
+.lexvoice-meeting-composer.is-mobile .lexvoice-meeting-send {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+}
+
+.lexvoice-meeting-attach:hover,
+.lexvoice-meeting-send:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.lexvoice-meeting-send {
+  color: var(--text-accent);
+}
+
+.lexvoice-meeting-send:hover {
+  color: var(--text-accent);
+  background: color-mix(in srgb, var(--text-accent) 10%, transparent);
+}
+
+.lexvoice-meeting-material-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.lexvoice-meeting-material-chip:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.lexvoice-meeting-material-chip .lexvoice-meeting-material-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+.lexvoice-meeting-material-chip .lexvoice-meeting-material-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-ui-smaller);
+}
+
+@media (max-width: 520px) {
+  .lexvoice-meeting-workbench-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .lexvoice-meeting-workbench-hint {
+    text-align: left;
+  }
+
+  .lexvoice-meeting-entry {
+    grid-template-columns: minmax(0, 1fr) 28px;
+  }
+
+  .lexvoice-outline-annotation {
+    grid-template-columns: minmax(0, 1fr) 28px;
+  }
+
+  .lexvoice-meeting-entry-time {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    width: fit-content;
+  }
+
+  .lexvoice-outline-annotation-time {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    width: fit-content;
+  }
+
+  .lexvoice-meeting-composer {
+    grid-template-columns: 1fr;
+  }
+
+  .lexvoice-meeting-composer-actions {
+    justify-content: flex-end;
+    padding-bottom: 0;
+  }
+}
+
+.lexvoice-meeting-material-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lexvoice-meeting-material-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 28px 28px;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 5px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 55%, transparent);
+}
+
+.lexvoice-meeting-material-row:last-child {
+  border-bottom: 0;
+}
+
+.lexvoice-meeting-material-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.lexvoice-meeting-material-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.lexvoice-meeting-material-text {
+  min-width: 0;
+}
+
+.lexvoice-meeting-material-name,
+.lexvoice-meeting-material-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lexvoice-meeting-material-name {
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+}
+
+.lexvoice-meeting-material-path {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.lexvoice-meeting-material-row .clickable-icon {
+  width: 28px;
+  height: 28px;
 }
 
 .lexvoice-outline-segments {
@@ -868,6 +1345,85 @@
 .lexvoice-outline-ai-body > ul > li {
   margin: 10px 0;
   font-weight: var(--font-semibold);
+}
+
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail {
+  --lexvoice-outline-rail-x: 26px;
+  --lexvoice-outline-rail-content-x: 62px;
+  padding-inline-start: 0;
+  margin-inline-start: 0;
+}
+
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li {
+  position: relative;
+  list-style: none;
+  min-height: 34px;
+  margin: 0;
+  padding: 8px 0 12px var(--lexvoice-outline-rail-content-x);
+}
+
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li::before {
+  content: "";
+  position: absolute;
+  left: var(--lexvoice-outline-rail-x);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: color-mix(in srgb, var(--background-modifier-border) 76%, transparent);
+}
+
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li:first-child::before {
+  top: 17px;
+}
+
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li:last-child::before {
+  bottom: calc(100% - 17px);
+}
+
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li.lexvoice-outline-has-leading-time > p,
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li.lexvoice-outline-has-leading-time {
+  min-height: 24px;
+}
+
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li > .lexvoice-time-link.lexvoice-outline-leading-time,
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li > p > .lexvoice-time-link.lexvoice-outline-leading-time {
+  position: absolute;
+  left: 0;
+  top: 9px;
+  z-index: 1;
+  margin: 0;
+}
+
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li.lexvoice-outline-has-leading-time > p {
+  display: inline;
+}
+
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li.lexvoice-outline-annotation-li {
+  padding-left: var(--lexvoice-outline-rail-content-x);
+}
+
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li.lexvoice-outline-annotation-li > .lexvoice-outline-annotation {
+  position: static;
+  display: block;
+  padding: 0;
+  background: transparent;
+}
+
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li.lexvoice-outline-annotation-li .lexvoice-outline-annotation-time {
+  position: absolute;
+  left: 0;
+  top: 7px;
+  z-index: 1;
+}
+
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li.lexvoice-outline-annotation-li .lexvoice-outline-annotation-body {
+  padding-top: 1px;
+}
+
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li.lexvoice-outline-annotation-li .lexvoice-outline-annotation-remove {
+  position: absolute;
+  top: 3px;
+  right: 0;
 }
 
 .lexvoice-outline-ai-body > ul > li > ul > li {
@@ -1052,27 +1608,50 @@
 .lexvoice-outline-controls {
   display: flex;
   flex-direction: column;
-  gap: var(--size-2-2);
-  margin-top: var(--size-2-1);
+  gap: var(--size-2-3);
+  margin-top: var(--size-2-2);
 }
 
 .lexvoice-outline-control-row {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-columns: var(--lexvoice-outline-form-label-width) minmax(0, 1fr);
   align-items: center;
-  gap: var(--size-2-2);
+  column-gap: var(--lexvoice-outline-form-column-gap);
+  row-gap: var(--size-2-1);
 }
 
 .lexvoice-outline-control-label {
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
   white-space: nowrap;
+  align-self: center;
 }
 
 .lexvoice-outline-control-row select {
   width: 100%;
   min-width: 0;
   font-size: var(--font-ui-small);
+  min-height: 36px;
+}
+
+.lexvoice-outline-head.is-idle .lexvoice-outline-actions,
+.lexvoice-outline-head.is-idle .lexvoice-outline-device-status {
+  margin-left: calc(var(--lexvoice-outline-form-label-width) + var(--lexvoice-outline-form-column-gap));
+}
+
+.lexvoice-outline-head.is-idle .lexvoice-outline-actions {
+  margin-top: var(--size-2-1);
+}
+
+@media (max-width: 520px) {
+  .lexvoice-outline-control-row {
+    grid-template-columns: 1fr;
+  }
+
+  .lexvoice-outline-head.is-idle .lexvoice-outline-actions,
+  .lexvoice-outline-head.is-idle .lexvoice-outline-device-status {
+    margin-left: 0;
+  }
 }
 
 /* === 招聘面试模式 · [!ai-eval] callout ===
@@ -1496,11 +2075,16 @@
   display: flex;
   flex-direction: column;
   gap: var(--size-2-1);
-  margin-top: var(--size-2-2);
-  padding: var(--size-2-2) var(--size-2-3);
+  margin-top: var(--size-2-1);
+  padding: var(--size-2-1) 0 0;
   background: var(--background-secondary);
   border-radius: var(--radius-s);
   font-size: var(--font-ui-smaller);
+}
+
+.lexvoice-outline-head.is-idle .lexvoice-outline-device-status {
+  background: transparent;
+  border-radius: 0;
 }
 
 .lexvoice-outline-device-status:empty {
