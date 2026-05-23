@@ -330,6 +330,55 @@
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.42);
 }
 
+/* Core floating controls are drawn with CSS shapes instead of theme/icon-font glyphs.
+   This keeps recording controls visible even when Obsidian button styles or icon sets change. */
+body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-jump.is-note-icon svg,
+body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-play-icon svg,
+body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-pause-icon svg,
+body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-icon svg {
+  display: none;
+}
+
+body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-jump.is-note-icon::before,
+body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-play-icon::before,
+body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-pause-icon::before,
+body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-icon::before {
+  content: "";
+  display: block;
+  flex: 0 0 auto;
+  color: currentColor;
+}
+
+body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-jump.is-note-icon::before {
+  width: 12px;
+  height: 15px;
+  border: 1.6px solid currentColor;
+  border-radius: 2px;
+  box-shadow: inset 0 4px 0 -2px currentColor;
+}
+
+body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-play-icon::before {
+  width: 0;
+  height: 0;
+  margin-left: 2px;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  border-left: 9px solid currentColor;
+}
+
+body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-pause-icon::before {
+  width: 12px;
+  height: 14px;
+  background: linear-gradient(to right, currentColor 0 36%, transparent 36% 64%, currentColor 64% 100%);
+}
+
+body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-icon::before {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
 /* ============================================================
    2. 状态栏指示
    ============================================================ */
@@ -7988,4 +8037,96 @@ select.lexvoice-recruit-input.dropdown {
   background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
   border-color: var(--interactive-accent);
   color: var(--text-accent);
+}
+
+/* Core recorder/player controls: do not rely on Obsidian button defaults or icon names. */
+.workspace-leaf-content .lexvoice-outline .lexvoice-inline-player button.lexvoice-inline-player-play,
+.workspace-leaf-content .lexvoice-outline .lexvoice-recording-player button.lexvoice-recording-player-primary,
+.workspace-leaf-content .lexvoice-outline .lexvoice-recording-player button.lexvoice-recording-player-secondary,
+.workspace-leaf-content .lexvoice-outline .lexvoice-inline-player button.lexvoice-inline-player-icon-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  border: 0;
+  box-shadow: none;
+  font: inherit;
+  text-decoration: none;
+}
+
+.workspace-leaf-content .lexvoice-outline .lexvoice-inline-player button.lexvoice-inline-player-play,
+.workspace-leaf-content .lexvoice-outline .lexvoice-recording-player.is-playback button.lexvoice-recording-player-primary {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--lex-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  opacity: 1;
+}
+
+.workspace-leaf-content .lexvoice-outline .lexvoice-inline-player button.lexvoice-inline-player-play svg,
+.workspace-leaf-content .lexvoice-outline .lexvoice-recording-player button.is-play-icon svg,
+.workspace-leaf-content .lexvoice-outline .lexvoice-recording-player button.is-pause-icon svg {
+  display: none;
+}
+
+.workspace-leaf-content .lexvoice-outline .lexvoice-inline-player button.lexvoice-inline-player-play::before,
+.workspace-leaf-content .lexvoice-outline .lexvoice-recording-player button.is-play-icon::before,
+.workspace-leaf-content .lexvoice-outline .lexvoice-recording-player button.is-pause-icon::before {
+  content: "";
+  display: block;
+  color: currentColor;
+}
+
+.workspace-leaf-content .lexvoice-outline .lexvoice-inline-player button.lexvoice-inline-player-play::before,
+.workspace-leaf-content .lexvoice-outline .lexvoice-recording-player button.is-play-icon::before {
+  width: 0;
+  height: 0;
+  margin-left: 2px;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  border-left: 9px solid currentColor;
+}
+
+.workspace-leaf-content .lexvoice-outline .lexvoice-inline-player button.lexvoice-inline-player-play.is-playing::before,
+.workspace-leaf-content .lexvoice-outline .lexvoice-recording-player button.is-pause-icon::before {
+  width: 12px;
+  height: 14px;
+  margin-left: 0;
+  border: 0;
+  background: linear-gradient(to right, currentColor 0 36%, transparent 36% 64%, currentColor 64% 100%);
+}
+
+.workspace-leaf-content .lexvoice-outline .lexvoice-recording-player.is-live:not(.is-network):not(.is-microphone) button.lexvoice-recording-player-primary {
+  background: var(--lex-primary);
+  color: var(--lex-on-primary, var(--text-on-accent));
+  border: 0;
+  box-shadow: none;
+}
+
+.workspace-leaf-content .lexvoice-outline .lexvoice-recording-player.is-live:not(.is-network):not(.is-microphone) .lexvoice-recording-stop-square {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.workspace-leaf-content .lexvoice-outline .lexvoice-recording-player button.lexvoice-recording-player-secondary,
+.workspace-leaf-content .lexvoice-outline .lexvoice-inline-player button.lexvoice-inline-player-icon-btn {
+  background: transparent;
+  color: var(--lex-primary);
+  border: 0;
+  box-shadow: none;
+  opacity: 1;
+}
+
+.workspace-leaf-content .lexvoice-outline .lexvoice-recording-player button.lexvoice-recording-player-secondary svg,
+.workspace-leaf-content .lexvoice-outline .lexvoice-inline-player button.lexvoice-inline-player-icon-btn svg {
+  color: currentColor;
+  stroke: currentColor;
 }

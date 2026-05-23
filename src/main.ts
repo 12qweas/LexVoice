@@ -7137,9 +7137,7 @@ class BubbleWidget {
     this.el.removeClass("is-idle"); this.el.removeClass("is-recording"); this.el.removeClass("is-paused");
     if (this.wrapEl) this.wrapEl.removeClass("is-recording-wrap");
     const makeDocButton = (title, handler) => {
-      const jumpBtn = this.el.createEl("button", { cls: "lexvoice-bubble-jump", attr: { title, "aria-label": title } });
-      try { obsidian.setIcon(jumpBtn, "file-text"); }
-      catch { jumpBtn.addClass("is-fallback-icon"); }
+      const jumpBtn = this.el.createEl("button", { cls: "lexvoice-bubble-jump is-note-icon", attr: { title, "aria-label": title } });
       jumpBtn.onclick = (e) => { e.stopPropagation(); handler(); };
       return jumpBtn;
     };
@@ -7161,13 +7159,9 @@ class BubbleWidget {
       this.show();
       makeDocButton("跳到当前录音笔记的转写位置", () => this.plugin.openSessionNote());
       const ctrl = this.el.createDiv({ cls: "lexvoice-bubble-ctrl" });
-      const pauseBtn = ctrl.createEl("button", { cls: "lexvoice-bubble-btn", attr: { title: info.state === "paused" ? "继续" : "暂停", "aria-label": info.state === "paused" ? "继续" : "暂停" } });
-      try { obsidian.setIcon(pauseBtn, info.state === "paused" ? "play" : "pause"); }
-      catch { pauseBtn.setText(info.state === "paused" ? "▶" : "‖"); }
+      const pauseBtn = ctrl.createEl("button", { cls: `lexvoice-bubble-btn ${info.state === "paused" ? "is-play-icon" : "is-pause-icon"}`, attr: { title: info.state === "paused" ? "继续" : "暂停", "aria-label": info.state === "paused" ? "继续" : "暂停" } });
       pauseBtn.onclick = (e) => { e.stopPropagation(); info.state === "paused" ? this.plugin.recorder.resume() : this.plugin.recorder.pause(); };
-      const stopBtn = ctrl.createEl("button", { cls: "lexvoice-bubble-btn stop", attr: { title: "停止并合并润色", "aria-label": "停止并合并润色" } });
-      try { obsidian.setIcon(stopBtn, "square"); }
-      catch { stopBtn.setText("■"); }
+      const stopBtn = ctrl.createEl("button", { cls: "lexvoice-bubble-btn stop is-stop-icon", attr: { title: "停止并合并润色", "aria-label": "停止并合并润色" } });
       stopBtn.onclick = (e) => { e.stopPropagation(); this.plugin.stopRecording(); };
       const timer = this.el.createDiv({ cls: "lexvoice-bubble-timer" });
       timer.setText(formatElapsed(info.elapsed));
@@ -14688,7 +14682,7 @@ class OutlineView extends obsidian.ItemView {
       primary.createSpan({ cls: "lexvoice-recording-stop-square" });
       primary.onclick = () => this.plugin.stopRecording();
     } else {
-      try { obsidian.setIcon(primary, "player-play"); } catch { primary.setText("▶"); }
+      primary.addClass("is-play-icon");
       primary.disabled = true;
     }
     const middle = main.createDiv({ cls: "lexvoice-recording-player-middle" });
@@ -14713,7 +14707,7 @@ class OutlineView extends obsidian.ItemView {
       attr: { type: "button", "aria-label": isPaused ? "继续录音" : "暂停录音" },
     });
     if ((isRecording || isPaused) && !isMicBlocked) {
-      try { obsidian.setIcon(pause, isPaused ? "player-play" : "player-pause"); } catch { pause.setText(isPaused ? "继续" : "暂停"); }
+      pause.addClass(isPaused ? "is-play-icon" : "is-pause-icon");
       pause.onclick = () => isPaused ? this.plugin.recorder.resume() : this.plugin.recorder.pause();
     } else {
       try { obsidian.setIcon(pause, "volume"); } catch {}
