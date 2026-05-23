@@ -38,6 +38,13 @@ Huashu Design is distributed under its own Personal Use License. That license ap
 
 Guizang PPT Skill is distributed under the MIT License. LexVoice references its publicly documented design workflow ideas, including slide rhythm, fixed layout discipline, and visual checklist thinking, but does not copy its implementation.
 
+LexVoice's learning-card wall uses an independently written Obsidian Bases configuration inspired by the simple card-wall structure in PaperBell:
+
+- Obsidian-PaperBell: https://github.com/PaperBell-Org/Obsidian-PaperBell
+- Referenced file: `PaperBell/Cards/00. 概念墙.base`
+
+Obsidian-PaperBell is distributed under the MIT License. LexVoice does not bundle or redistribute PaperBell vault content, templates, media, or project files; the LexVoice Base files are generated from the user's local LexVoice settings and folders.
+
 ## AI assistance
 
 This plugin was developed with AI-assisted programming. All third-party APIs were integrated from public documentation, not from copied source code. Any future contribution that adapts code from another project must document the source, license, and notice in this file before being merged.

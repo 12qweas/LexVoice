@@ -112,6 +112,7 @@ const DEFAULT_SETTINGS = {
 
   // 结构化程度：loose（散文为主）/ balanced（散文+列表，推荐）/ strict（多层嵌套列表）
   briefingStructureLevel: "balanced",
+  repolishPreferencePromptAddendum: "",
 
   briefingTranslationMode: "off",
   briefingTargetLanguage: "zh-CN",
@@ -131,6 +132,8 @@ const DEFAULT_SETTINGS = {
   vocabularyFile: "LexVoice/词汇表.md",
   peopleDirectoryFolder: "LexVoice/人员",
   peopleBaseFile: "LexVoice/人员库.base",
+  learningCardsFolder: "LexVoice/学习卡片",
+  todoCardsFolder: "LexVoice/待办卡片",
   lexVoiceBasesFolder: "LexVoice/视图",
   peopleContextMode: "privacy",
   peopleHotwordsConsentAt: "",
@@ -414,6 +417,15 @@ function pickDefined() {
   return undefined;
 }
 
+function pickNonBlankString() {
+  for (const value of arguments) {
+    if (value === undefined || value === null) continue;
+    const text = String(value).trim();
+    if (text) return value;
+  }
+  return "";
+}
+
 function normalizeAsrConcurrency(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return 1;
@@ -478,7 +490,9 @@ function redactDiagnosticText(value) {
     .replace(/(api[_-]?key|authorization|token|secret|password)\s*[:=]\s*['"]?[^'"\s,;]+/gi, "$1=<redacted>")
     .replace(/\b(sk-[A-Za-z0-9_-]{12,}|ghp_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]+)\b/g, "<redacted-token>")
     .replace(/C:\\Users\\[^\\\s]+/gi, "C:\\Users\\<user>")
-    .replace(/E:\\10\s*知识库\\lexmind/gi, "<vault>")
+    .replace(/\/Users\/[^/\s]+/gi, "/Users/<user>")
+    .replace(/\/home\/[^/\s]+/gi, "/home/<user>")
+    .replace(/\b(?!C:\\Users\\<user>)[A-Z]:\\[^\\\r\n]+(?:\\[^\\\r\n\s]+){1,}/g, "<local-path>")
     .slice(0, 1200);
 }
 
@@ -489,11 +503,15 @@ function diagnosticPathLabel(path) {
 
 function diagnosticError(error) {
   const e = error || {};
-  return {
+  const out = {
     name: redactDiagnosticText(e.name || "Error"),
     message: redactDiagnosticText(e.message || String(error || "")),
     stack: e.stack ? redactDiagnosticText(String(e.stack).split("\n").slice(0, 4).join("\n")) : "",
   };
+  if (e.status !== undefined) out.status = e.status;
+  if (e.statusDetail !== undefined) out.statusDetail = redactDiagnosticText(e.statusDetail);
+  if (e.nonRetryable !== undefined) out.nonRetryable = !!e.nonRetryable;
+  return out;
 }
 
 function sanitizeDiagnosticData(data, depth = 0) {
@@ -626,9 +644,9 @@ function normalizeLexVoiceSettings(savedData) {
 
   const composer = raw.composer || {};
   const promptOverrides = composer.modePromptOverrides || raw.modePromptOverrides || {};
-  s.llmEndpoint = pickDefined(composer.endpoint, raw.llmEndpoint, defaults.llmEndpoint);
-  s.llmApiKey = pickDefined(composer.apiKey, raw.llmApiKey, defaults.llmApiKey);
-  s.llmModel = pickDefined(composer.model, raw.llmModel, defaults.llmModel);
+  s.llmEndpoint = pickNonBlankString(composer.endpoint, raw.llmEndpoint, defaults.llmEndpoint);
+  s.llmApiKey = pickNonBlankString(composer.apiKey, raw.llmApiKey, defaults.llmApiKey);
+  s.llmModel = pickNonBlankString(composer.model, raw.llmModel, defaults.llmModel);
   s.llmServicePreset = pickDefined(composer.servicePreset, raw.llmServicePreset, defaults.llmServicePreset);
   s.polishMode = pickDefined(composer.defaultMode, raw.polishMode, defaults.polishMode);
   s.polishPromptInterview = pickDefined(promptOverrides.interview, raw.polishPromptInterview, defaults.polishPromptInterview);
@@ -639,6 +657,7 @@ function normalizeLexVoiceSettings(savedData) {
   s.polishPromptLearning = pickDefined(promptOverrides.learning, raw.polishPromptLearning, defaults.polishPromptLearning);
   s.polishPromptRecruit = pickDefined(promptOverrides.recruit, raw.polishPromptRecruit, defaults.polishPromptRecruit);
   s.briefingStructureLevel = pickDefined(composer.structureLevel, raw.briefingStructureLevel, defaults.briefingStructureLevel);
+  s.repolishPreferencePromptAddendum = pickDefined(composer.repolishPreferencePromptAddendum, raw.repolishPreferencePromptAddendum, defaults.repolishPreferencePromptAddendum);
   const languagePolicy = composer.languagePolicy || raw.languagePolicy || {};
   s.briefingTranslationMode = pickDefined(languagePolicy.mode, raw.briefingTranslationMode, defaults.briefingTranslationMode);
   s.briefingTargetLanguage = pickDefined(languagePolicy.targetLanguage, raw.briefingTargetLanguage, defaults.briefingTargetLanguage);
@@ -665,6 +684,8 @@ function normalizeLexVoiceSettings(savedData) {
   }
   s.peopleDirectoryFolder = obsidian.normalizePath(pickDefined(vocabulary.peopleFolder, raw.peopleDirectoryFolder, defaults.peopleDirectoryFolder) || defaults.peopleDirectoryFolder);
   s.peopleBaseFile = obsidian.normalizePath(pickDefined(vocabulary.peopleBasePath, raw.peopleBaseFile, defaults.peopleBaseFile) || defaults.peopleBaseFile);
+  s.learningCardsFolder = obsidian.normalizePath(pickDefined(vocabulary.learningCardsFolder, raw.learningCardsFolder, defaults.learningCardsFolder) || defaults.learningCardsFolder);
+  s.todoCardsFolder = obsidian.normalizePath(pickDefined(vocabulary.todoCardsFolder, raw.todoCardsFolder, defaults.todoCardsFolder) || defaults.todoCardsFolder);
   s.peopleContextMode = normalizePeopleContextMode(pickDefined(vocabulary.peopleContextMode, raw.peopleContextMode, defaults.peopleContextMode));
   s.peopleHotwordsConsentAt = String(pickDefined(vocabulary.peopleHotwordsConsentAt, raw.peopleHotwordsConsentAt, defaults.peopleHotwordsConsentAt) || "");
   s.peopleSuggestionIgnores = normalizePeopleSuggestionIgnores(pickDefined(vocabulary.peopleSuggestionIgnores, raw.peopleSuggestionIgnores, defaults.peopleSuggestionIgnores));
@@ -833,6 +854,7 @@ function serializeLexVoiceSettings(s) {
         recruit: s.polishPromptRecruit || "",
       },
       structureLevel: s.briefingStructureLevel || "balanced",
+      repolishPreferencePromptAddendum: s.repolishPreferencePromptAddendum || "",
       languagePolicy: {
         mode: s.briefingTranslationMode || "off",
         targetLanguage: s.briefingTargetLanguage || "zh-CN",
@@ -856,6 +878,8 @@ function serializeLexVoiceSettings(s) {
       notePath: s.vocabularyFile || "",
       peopleFolder: s.peopleDirectoryFolder || DEFAULT_SETTINGS.peopleDirectoryFolder,
       peopleBasePath: s.peopleBaseFile || DEFAULT_SETTINGS.peopleBaseFile,
+      learningCardsFolder: s.learningCardsFolder || DEFAULT_SETTINGS.learningCardsFolder,
+      todoCardsFolder: s.todoCardsFolder || DEFAULT_SETTINGS.todoCardsFolder,
       peopleContextMode: normalizePeopleContextMode(s.peopleContextMode),
       peopleHotwordsConsentAt: s.peopleHotwordsConsentAt || "",
       peopleSuggestionIgnores: normalizePeopleSuggestionIgnores(s.peopleSuggestionIgnores),
@@ -1208,6 +1232,94 @@ function getLexVoiceBasesFolder(settings) {
   return obsidian.normalizePath((settings && settings.lexVoiceBasesFolder) || DEFAULT_SETTINGS.lexVoiceBasesFolder || "LexVoice/视图");
 }
 
+const LEARNING_CARD_TAG = "lexvoice/learning-card";
+const CONCEPT_CARD_TAG = "lexvoice/concept";
+const TODO_CARD_TAG = "lexvoice/todo-card";
+const LEARNING_WALL_FILE = "学习卡片瀑布墙.md";
+const CONCEPT_WALL_FILE = "概念墙.md";
+const TODO_WALL_FILE = "待办墙.md";
+
+function getLexVoiceWallPath(settings, fileName) {
+  const folder = getLexVoiceBasesFolder(settings);
+  return obsidian.normalizePath(folder + "/" + fileName);
+}
+
+function formatLexVoiceWallMarkdown(title, folder, tag, emptyText) {
+  const folderQuery = JSON.stringify('"' + obsidian.normalizePath(folder || "") + '"');
+  const tagQuery = JSON.stringify("#" + String(tag || "").replace(/^#/, ""));
+  return [
+    "---", "cssclasses:", "  - lvwall-page", "---", "", "# " + title, "", "```dataviewjs",
+    "const root = dv.el(\"div\", \"\", { cls: \"lvwall\" });",
+    "const folderQuery = " + folderQuery + ";",
+    "const targetTag = " + tagQuery + ";",
+    "const esc = s => String(s ?? \"\").replace(/[&<>\\\"]/g, c => c === \"&\" ? \"&amp;\" : c === \"<\" ? \"&lt;\" : c === \">\" ? \"&gt;\" : \"&quot;\");",
+    "function columnCount(width){ if (width >= 1320) return 4; if (width >= 960) return 3; if (width >= 620) return 2; return 1; }",
+    "function layoutWidth(){ const selectors = [\".workspace-leaf-content\", \".view-content\", \".markdown-preview-view\", \".markdown-reading-view\", \".markdown-source-view\"]; const nodes = selectors.map(sel => root.closest(sel)).filter(Boolean); nodes.push(root.parentElement, root); for (const node of nodes) { const rect = node && node.getBoundingClientRect ? node.getBoundingClientRect() : null; const width = Math.floor(Math.max(node && node.clientWidth || 0, rect && rect.width || 0)); if (width > 120) return width; } return window.innerWidth || 0; }",
+    "function cardWeight(card){ return 10 + card.title.length * 1.5 + card.sum.length * 0.38 + card.src.length * 0.18 + card.tagCount * 3; }",
+    "const pages = dv.pages(folderQuery).where(p => (p.file.tags || []).includes(targetTag)).sort(p => p.file.ctime, \"desc\");",
+    "const cards = [];",
+    "for (const p of pages) {",
+    "  const type = esc(p[\"卡片类型\"] || p[\"类型\"] || p[\"状态\"] || \"卡片\");",
+    "  const title = esc(p[\"标题\"] || p[\"事项\"] || p.file.name);",
+    "  const sum = esc(p[\"摘要\"] || p[\"说明\"] || p[\"任务\"] || p[\"事项\"] || \"\");",
+    "  const srcR = p[\"来源笔记\"] || p[\"来源\"]; let src = \"\";",
+    "  if (srcR) src = esc(String(srcR.path ?? srcR).split(\"/\").pop().replace(/\\.md$|[\\[\\]]/g, \"\"));",
+    "  const rawTags = p.file.tags || [];",
+    "  const tags = rawTags.map(t => '<span class=\\\"lvwall-tag\\\">' + esc(String(t).replace(/^#/, \"\")) + '</span>').join(\"\");",
+    "  const ct = p.file.ctime ? p.file.ctime.toFormat(\"yyyy-MM-dd HH:mm\") : \"\";",
+    "  const html = '<div class=\\\"lvwall-card\\\" data-path=\\\"' + esc(p.file.path) + '\\\">' + '<div class=\\\"lvwall-head\\\"><span class=\\\"lvwall-type\\\">' + type + '</span><span class=\\\"lvwall-brand\\\">LEXVOICE CARD</span></div>' + '<div class=\\\"lvwall-title\\\">' + title + '</div>' + (sum ? '<div class=\\\"lvwall-k\\\">摘要</div><div class=\\\"lvwall-sum\\\">' + sum + '</div>' : '') + (src ? '<div class=\\\"lvwall-k\\\">来源</div><div class=\\\"lvwall-src\\\">' + src + '</div>' : '') + (tags ? '<div class=\\\"lvwall-tags\\\">' + tags + '</div>' : '') + (ct ? '<div class=\\\"lvwall-time\\\">' + ct + '</div>' : '') + '</div>';",
+    "  cards.push({ html, title, sum, src, tagCount: rawTags.length });",
+    "}",
+    "let lastCols = 0; let raf = 0;",
+    "function bindCards(){ root.querySelectorAll(\".lvwall-card\").forEach(el => el.addEventListener(\"click\", () => app.workspace.openLinkText(el.dataset.path, \"\", false))); }",
+    "function renderWall(){",
+    "  const width = layoutWidth();",
+    "  const cols = columnCount(width);",
+    "  root.style.setProperty(\"--lvwall-columns\", String(cols));",
+    "  root.style.setProperty(\"--lvwall-gutter\", (width < 680 ? 18 : 24) + \"px\");",
+    "  if (!cards.length) { root.classList.add(\"is-empty\"); root.innerHTML = " + JSON.stringify("<p>" + emptyText + "</p>") + "; return; }",
+    "  root.classList.remove(\"is-empty\");",
+    "  const buckets = Array.from({ length: cols }, () => ({ weight: 0, html: \"\" }));",
+    "  for (const card of cards) {",
+    "    let target = 0;",
+    "    for (let i = 1; i < buckets.length; i++) if (buckets[i].weight < buckets[target].weight) target = i;",
+    "    buckets[target].html += card.html;",
+    "    buckets[target].weight += cardWeight(card);",
+    "  }",
+    "  root.innerHTML = buckets.map(b => '<div class=\\\"lvwall-col\\\">' + b.html + '</div>').join(\"\");",
+    "  bindCards();",
+    "  lastCols = cols;",
+    "}",
+    "function scheduleLayout(){",
+    "  if (raf) cancelAnimationFrame(raf);",
+    "  raf = requestAnimationFrame(() => {",
+    "    raf = 0;",
+    "    const width = layoutWidth();",
+    "    const cols = columnCount(width);",
+    "    root.style.setProperty(\"--lvwall-columns\", String(cols));",
+    "    root.style.setProperty(\"--lvwall-gutter\", (width < 680 ? 18 : 24) + \"px\");",
+    "    if (cols !== lastCols) renderWall();",
+    "  });",
+    "}",
+    "renderWall();",
+    "if (typeof ResizeObserver !== \"undefined\") { const ro = new ResizeObserver(scheduleLayout); [root, root.parentElement, root.closest(\".markdown-preview-view\"), root.closest(\".markdown-reading-view\"), root.closest(\".markdown-source-view\"), root.closest(\".view-content\"), root.closest(\".workspace-leaf-content\")].filter(Boolean).forEach(el => ro.observe(el)); }",
+    "window.addEventListener(\"resize\", scheduleLayout, { passive: true });",
+    "```", "",
+  ].join("\n");
+}
+function formatLearningWallMarkdown(settings) {
+  return formatLexVoiceWallMarkdown("学习卡片瀑布墙", settings && settings.learningCardsFolder || DEFAULT_SETTINGS.learningCardsFolder, LEARNING_CARD_TAG, "没有找到学习卡片。完成学习类纪要后，可从信息提取面板保存学习卡片。");
+}
+
+function formatConceptWallMarkdown(settings) {
+  const root = settings && settings.learningCardsFolder || DEFAULT_SETTINGS.learningCardsFolder;
+  return formatLexVoiceWallMarkdown("概念墙", root, CONCEPT_CARD_TAG, "没有找到概念卡片。会中用 #概念 标记或从学习纪要中提取概念后，会出现在这里。");
+}
+
+function formatTodoWallMarkdown(settings) {
+  return formatLexVoiceWallMarkdown("待办墙", settings && settings.todoCardsFolder || DEFAULT_SETTINGS.todoCardsFolder, TODO_CARD_TAG, "没有找到待办卡片。会议纪要中的明确行动项可在确认后沉淀为待办卡片。");
+}
+
 const LV_BASE_DEFINITIONS = [
   // —— 按模式 ——
   {
@@ -1557,7 +1669,7 @@ const STRUCTURE_LEVEL_INSTRUCTIONS = {
   balanced: `**结构化程度：均衡（默认）**
 - 每个自然话题以一句话主论点起头（短散文或加粗短语）
 - 主要支撑信息用列表展开，**列表层级 1–2 级**
-- 列表项简洁可扫读（每项 ≤30 字），需要展开的细节单独成段散文
+- 列表项先写成可扫读的短句；需要展开的事实、例子和判断单独成段散文，不因篇幅压缩删减关键信息
 - 关键判断或原话用 \`> \` blockquote 引用
 - 议题间存在归并关系时，用一句话 cross-reference
 - **不是逐字转录**：合并相邻同主题碎片，去口头禅，但保留事实和判断
@@ -1627,7 +1739,7 @@ ${fmSchema}
 
 填入真实值；转写未提及的字段写 "未提及"，不要编造。frontmatter 后空一行，再开始 Markdown 内容。
 
-**末尾必须输出多维度中文标签建议**（用于插件回写到 frontmatter.tags，方便用户从主题 / 项目 / 公司 / 人物 / 行业等多角度跨纪要检索）。在文档**最后一行**添加注释（不会渲染显示）：
+**末尾必须输出多维度中文标签建议**（用于插件回写到 frontmatter.tags，方便用户从主题 / 项目 / 公司 / 人物 / 行业等多角度跨纪要检索）。在正文收尾处添加注释（不会渲染显示）；如果后面还有插件要求的机器块，机器块放在标签注释之后：
 
 \`\`\`html
 <!-- lexvoice-tags: 主题/招聘流程, 主题/AI转型, 项目/晋升提名, 公司/示例科技, 人物/某负责人, 行业/HR -->
@@ -1654,6 +1766,8 @@ ${fmSchema}
 `
     : "";
   return `你是录音整理助手。输入是一段${inputDesc}。按下方规则生成纪要。
+
+**篇幅原则**：所有句数、字数、条数都只是常规材料的写作基准，不是上限。请根据录音时长、信息密度和主题数量机动扩展；宁可让主体内容更完整，也不要为了凑短摘要而漏掉关键事实、论证、概念、决策、待办或风险。顶部摘要保持可扫读，主体内容必须覆盖完整材料，不要只整理开头或少数高频片段。
 
 ${frontmatterSection}**整体结构原则**：顶部用 callout 做结构化速览（摘要、必要时的决策清单/录用建议），**主体内容贴近原文按实际推进顺序展开**——用三级标题 + 散文段落叙述，不强行套"讨论要点 / 分歧 / 暂行结论"等模板框。关键判断引用用普通 \`> \` blockquote 即可，不要为每个话题再套 callout。
 
@@ -1758,7 +1872,7 @@ const MODE_BODIES = {
 > 内容类型：<课程/讲座/访谈/论文解读/技术分享/纪录片/其他>
 
 > [!abstract] 核心摘要
-> 用 5–8 句话说明这段内容真正讲了什么、解决什么问题、最重要的结论是什么。不要写成宣传语。
+> 先用 5–8 句话作为常规起点说明这段内容真正讲了什么、解决什么问题、最重要的结论是什么；如果是长课程、长视频或多文件合并材料，可以扩展为更完整的核心摘要，确保覆盖全部主要章节。不要写成宣传语。
 
 ### 一、学习要点
 按知识点组织，而不是按转写顺序逐句复述。每个要点包含：
@@ -1774,7 +1888,7 @@ const MODE_BODIES = {
 把内容拆成适合后续 Paste / 剪藏 / 知识库复用的原子卡片。每张卡片尽量短，避免大段复制。
 
 #### 卡片：<卡片标题>
-- 摘要：<2–4 句话>
+- 摘要：<通常 2–4 句话；复杂概念或长课程卡片可适当展开，但不要堆砌原文>
 - 适合放入：<主题/项目/课程/人物/概念>
 - 标签建议：#学习 #视频笔记 #<具体主题>
 - 可复用句：<可以直接复制到笔记里的高密度表达>
@@ -1788,7 +1902,7 @@ const MODE_BODIES = {
 如果没有明显外语内容，本节跳过。
 
 ### 五、值得追问的问题
-列出 3–6 个进一步学习问题，帮助用户继续查资料、写笔记或形成自己的判断。
+通常列出 3–6 个进一步学习问题；如果材料很长、概念很多或存在多条研究线索，可以适当增加，帮助用户继续查资料、写笔记或形成自己的判断。
 
 ### 六、行动建议
 如果内容包含方法、工具、论文、书单、实验或实践步骤，请整理成可执行清单。没有就跳过。
@@ -1821,7 +1935,7 @@ const MODE_BODIES = {
 > 受访者：<推断；未提及写「未提及」> · 主题：<一句话> · 时长：<MM:SS>
 
 > [!abstract] 摘要
-> 写一段 150–250 字第三人称散文综述：访谈背景与主题 → 受访者核心立场 → 3–5 个最重要的观点 → 最值得注意的发现或悬而未决之处。不摘抄原话。
+> 写一段第三人称散文综述：访谈背景与主题 → 受访者核心立场 → 最重要的观点 → 最值得注意的发现或悬而未决之处。常规访谈保持简洁；长访谈或信息密度高时可以扩展为 2 段，不摘抄原话。
 
 ### 主要内容（贴近原文展开，散文叙述）
 
@@ -1878,7 +1992,7 @@ const MODE_BODIES = {
 ### 顶部速览（结构化分析，使用 callout）
 
 > [!abstract] 摘要
-> 写一段 180–280 字第三人称散文综述：会议背景与目的 → 主要议题脉络 → 关键决议（保留/否决/新启动）→ 重要待办与时限 → 仍未解决的争议或风险。不摘抄原话。
+> 写一段第三人称散文综述：会议背景与目的 → 主要议题脉络 → 关键决议（保留/否决/新启动）→ 重要待办与时限 → 仍未解决的争议或风险。常规会议保持简洁；长会或多议题会议可以扩展为 2–3 段，不摘抄原话。
 
 > [!success] 决策与待办（仅在出现时写）
 >
@@ -1951,7 +2065,7 @@ const MODE_BODIES = {
 ### 顶部速览
 
 > [!abstract] 研讨摘要
-> 用 180–280 字说明本次研讨围绕什么对象展开、核心问题是什么、主要观点谱系是什么、最有价值的争议或启发是什么、还有哪些问题没有闭合。不要写成会议流水账。
+> 说明本次研讨围绕什么对象展开、核心问题是什么、主要观点谱系是什么、最有价值的争议或启发是什么、还有哪些问题没有闭合。常规研讨保持一段清晰摘要；长研讨、跨材料研讨或多主题研讨可以扩展为 2–3 段。不要写成会议流水账。
 
 > [!important] 核心判断
 > 用 1–3 条写出本次研讨最值得带走的判断。每条都要有内容，不要写「大家进行了深入讨论」这类空话。
@@ -1992,12 +2106,12 @@ const MODE_BODIES = {
 - **案例 / 材料**：说明它被用来支撑哪个观点
 
 ### 五、后续问题
-列出 3–8 个真正值得继续追问的问题。问题要能推动下一次研讨、阅读或写作，不要写泛泛的「继续研究」。
+列出真正值得继续追问的问题。常规研讨 3–8 个即可；长研讨或多学科材料可适当增加。问题要能推动下一次研讨、阅读或写作，不要写泛泛的「继续研究」。
 
 ### 六、可转化为笔记的条目
 把适合沉淀到知识库的内容写成短条目：
 - **条目标题**：<概念 / 判断 / 案例 / 问题>
-- 摘要：<2–4 句>
+- 摘要：<通常 2–4 句；复杂条目可适当展开，但不要照抄原文>
 - 可放入：<主题 / 项目 / 课程 / 论文 / 案例库>
 - 标签建议：#研讨 #观点谱系 #<具体主题>
 
@@ -2032,10 +2146,10 @@ const MODE_BODIES = {
 > 参会：<姓名/角色 — 功能定位>（例：某负责人（当事人） / 某参谋（辅助分析））
 
 > [!abstract] 摘要
-> 写一段 150–250 字第三人称散文综述：对话背景与诉求 → 当事人面临的核心抉择 → 主要议题与各方立场 → 关键结论或下一步行动 → 留待当事人继续思考的开放问题。
+> 写一段第三人称散文综述：对话背景与诉求 → 当事人面临的核心抉择 → 主要议题与各方立场 → 关键结论或下一步行动 → 留待当事人继续思考的开放问题。内容复杂时可以扩展为 2 段。
 
 > [!important] 一句话定位
-> ≤50 字。本次对话**解决了什么 + 悬置了什么**，一句两分句。
+> 本次对话**解决了什么 + 悬置了什么**，用一句两分句定调；以准确为先，不为压字数牺牲信息。
 
 ### 主要内容（贴近原文展开，散文叙述）
 
@@ -2056,7 +2170,7 @@ const MODE_BODIES = {
 
 ### 认知提醒（**本模式核心**，必有 1–3 条）
 
-参谋戳破的盲点 / 当事人未察觉的偏差 / 沉没成本陷阱 / 隐性假设。每条 ≤2 行：
+参谋戳破的盲点 / 当事人未察觉的偏差 / 沉没成本陷阱 / 隐性假设。每条优先写短，但必要时可以展开到足以说明依据：
 
 > [!important] 提醒 N
 > **点题**：<一句话本质>
@@ -2064,7 +2178,7 @@ const MODE_BODIES = {
 
 ### 自己要继续想的问题（主语是当事人，仅当出现时写）
 
-≤7 条普通列表：
+普通列表；只写真实值得继续想的问题，不为凑数量或压数量删减关键问题：
 - <当事人能自己回答的问题>
 
 ### 话术预演（条件触发：仅当对话讨论了下一场谈话/沟通的应对策略时出现）
@@ -2098,7 +2212,7 @@ const MODE_BODIES = {
 ### 顶部速览（结构化分析，使用 callout）
 
 > [!abstract] 摘要
-> 写一段 100–200 字第一人称散文综述：本段独白的核心命题 → 主要思路或观察 → 最值得保留的洞察或问题。保留作者语气，不摘抄原话。
+> 写一段第一人称散文综述：本段独白的核心命题 → 主要思路或观察 → 最值得保留的洞察或问题。常规独白保持简洁；长独白或多主题口述可以扩展为 2 段。保留作者语气，不摘抄原话。
 
 ### 主要内容（贴近原文展开，保留作者语感）
 
@@ -2142,7 +2256,11 @@ const MODE_BODIES = {
 
 ## §1 角色识别
 - 标签：【面试官】/【候选人】（多面试官时【面试官 A】【面试官 B】）
-- 推断依据：发问的一方 = 面试官；陈述自身经历/技能/想法的一方 = 候选人
+- **音源映射（线上面试 · 优先于其他推断）**：当转写或大纲条目前出现 \`[麦克风]\` / \`[电脑音频]\` 来源标记时：
+  - \`[麦克风]\` = **面试官**（用户本机麦克风端，HR/招聘方）
+  - \`[电脑音频]\` = **候选人**（电脑音频输入端，即远端入会的对方）
+  - 这两条映射在线上面试场景中可视为事实标签，不要被语义重新覆盖；只有当某段内容明显与音源标签冲突（例如标记 \`[电脑音频]\` 但显然是面试官在追问）时，才回到内容推断。
+- 推断依据（无音源标记时回退到此）：发问的一方 = 面试官；陈述自身经历/技能/想法的一方 = 候选人
 - 识别候选人姓名、应聘岗位（若提及）；未提及标「未提及」
 
 ## §0.5 评分校准纪律（**生成前先内化，每条都必须遵守**）
@@ -2203,7 +2321,7 @@ const MODE_BODIES = {
 ### 顶部 · 结构化分析（这部分用表格和 callout，承担「评估快报」角色）
 
 > [!summary] 面试评价
-> 根据面试整体情况，撰写一段可同步至人才档案的正式评价，120–220 字。不要复述填写说明，不要写成条目清单；写成完整段落。若人选面试通过，必须覆盖或自然融入以下维度：1）整体优势与不足；2）专业能力判断；3）底层素质判断（成就欲、韧性、谦逊好学）；4）其他关键信息记录。若人选未通过，也需基于证据说明不适配原因、核心风险和后续是否建议保留人才池。
+> 根据面试整体情况，撰写一段可同步至人才档案的正式评价。不要复述填写说明，不要写成条目清单；写成完整段落。常规评价保持精炼；信息复杂、证据较多或风险较重时可以适当展开。若人选面试通过，必须覆盖或自然融入以下维度：1）整体优势与不足；2）专业能力判断；3）底层素质判断（成就欲、韧性、谦逊好学）；4）其他关键信息记录。若人选未通过，也需基于证据说明不适配原因、核心风险和后续是否建议保留人才池。
 > <面试评价正文>
 
 > [!info] 面试信息
@@ -2211,17 +2329,17 @@ const MODE_BODIES = {
 > 面试形式：<现场/线上/电话> · 轮次：<推断>
 
 > [!important] 结论
-> <一句话定调，≤80 字，判断句，必须用「X，Y，尤其是 Z」句式，Z 放最重失分点>
+> <一句话定调，判断句，建议用「X，Y，尤其是 Z」句式，Z 放最重失分点；以准确表达最重判断为先>
 >
 > 写作约束：
-> - 必须 ≤80 字，判断句
-> - 必须用「尤其是」句式
+> - 必须是判断句
+> - 优先用「尤其是」句式突出最重失分点
 > - 「尤其是」 优先选「未激活的优势」
 > - 不许出现「综合来看」「整体表现」等过渡空话
 
 #### 候选人画像
 
-写一段 150–250 字第三人称散文，展开「结论」的判断依据：候选人背景 → 各能力维度的实际表现 vs JD seniority 标杆人的差距 → 主要风险点。**不重复结论原文**，不再次溢美承认边界等基础职业素养。
+写一段第三人称散文，展开「结论」的判断依据：候选人背景 → 各能力维度的实际表现 vs JD seniority 标杆人的差距 → 主要风险点。常规面试保持精炼；长面试、证据较多或岗位复杂时可以扩展为多段。**不重复结论原文**，不再次溢美承认边界等基础职业素养。
 
 #### AI 使用画像（仅当 JD 涉及 AI / 自动化 / 工具效率维度时出现）
 
@@ -2437,11 +2555,12 @@ const MERGE_PROMPTS = {
 };
 
 // 实时大纲：归并到共同上层概念，层级由内容涌现，不强加结构
-const REALTIME_OUTLINE_MAX_SEGMENTS = 36;
-const REALTIME_OUTLINE_MAX_TRANSCRIPT_CHARS = 18000;
-const REALTIME_OUTLINE_MAX_PREVIOUS_CHARS = 9000;
+const REALTIME_OUTLINE_MAX_SEGMENTS = 24;
+const REALTIME_OUTLINE_MAX_TRANSCRIPT_CHARS = 12000;
+const REALTIME_OUTLINE_MAX_PREVIOUS_CHARS = 3000;
+const REALTIME_OUTLINE_MAX_MEMORY_CHARS = 4500;
 
-function buildSourceAwareOutlineInstruction(captureMode) {
+function buildSourceAwareOutlineInstruction(captureMode, modeKey) {
   const mode = normalizeAudioInputMode(captureMode || "mic");
   if (mode === "mic") {
     return `【来源标记】
@@ -2451,6 +2570,21 @@ function buildSourceAwareOutlineInstruction(captureMode) {
   if (mode === "virtualCable") {
     return `【来源标记】
 当前只录电脑音频。若一级条目明显来自播放的视频、课程、会议远端声音，可在该一级条目前加 \`[电脑音频]\`；不要给二级条目重复标记。
+`;
+  }
+  // mix-virtual：HR/招聘模式下，麦克风/电脑音频 直接对应 面试官/候选人，应主动打标
+  if (modeKey === "recruit") {
+    return `【来源标记 · 线上面试 · 主动标记】
+当前录音同时包含麦克风和电脑音频。在线上面试场景里：
+- \`[麦克风]\` = **面试官端**（本机说话的人，即用户自己）
+- \`[电脑音频]\` = **候选人端**（远端入会的对方）
+
+请尽量给每个一级条目前加上对应的来源标记，方便后续按角色归类。判断依据优先级：
+1. 该条目主要说话角色（提问/陈述自己经历）显然来自哪一端 → 直接标
+2. 内容功能（提问/追问 → 多半是面试官；陈述经历/技能/项目细节 → 多半是候选人）
+3. 实在交织（两端同时说话/打断）才不标，并在条目末尾加一句 \`（双端交织）\`
+
+不要给二级条目重复标记，也不要为了凑标记而改写事实。
 `;
   }
   return `【来源标记 · 谨慎使用】
@@ -2471,39 +2605,13 @@ function getSessionLatestSegmentEndMs(session) {
   return latest;
 }
 
-function buildRealtimeWorkbenchEntryBlock(entry) {
-  const lines = [`【会中批注｜${formatElapsed(entry.atMs || 0)}｜用户手动补充】`];
-  if (entry.text) lines.push(String(entry.text).trim());
-  for (const item of entry.materials || []) {
-    const name = item.name || String(item.path || "").split("/").pop() || item.path;
-    const kind = item.kind ? ` · ${item.kind}` : "";
-    lines.push(`- 附件：[[${item.path}|${name}]]${kind}`);
-  }
-  return lines.join("\n");
-}
-
-function buildRealtimeOutlineTranscript(segments, meetingWorkbench) {
+function buildRealtimeOutlineTranscript(segments) {
   const validSegments = (segments || [])
     .filter((s) => s && s.text && String(s.text).trim())
     .map((s, i) => Object.assign({ _validIndex: i }, s));
   if (!validSegments.length) return "";
-  const firstStart = Math.min(...validSegments.map(s => Number(s.startOffsetMs) || 0));
-  const lastEnd = Math.max(...validSegments.map(s => Number(s.endOffsetMs ?? s.startOffsetMs) || 0));
-  const workbench = normalizeMeetingWorkbench(meetingWorkbench);
-  const events = [];
-  for (const s of validSegments) {
-    events.push({ type: "segment", atMs: Number(s.startOffsetMs) || 0, segment: s });
-  }
-  for (const entry of workbench.entries) {
-    const atMs = Number(entry.atMs) || 0;
-    if (atMs < firstStart || atMs > lastEnd) continue;
-    events.push({ type: "manual", atMs, entry });
-  }
-  events.sort((a, b) => (a.atMs - b.atMs) || (a.type === "segment" ? -1 : 1));
-  return events
-    .map((event, i) => {
-      if (event.type === "manual") return buildRealtimeWorkbenchEntryBlock(event.entry);
-      const s = event.segment;
+  return validSegments
+    .map((s, i) => {
       const n = Number.isFinite(s.index) ? s.index + 1 : (Number(s._validIndex) || 0) + 1;
       const start = formatElapsed(s.startOffsetMs || 0);
       const end = formatElapsed(s.endOffsetMs || 0);
@@ -2538,22 +2646,118 @@ function selectRealtimeOutlineSegments(segments, maxSegments = REALTIME_OUTLINE_
   };
 }
 
-function buildRollingOutlineContext(previousOutline, omittedBeforeCount) {
-  const outline = String(previousOutline || "").trim();
-  if (!outline || !omittedBeforeCount) return "";
-  const clipped = outline.length > REALTIME_OUTLINE_MAX_PREVIOUS_CHARS
-    ? outline.slice(-REALTIME_OUTLINE_MAX_PREVIOUS_CHARS)
-    : outline;
+function getRealtimeOutlineTimeoutMs(windowed) {
+  const chars = Math.max(0, Number(windowed && windowed.approxChars) || 0);
+  if (chars >= 30000) return 90000;
+  if (chars >= 18000) return 75000;
+  return 60000;
+}
+
+function clipRealtimeContextText(text, maxChars) {
+  const cleaned = String(text || "").trim();
+  const max = Math.max(800, Number(maxChars) || 0);
+  if (cleaned.length <= max) return cleaned;
+  const marker = "\n\n……（中间内容已压缩，后续以主题记忆为准）……\n\n";
+  const head = Math.max(300, Math.floor((max - marker.length) * 0.58));
+  const tail = Math.max(300, max - marker.length - head);
+  return cleaned.slice(0, head).trimEnd() + marker + cleaned.slice(-tail).trimStart();
+}
+
+function buildRollingOutlineContext(previousMemory, previousOutline, windowed) {
+  const memory = clipRealtimeContextText(previousMemory, REALTIME_OUTLINE_MAX_MEMORY_CHARS);
+  const outline = clipRealtimeContextText(previousOutline, REALTIME_OUTLINE_MAX_PREVIOUS_CHARS);
+  const omittedBeforeCount = Math.max(0, Number(windowed && windowed.omittedBeforeCount) || 0);
+  const lines = [];
+  lines.push("【主题记忆 / 滚动摘要】");
+  if (memory) {
+    lines.push(
+      "下面是此前较早内容压缩后的长期记忆。它用于承接主线，不直接面向用户展示；请在本轮处理后更新它。",
+      "",
+      memory
+    );
+  } else {
+    lines.push("暂无主题记忆。请根据本轮转写建立第一版主题记忆。");
+  }
+  if (outline) {
+    lines.push(
+      "",
+      "【当前可见大纲参考】",
+      "下面是侧边栏当前显示的大纲。它只用于保持连续性；请保留仍然重要的主线，合并重复或过细的旧节点。",
+      "",
+      outline
+    );
+  }
+  lines.push(
+    "",
+    "【最近转写窗口】",
+    omittedBeforeCount
+      ? `为控制长录音上下文，较早的 ${omittedBeforeCount} 段已由主题记忆承接；下面只提供最近窗口的转写和会中补充。`
+      : "下面是当前可用的最近转写和会中补充。",
+    ""
+  );
+  return lines.join("\n");
+}
+
+function buildRealtimeOutlineEnvelopeInstruction() {
   return [
-    "【上一版实时大纲】",
-    "下面的大纲是较早段落已经整理出的上下文。请以它为基础，结合后面提供的最近转写窗口，输出一份更新后的完整大纲；不要只输出新增内容，也不要机械保留已经不重要的旧细节。",
+    "【输出协议】",
+    "请严格输出两个 XML 风格块，不要前言、不要解释、不要代码围栏：",
     "",
-    clipped,
+    "<lexvoice-memory>",
+    "写给后续轮次使用的主题记忆 / 滚动摘要。",
+    "</lexvoice-memory>",
     "",
-    `【最近转写窗口】`,
-    `为控制长录音的上下文长度，较早的 ${omittedBeforeCount} 段已由上一版大纲承接；下面只提供最近窗口的转写。`,
+    "<lexvoice-outline>",
+    "写给用户看的实时大纲 Markdown 列表。",
+    "</lexvoice-outline>",
     "",
+    "【主题记忆写法】",
+    "- 这是隐藏的长期上下文，不是最终纪要，不要写成漂亮文章。",
+    "- 记录会议/课程主线、已出现的重要对象、待追踪问题、用户用 # / ？ / ！ / TODO / @ 标记过的意图和大致时间。",
+    "- 长录音可以逐步增长，但要压缩；优先保留能帮助后续理解的话题脉络，而不是抄原文。",
+    "- 不要写“未提及”“待确认”这类空字段。",
+    "",
+    "【可见大纲写法】",
+    "- <lexvoice-outline> 内只能放用户可读的大纲列表。",
+    "- 要输出一份结合主题记忆和最近窗口后的更新版大纲，不要只输出新增内容。",
+    "- 合并重复节点，删掉已经不重要的细枝末节；保留能帮助用户回忆现场的关键词和时间锚点。",
   ].join("\n");
+}
+
+function extractRealtimeTaggedBlock(text, tagName) {
+  const tag = String(tagName || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i");
+  const match = re.exec(String(text || ""));
+  return match ? String(match[1] || "").trim() : "";
+}
+
+function stripRealtimeTaggedBlocks(text) {
+  return String(text || "")
+    .replace(/<lexvoice-memory\b[^>]*>[\s\S]*?<\/lexvoice-memory>/gi, "")
+    .replace(/<lexvoice-outline\b[^>]*>[\s\S]*?<\/lexvoice-outline>/gi, "")
+    .trim();
+}
+
+function cleanRealtimeLlmText(text) {
+  return String(text || "").trim()
+    .replace(/^```(?:xml|markdown|md|text)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+}
+
+function parseRealtimeOutlineResponse(raw, fallbackOutline, fallbackMemory) {
+  const cleaned = cleanRealtimeLlmText(raw);
+  let memory = extractRealtimeTaggedBlock(cleaned, "lexvoice-memory");
+  let outline = extractRealtimeTaggedBlock(cleaned, "lexvoice-outline");
+  if (!outline) outline = stripRealtimeTaggedBlocks(cleaned);
+  outline = cleanRealtimeLlmText(outline);
+  memory = cleanRealtimeLlmText(memory);
+  if (!outline) outline = String(fallbackOutline || "").trim();
+  if (!memory) memory = String(fallbackMemory || "").trim();
+  return {
+    outline,
+    memory: clipRealtimeContextText(memory, REALTIME_OUTLINE_MAX_MEMORY_CHARS),
+  };
 }
 
 function buildOutlineAudioAnchorInstruction() {
@@ -2570,16 +2774,18 @@ function buildOutlineAudioAnchorInstruction() {
 function buildOutlinePrompt(modeLabel, modeKey, transcript, captureMode) {
   // 招聘面试模式：大纲严格按"问题 → 回答 → AI 评价"组织
   if (modeKey === "recruit") {
-    return `下面是一段${modeLabel}录音到目前为止的转写。请生成结构化的面试实时大纲。
+    return `下面是一段${modeLabel}录音的实时整理上下文。请更新结构化的面试实时大纲和主题记忆。
 
-${buildSourceAwareOutlineInstruction(captureMode)}
+${buildSourceAwareOutlineInstruction(captureMode, modeKey)}
 
 ${buildOutlineAudioAnchorInstruction()}
 
-【结构 · 严格按问题为单位组织】
-对识别到的每个"面试官提问"作为一级节点，下挂候选人回答要点和 AI 评价。
+${buildRealtimeOutlineEnvelopeInstruction()}
 
-【输出格式】
+【结构 · 严格按问题为单位组织】
+在 <lexvoice-outline> 内，对识别到的每个"面试官提问"作为一级节点，下挂候选人回答要点和 AI 评价。
+
+【可见大纲格式】
 \`\`\`
 - ❓ <问题主题，6-12 字> [[音频文件.webm|12:34]]
   - 💬 <候选人回答的关键点 1>
@@ -2604,19 +2810,21 @@ ${buildOutlineAudioAnchorInstruction()}
 - 没听清楚的问答标注"❓ <主题>（转写不清，待复核）"，不要硬猜
 
 【输出】
-- 纯 Markdown 列表，每个问题独立成一级节点
+- <lexvoice-outline> 内使用纯 Markdown 列表，每个问题独立成一级节点
 - 不要前言、不要总评（综合评价留给最终整合，不在大纲里出现）
 
-转写内容：
+实时整理上下文：
 ${transcript}`;
   }
 
   // 通用：归并到共同上层概念
-  return `下面是一段${modeLabel}录音到目前为止的转写。请提炼大纲。
+  return `下面是一段${modeLabel}录音的实时整理上下文。请更新实时大纲和主题记忆。
 
-${buildSourceAwareOutlineInstruction(captureMode)}
+${buildSourceAwareOutlineInstruction(captureMode, modeKey)}
 
 ${buildOutlineAudioAnchorInstruction()}
+
+${buildRealtimeOutlineEnvelopeInstruction()}
 
 【方法 · 归并】
 找到讨论中可以归并的"共同上一级概念"。
@@ -2636,11 +2844,11 @@ ${buildOutlineAudioAnchorInstruction()}
 - 讨论本身可能没那么深刻，那就让大纲也朴素一点
 
 【输出】
-- 纯 Markdown 列表，缩进表达层级
+- <lexvoice-outline> 内使用纯 Markdown 列表，缩进表达层级
 - 每条简短，不解释、不前言、不结语；一级条目可在末尾带一个回听锚点
 - 转写不完整时只整理已出现的内容
 
-转写内容：
+实时整理上下文：
 ${transcript}`;
 }
 
@@ -2695,6 +2903,15 @@ function normalizeMeetingWorkbench(value) {
     if (!text && !materials.length) continue;
     const createdAt = String(item.createdAt || item.addedAt || "");
     const atMs = Math.max(0, Number(item.atMs ?? item.offsetMs ?? 0) || 0);
+    const rawInteraction = item.interaction && typeof item.interaction === "object" ? item.interaction : null;
+    const interaction = rawInteraction ? {
+      kind: String(rawInteraction.kind || "").trim(),
+      query: String(rawInteraction.query || "").trim(),
+      status: String(rawInteraction.status || "").trim(),
+      response: String(rawInteraction.response || "").trim(),
+      error: String(rawInteraction.error || "").trim(),
+      updatedAt: String(rawInteraction.updatedAt || ""),
+    } : null;
     entries.push({
       id: String(item.id || `meeting-entry-${entries.length}-${atMs}-${createdAt || "time"}`),
       atMs,
@@ -2702,6 +2919,7 @@ function normalizeMeetingWorkbench(value) {
       source: String(item.source || (materials.length && !text ? "material" : "manual")),
       text,
       materials,
+      interaction,
     });
   }
   return {
@@ -2710,6 +2928,81 @@ function normalizeMeetingWorkbench(value) {
     materials: normalizeMeetingMaterials(raw.materials, 30),
     entries: entries.slice(-100),
   };
+}
+
+// 元数据型符号（不触发 AI 即时助理，只用于结构化标注 + 传给 merge prompt）
+const MEETING_METADATA_KINDS = new Set(["assignee", "todo"]);
+
+function detectMeetingWorkbenchInteraction(text) {
+  const value = String(text || "").trim();
+  if (!value) return null;
+  // ---------- AI 触发型（concept / question / focus） ----------
+  let match = value.match(/^[#＃]\s*(.+)$/);
+  if (match && String(match[1] || "").trim()) {
+    return { kind: "concept", query: String(match[1] || "").trim() };
+  }
+  match = value.match(/^[?？]\s*(.+)$/);
+  if (match && String(match[1] || "").trim()) {
+    return { kind: "question", query: String(match[1] || "").trim() };
+  }
+  match = value.match(/^[!！]\s*(.+)$/);
+  if (match && String(match[1] || "").trim()) {
+    return { kind: "focus", query: String(match[1] || "").trim() };
+  }
+  // ---------- 元数据型（assignee / todo） ----------
+  // @xxx [任务内容]：指派给某人；assignee 取首个空白前的 token，余下作为任务说明
+  match = value.match(/^[@＠]\s*(\S+)(?:\s+(.+))?$/);
+  if (match && String(match[1] || "").trim()) {
+    return {
+      kind: "assignee",
+      assignee: String(match[1] || "").trim(),
+      task: String(match[2] || "").trim(),
+    };
+  }
+  // /任务内容：创建待办；可在任务文本里再用 @xxx 标注负责人
+  match = value.match(/^[/／]\s*(.+)$/);
+  if (match && String(match[1] || "").trim()) {
+    const raw = String(match[1] || "").trim();
+    const innerAssignee = raw.match(/[@＠](\S+)/);
+    return {
+      kind: "todo",
+      task: innerAssignee ? raw.replace(/\s*[@＠]\S+\s*/g, " ").trim() : raw,
+      assignee: innerAssignee ? String(innerAssignee[1] || "").trim() : "",
+    };
+  }
+  return null;
+}
+
+function getMeetingWorkbenchOutlineSignature(value, maxAtMs = Infinity) {
+  const workbench = normalizeMeetingWorkbench(value);
+  const limit = Number.isFinite(Number(maxAtMs)) ? Number(maxAtMs) : Infinity;
+  const notes = String(workbench.notes || "").trim().slice(-1000);
+  const entries = workbench.entries
+    .filter(entry => (Number(entry.atMs) || 0) <= limit)
+    .slice(-80)
+    .map(entry => [
+      entry.id || "",
+      Math.round(Number(entry.atMs) || 0),
+      entry.source || "",
+      String(entry.text || "").trim(),
+      (entry.materials || []).map(item => [item.path || "", item.name || "", item.kind || ""].join("@")).join(","),
+    ].join("::"))
+    .join("|");
+  const materials = workbench.materials
+    .map(item => [item.path || "", item.name || "", item.kind || ""].join("@"))
+    .join("|");
+  return [notes, entries, materials].filter(Boolean).join("\n");
+}
+
+function getRealtimeOutlineWorkbenchSignature(session) {
+  return getMeetingWorkbenchOutlineSignature(session && session.meetingWorkbench, getSessionLatestSegmentEndMs(session));
+}
+
+function isRealtimeOutlineCurrent(session) {
+  if (!session || !session.realtimeOutline) return false;
+  const segmentCount = Array.isArray(session.segments) ? session.segments.length : 0;
+  const processedCount = Number(session.realtimeOutlineSegmentCount) || 0;
+  return processedCount >= segmentCount;
 }
 
 function hasMeetingWorkbenchContent(value) {
@@ -2739,18 +3032,48 @@ function buildMeetingWorkbenchPrompt(value) {
     lines.push("### 用户零散记录", workbench.notes, "");
   }
   if (workbench.entries.length) {
-    lines.push("### 用户补充");
-    for (const entry of workbench.entries) {
-      const time = formatElapsed(entry.atMs || 0);
-      const text = entry.text ? ` ${entry.text}` : "";
-      lines.push(`- [${time}]${text}`);
-      for (const item of entry.materials || []) {
-        const name = item.name || item.path.split("/").pop() || item.path;
-        const kind = item.kind ? ` · ${item.kind}` : "";
-        lines.push(`  - 附件：[[${item.path}|${name}]]${kind}`);
+    // 把元数据 kinds 单独拎出来，让 merge LLM 能直接识别"指派"和"待办"两类结构化标注
+    const assigneeEntries = workbench.entries.filter(e => e.interaction && e.interaction.kind === "assignee");
+    const todoEntries = workbench.entries.filter(e => e.interaction && e.interaction.kind === "todo");
+    if (assigneeEntries.length) {
+      lines.push("### 用户指派（@ 符号）—— 视为权威的角色归属，正文应据此署名");
+      for (const entry of assigneeEntries) {
+        const time = formatElapsed(entry.atMs || 0);
+        const who = entry.interaction.assignee || "未指定";
+        const task = entry.interaction.task ? `：${entry.interaction.task}` : "";
+        lines.push(`- [${time}] @${who}${task}`);
       }
+      lines.push("");
     }
-    lines.push("");
+    if (todoEntries.length) {
+      lines.push("### 用户标记的待办（/ 符号）—— 必须写入最终纪要的待办区，不要遗漏");
+      for (const entry of todoEntries) {
+        const time = formatElapsed(entry.atMs || 0);
+        const task = entry.interaction.task || entry.text || "未命名待办";
+        const who = entry.interaction.assignee ? ` 责任人：${entry.interaction.assignee}` : "";
+        lines.push(`- [${time}] ${task}${who}`);
+      }
+      lines.push("");
+    }
+    // 其他普通 / AI 触发型补充
+    const otherEntries = workbench.entries.filter(e => !e.interaction || !MEETING_METADATA_KINDS.has(e.interaction.kind));
+    if (otherEntries.length) {
+      lines.push("### 用户补充");
+      for (const entry of otherEntries) {
+        const time = formatElapsed(entry.atMs || 0);
+        const text = entry.text ? ` ${entry.text}` : "";
+        lines.push(`- [${time}]${text}`);
+        if (entry.interaction && entry.interaction.response) {
+          lines.push(`  - AI 补充：${String(entry.interaction.response).replace(/\r?\n/g, "；")}`);
+        }
+        for (const item of entry.materials || []) {
+          const name = item.name || item.path.split("/").pop() || item.path;
+          const kind = item.kind ? ` · ${item.kind}` : "";
+          lines.push(`  - 附件：[[${item.path}|${name}]]${kind}`);
+        }
+      }
+      lines.push("");
+    }
   }
   if (workbench.materials.length) {
     lines.push("### 用户补充附件");
@@ -2776,6 +3099,9 @@ function buildMeetingWorkbenchDetails(session) {
     for (const entry of workbench.entries) {
       const text = entry.text ? ` ${entry.text}` : "";
       lines.push(`- ${formatElapsed(entry.atMs || 0)}${text}`);
+      if (entry.interaction && entry.interaction.response) {
+        lines.push(`  - AI：${String(entry.interaction.response).replace(/\r?\n/g, "\n    ")}`);
+      }
       for (const item of entry.materials || []) {
         const name = item.name || item.path.split("/").pop() || item.path;
         const kind = item.kind ? ` · ${item.kind}` : "";
@@ -2870,6 +3196,7 @@ function extractLexVoiceDetailsBody(markdown, summaryPattern) {
 
 function extractLexVoiceNotePanelData(file, markdown) {
   const text = String(markdown || "");
+  const sedimentPreExtraction = extractSedimentPreExtractionBlock(text);
   const hasMarker = /<!--\s*lexvoice-session(?::|\s*--)/.test(text)
     || /<!--\s*lexvoice-segments-start/.test(text);
   const outlineRaw = extractLexVoiceDetailsBody(text, /录音中实时大纲/);
@@ -2888,6 +3215,8 @@ function extractLexVoiceNotePanelData(file, markdown) {
     timeline,
     audioRefs,
     hasMarker,
+    preExtractedSediment: sedimentPreExtraction.objects,
+    hasPreExtractedSediment: !!sedimentPreExtraction.objects,
   };
 }
 
@@ -3105,10 +3434,12 @@ async function pickVirtualCableId() {
 async function pickRealMicrophoneId(preferredId = "") {
   const { mics } = await enumerateAudioDevices();
   if (preferredId && mics.some((d) => d.deviceId === preferredId)) return preferredId;
-  // 优先返回 default；否则第一个非虚拟设备
+  // 优先选择明确的真实麦克风设备，避免让浏览器/系统 default 落到 CABLE Output、BlackHole 等虚拟输入。
+  const concrete = mics.find((d) => d.deviceId && d.deviceId !== "default" && !/^default\b/i.test(d.label || ""));
+  if (concrete) return concrete.deviceId;
   const def = mics.find((d) => d.deviceId === "default" || /default/i.test(d.label || ""));
-  if (def) return def.deviceId === "default" ? null : def.deviceId; // null = 让浏览器选默认
-  return mics[0] ? mics[0].deviceId : "";
+  if (def && !isVirtualCableLabel(def.label || "")) return def.deviceId === "default" ? null : def.deviceId;
+  return "";
 }
 
 function pickMimeType() {
@@ -3192,13 +3523,125 @@ function isSyncConflictName(name) {
 }
 
 const VOCABULARY_SECTIONS = [
-  { key: "people", title: "人名", desc: "仅放你明确愿意作为 ASR 提示发送的姓名或称呼；敏感人员关系请放到人员信息表。", placeholder: "例如：某负责人、某专家、某候选人" },
+  { key: "people", title: "人名", desc: "仅放你明确愿意作为 ASR 提示发送的姓名或称呼；敏感人员关系请放到人员资料。", placeholder: "例如：某负责人、某专家、某候选人" },
   { key: "brands", title: "品牌/机构", desc: "公司、学校、团队、客户、供应商、社区、品牌名。", placeholder: "例如：OpenAI、阿里云百炼、硅基流动" },
   { key: "projects", title: "项目/产品", desc: "项目代号、产品名、模型名、系统名、插件名。", placeholder: "例如：LexVoice、SenseVoiceSmall、Paraformer" },
   { key: "terms", title: "行业术语", desc: "专业概念、流程、缩写、技术词、业务词。", placeholder: "例如：ASR、履约保证金、灰度发布" },
   { key: "corrections", title: "易错写法", desc: "明确写出 ASR 常见误写与标准写法。转写返回后，LexVoice 只会按这些显式规则做轻量替换。", placeholder: "例如：森斯 Voice Small => SenseVoiceSmall" },
   { key: "other", title: "其他专有名词", desc: "暂时不好归类但希望 ASR 优先识别准确的词。", placeholder: "例如：会议室名、活动名、内部简称" },
 ];
+
+const SEDIMENT_GROUP_CONFIG = {
+  person: {
+    label: "人员",
+    unit: "位",
+    dest: "人员库",
+    model: "judge",
+    decisionModel: "judge",
+    lead: "人",
+    primaryButtonText: (n) => `加入人员库（${n}）`,
+    secondaryButtonText: "全部忽略",
+  },
+  todo: {
+    label: "待办",
+    unit: "条",
+    dest: "待办",
+    model: "checkbox",
+    decisionModel: "checkbox",
+    defaultAllSelected: true,
+    lead: "事",
+    primaryButtonText: (n) => `加入待办（${n}）`,
+    secondaryButtonText: "忽略未选",
+  },
+  card: {
+    label: "学习",
+    unit: "张",
+    dest: "卡片库",
+    model: "checkbox",
+    decisionModel: "checkbox",
+    defaultAllSelected: true,
+    lead: "知",
+    primaryButtonText: (n) => `加入卡片库（${n}）`,
+    secondaryButtonText: "忽略未选",
+  },
+  hotword: {
+    label: "热词",
+    unit: "个",
+    dest: "热词库",
+    model: "checkbox",
+    decisionModel: "checkbox",
+    defaultAllSelected: true,
+    lead: "词",
+    primaryButtonText: (n) => `加入热词库（${n}）`,
+    secondaryButtonText: "忽略未选",
+  },
+};
+const SEDIMENT_GROUP_ORDER = ["person", "todo", "card", "hotword"];
+const SEDIMENT_GROUP_STATUS_LABELS = {
+  person: "人员建议",
+  todo: "待办候选",
+  card: "学习卡片",
+  hotword: "转写热词",
+};
+
+function makeSedimentStableHash(value) {
+  const source = String(value || "");
+  let hash = 2166136261;
+  for (let i = 0; i < source.length; i++) {
+    hash ^= source.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function makeSedimentStableId(type, parts) {
+  return `lv-sed-${type}-${makeSedimentStableHash((parts || []).map(item => String(item || "").trim()).join("\u0001"))}`;
+}
+
+function getSedimentTodoId(item) {
+  if (item && item.id) return String(item.id);
+  return makeSedimentStableId("todo", [item && (item.task || item.title), item && item.owner, item && item.due, item && item.sourceTime, item && item.note]);
+}
+
+function getSedimentCardId(item) {
+  if (item && item.id) return String(item.id);
+  return makeSedimentStableId("card", [item && item.title, item && item.type, item && item.sourceTime, item && (item.summary || item.reusableLine)]);
+}
+
+function getSedimentHotwordId(sectionKey, term) {
+  return makeSedimentStableId("hotword", [sectionKey, term]);
+}
+
+function getSedimentPersonId(sourcePath, item) {
+  if (item && item.id) return String(item.id);
+  if (item && item.cacheKey) return String(item.cacheKey);
+  if (item && item.key) return String(item.key);
+  return getPeopleSuggestionCacheKey(sourcePath || (item && item.sourcePath) || "", item) || makeSedimentStableId("person", [sourcePath, item && item.name, item && item.role, item && item.organization]);
+}
+
+function withSedimentCandidateIds(objects, sourcePath, sourceBasename) {
+  const normalized = normalizeSedimentExtractionModel(objects);
+  return {
+    people: (normalized.people || []).map(item => {
+      const next = Object.assign({}, item, { sourcePath, sourceBasename });
+      const id = getSedimentPersonId(sourcePath, next);
+      return Object.assign(next, { id, key: next.key || id, cacheKey: next.cacheKey || id });
+    }),
+    todos: (normalized.todos || []).map(item => {
+      const next = Object.assign({}, item);
+      return Object.assign(next, { id: getSedimentTodoId(next) });
+    }),
+    learningCards: (normalized.learningCards || []).map(item => {
+      const next = Object.assign({}, item);
+      return Object.assign(next, { id: getSedimentCardId(next) });
+    }),
+    hotwords: normalized.hotwords || createVocabularyGroups(),
+  };
+}
+
+function removeSedimentGroupDone(doneGroups, groupKey) {
+  return (Array.isArray(doneGroups) ? doneGroups : []).filter(key => key !== groupKey);
+}
 
 function createVocabularyGroups() {
   const groups = {};
@@ -3395,6 +3838,7 @@ function personEntryFromFrontmatter(frontmatter, file) {
     role: firstPersonField(frontmatter, ["角色", "role", "岗位", "职能", "职位", "职称", "title"]),
     organization: firstPersonField(frontmatter, ["组织", "organization", "公司", "团队", "部门", "机构", "institute"]),
     aliases: splitPersonFieldValue(frontmatter["常用称呼"] || frontmatter["称呼"] || frontmatter.aliases || frontmatter.alias),
+    email: firstPersonField(frontmatter, ["邮箱", "邮箱地址", "邮件", "email", "mail", "e-mail"]),
     note: firstPersonField(frontmatter, ["备注", "note", "说明", "简介", "abstract"]),
     path: file && file.path ? file.path : "",
   };
@@ -3514,7 +3958,7 @@ function buildLocalPeopleContext(people) {
   const lines = [
     "## 本地人员上下文（仅本地模型使用）",
     "",
-    "以下信息来自用户本地维护的 LexVoice 人员信息表，仅在当前大模型服务为本地或局域网地址时提供。它不是声纹识别结果，只能作为整理纪要时的辅助上下文。",
+    "以下信息来自用户本地维护的 LexVoice 人员资料，仅在当前大模型服务为本地或局域网地址时提供。它不是声纹识别结果，只能作为整理纪要时的辅助上下文。",
     "",
   ];
   for (const person of list) {
@@ -3618,6 +4062,8 @@ properties:
     displayName: 常用称呼
   note.组织:
     displayName: 组织
+  note.邮箱:
+    displayName: 邮箱
   note.来源:
     displayName: 相关纪要
   note.最近更新:
@@ -3633,6 +4079,7 @@ views:
       - note.角色
       - note.常用称呼
       - note.组织
+      - note.邮箱
       - note.来源
       - note.最近更新
       - note.备注
@@ -3645,6 +4092,7 @@ views:
       - file.name
       - note.角色
       - note.组织
+      - note.邮箱
       - note.最近更新
     cardSize: 170
 `;
@@ -3658,6 +4106,7 @@ type: lexvoice-person
 角色: ""
 常用称呼: []
 组织: ""
+邮箱: ""
 来源: []
 最近更新: ""
 备注: ""
@@ -3672,6 +4121,7 @@ tags:
 - 角色：
 - 组织：
 - 常用称呼：
+- 邮箱：
 
 ${formatPersonRelatedBriefingsBase(mdFolder).trim()}
 
@@ -3985,7 +4435,7 @@ function findMatchingPersonEntry(people, suggestion) {
 
 function buildPeopleDirectorySuggestionPrompt(fileName, markdown) {
   const source = String(markdown || "").replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/m, "").slice(0, 16000);
-  return `请从下面这篇 LexVoice 纪要中，提取“适合维护到人员信息表”的候选人员资料。
+  return `请从下面这篇 LexVoice 纪要中，提取“适合维护为人员资料”的候选人员信息。
 
 文件名：${fileName}
 
@@ -4096,6 +4546,453 @@ async function generatePeopleDirectorySuggestions(plugin, file, markdown) {
   return suggestions;
 }
 
+function sanitizeSedimentText(value, limit) {
+  const text = String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\s+/g, " ")
+    .trim();
+  return limit && text.length > limit ? text.slice(0, limit).trim() : text;
+}
+
+function normalizeSedimentTextList(value, limit) {
+  const source = Array.isArray(value) ? value : String(value || "").split(/[\n;；、,，]+/);
+  const out = [];
+  const seen = new Set();
+  for (const item of source) {
+    const text = sanitizeSedimentText(item, limit || 80);
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+  }
+  return out;
+}
+
+function normalizeSedimentTodoSubtasks(value) {
+  const source = Array.isArray(value) ? value : String(value || "").split(/\n+/);
+  const out = [];
+  const seen = new Set();
+  for (const item of source || []) {
+    const raw = item && typeof item === "object"
+      ? (item.task || item.title || item.text || item.name || item.content)
+      : item;
+    const text = sanitizeSedimentText(raw, 120)
+      .replace(/^[-*]\s*/, "")
+      .replace(/^\[[ xX]\]\s*/, "")
+      .trim();
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
+function getSedimentSourceDateLabel(sourceFile) {
+  const basename = String(sourceFile && sourceFile.basename || "");
+  const m = basename.match(/^(\d{4}-\d{2}-\d{2})(?:\s+(\d{2})(\d{2}))?/);
+  if (!m) return "";
+  return m[2] ? `${m[1]} ${m[2]}:${m[3]}` : m[1];
+}
+
+function normalizeSedimentExtractionModel(model) {
+  const raw = model && typeof model === "object" ? model : {};
+  const out = {
+    people: normalizePeopleSuggestionsModel(raw.people || raw.persons || raw.peopleSuggestions || []),
+    hotwords: createVocabularyGroups(),
+    learningCards: [],
+    todos: [],
+  };
+  const hot = raw.hotwords || raw.vocabulary || raw.asrHotwords || {};
+  for (const def of VOCABULARY_SECTIONS) {
+    out.hotwords[def.key] = normalizeSedimentTextList(hot[def.key] || hot[def.title] || [], 80).slice(0, 18);
+  }
+  if (!out.hotwords.terms.length && Array.isArray(raw.terms)) {
+    out.hotwords.terms = normalizeSedimentTextList(raw.terms, 80).slice(0, 18);
+  }
+  const cards = Array.isArray(raw.learningCards) ? raw.learningCards : Array.isArray(raw.cards) ? raw.cards : Array.isArray(raw.concepts) ? raw.concepts : [];
+  for (const item of cards.slice(0, 12)) {
+    const title = sanitizeSedimentText(item && (item.title || item.name || item.concept || item.question), 80);
+    const summary = sanitizeSedimentText(item && (item.summary || item.description || item.answer), 600);
+    if (!title || !summary) continue;
+    const type = sanitizeSedimentText(item && (item.type || item.category || "概念"), 20) || "概念";
+    out.learningCards.push({
+      title,
+      type,
+      summary,
+      sourceTime: sanitizeSedimentText(item && (item.sourceTime || item.time || item.timestamp), 20),
+      tags: normalizeSedimentTextList(item && (item.tags || item.keywords), 24).slice(0, 8),
+      reusableLine: sanitizeSedimentText(item && (item.reusableLine || item.quote || item.sentence), 140),
+    });
+  }
+  const todos = Array.isArray(raw.todos) ? raw.todos : Array.isArray(raw.tasks) ? raw.tasks : [];
+  for (const item of todos.slice(0, 12)) {
+    const task = sanitizeSedimentText(item && (item.task || item.title || item.action), 140);
+    if (!task) continue;
+    const rawOwner = sanitizeSedimentText(item && (item.owner || item.assignee || item.person), 40);
+    const rawDue = sanitizeSedimentText(item && (item.due || item.deadline || item.date), 40);
+    out.todos.push({
+      task,
+      // 留空字符串，让 UI 端用"加责任人 / 加时间"虚线占位渲染；
+      // 同时把 LLM 误填的 "未指定" / "无" / "待定" / "TBD" 也视为空
+      owner: rawOwner && !/^(未指定|无|待定|TBD|N\/A|null|none)$/i.test(rawOwner) ? rawOwner : "",
+      due:   rawDue   && !/^(未指定|无|待定|TBD|N\/A|null|none)$/i.test(rawDue)   ? rawDue   : "",
+      sourceTime: sanitizeSedimentText(item && (item.sourceTime || item.time || item.timestamp), 20),
+      note: sanitizeSedimentText(item && (item.note || item.reason || item.evidence), 220),
+      subtasks: normalizeSedimentTodoSubtasks(item && (item.subtasks || item.children || item.steps || item.items)),
+    });
+  }
+  return out;
+}
+
+const SEDIMENT_PREEXTRACT_BEGIN = "LEXVOICE_SEDIMENT_BEGIN";
+const SEDIMENT_PREEXTRACT_END = "LEXVOICE_SEDIMENT_END";
+
+function buildSedimentPreExtractionInstruction() {
+  return `附加产物：沉淀预提取
+
+完成上面的纪要整理和标签注释后，请在本次回复最末尾额外输出一段“沉淀预提取 JSON”。这段 JSON 只给 LexVoice 插件解析，不属于正文。
+
+严格格式：
+<!--${SEDIMENT_PREEXTRACT_BEGIN}
+{
+  "people": [
+    {
+      "name": "姓名或最明确称呼",
+      "aliases": ["常用称呼"],
+      "role": "角色/职责",
+      "organization": "组织/部门/公司",
+      "note": "为什么值得入库或需要补充什么",
+      "confidence": "高/中/低",
+      "evidence": ["纪要中的依据短句"]
+    }
+  ],
+  "todos": [
+    {
+      "task": "具体行动",
+      "owner": "责任人；无法判断留空字符串",
+      "due": "截止时间；无法判断留空字符串",
+      "sourceTime": "如 12:34；没有则空",
+      "note": "依据或补充说明",
+      "subtasks": ["可拆分的子任务；没有则空数组"]
+    }
+  ],
+  "learningCards": [
+    {
+      "type": "概念/机制/案例/QA/追问/观点",
+      "title": "卡片标题",
+      "summary": "可独立复用的解释或摘要",
+      "sourceTime": "如 12:34；没有则空",
+      "tags": ["标签"],
+      "reusableLine": "可复用句；没有则空"
+    }
+  ],
+  "hotwords": {
+    "people": ["人名或称呼"],
+    "brands": ["品牌/机构"],
+    "projects": ["项目/产品/模型/系统"],
+    "terms": ["行业术语"],
+    "corrections": ["错误写法 => 标准写法"],
+    "other": ["其他专有名词"]
+  }
+}
+${SEDIMENT_PREEXTRACT_END}-->
+
+规则：
+- 只根据本次纪要内容提取，不要编造。
+- 四组字段必须都存在；没有内容时输出空数组或空对象字段。
+- 每组最多 8 条，宁缺毋滥。
+- 必须是合法 JSON，不要尾随逗号，不要 Markdown 代码块，不要解释文字。
+- 这段必须放在整篇回复最后。`;
+}
+
+function appendSedimentPreExtractionInstruction(prompt) {
+  return `${String(prompt || "").trimEnd()}\n\n---\n\n${buildSedimentPreExtractionInstruction()}`;
+}
+
+function getSedimentPreExtractionBlockPatterns(global) {
+  const flags = global ? "gi" : "i";
+  return [
+    new RegExp(`<!--\\s*${SEDIMENT_PREEXTRACT_BEGIN}\\s*([\\s\\S]*?)\\s*${SEDIMENT_PREEXTRACT_END}\\s*-->`, flags),
+    new RegExp(`<!--\\s*${SEDIMENT_PREEXTRACT_BEGIN}\\s*-->\\s*(?:\`\`\`json\\s*)?([\\s\\S]*?)(?:\\s*\`\`\`)?\\s*<!--\\s*${SEDIMENT_PREEXTRACT_END}\\s*-->`, flags),
+    /<!--\s*LEXVOICE_CARDS_BEGIN\s*-->\s*(?:```json\s*)?([\s\S]*?)(?:\s*```)?\s*<!--\s*LEXVOICE_CARDS_END\s*-->/gi,
+  ];
+}
+
+function stripSedimentPreExtractionBlocks(markdown) {
+  let text = String(markdown || "");
+  for (const pattern of getSedimentPreExtractionBlockPatterns(true)) {
+    text = text.replace(pattern, "");
+  }
+  return text.trimEnd();
+}
+
+function extractSedimentPreExtractionBlock(markdown) {
+  const text = String(markdown || "");
+  for (const pattern of getSedimentPreExtractionBlockPatterns(false)) {
+    const match = pattern.exec(text);
+    if (!match) continue;
+    const rawJson = String(match[1] || "").trim();
+    const parsed = extractJsonObject(rawJson);
+    if (!parsed) return { found: true, objects: null, cleaned: stripSedimentPreExtractionBlocks(text) };
+    return {
+      found: true,
+      objects: normalizeSedimentExtractionModel(parsed),
+      cleaned: stripSedimentPreExtractionBlocks(text),
+    };
+  }
+  return { found: false, objects: null, cleaned: text };
+}
+
+function formatSedimentPreExtractionBlock(objects) {
+  const normalized = normalizeSedimentExtractionModel(objects);
+  return [
+    `<!--${SEDIMENT_PREEXTRACT_BEGIN}`,
+    JSON.stringify(normalized),
+    `${SEDIMENT_PREEXTRACT_END}-->`,
+  ].join("\n");
+}
+
+function appendSedimentPreExtractionBlock(markdown, objects) {
+  if (!objects) return stripSedimentPreExtractionBlocks(markdown);
+  const cleaned = stripSedimentPreExtractionBlocks(markdown);
+  return `${cleaned}\n\n${formatSedimentPreExtractionBlock(objects)}\n`;
+}
+
+async function upsertSedimentPreExtractionBlockInFile(plugin, file, objects) {
+  if (!plugin || !file || !(file instanceof obsidian.TFile) || !objects) return false;
+  const content = await plugin.app.vault.cachedRead(file);
+  const next = appendSedimentPreExtractionBlock(content, objects);
+  if (next === content) return false;
+  await plugin.app.vault.modify(file, next);
+  return true;
+}
+
+function buildSedimentExtractionPrompt(fileName, markdown) {
+  const source = String(markdown || "")
+    .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/m, "")
+    .slice(0, 24000);
+  return `请从下面这篇 LexVoice 纪要中一次性提炼可沉淀信息。
+
+文件名：${fileName}
+
+总规则：
+- 只根据纪要原文提取，不要编造。
+- 同一篇纪要只做一次综合提炼：人员建议、待办、学习卡片、ASR 热词都在一个 JSON 里输出。
+- 没有明确依据的内容不要输出；闲聊、寒暄、无意义口头禅不要沉淀。
+- 人员建议只输出适合维护为人员资料的姓名、称呼、角色、组织或职责线索。
+- 待办只输出明确可执行事项。没有动作、责任或后续处理含义的句子不要写成待办。
+- 学习卡片只输出可复用的概念、机制、案例、QA、追问或观点；不要把普通段落摘要拆成卡片。
+- ASR 热词只输出后续录音里可能复现、且容易转写错的专名、术语或标准写法。
+- 不要输出 Markdown、代码块或解释文字，只输出合法 JSON。
+
+JSON 结构：
+{
+  "people": [
+    {
+      "name": "姓名或最明确称呼",
+      "aliases": ["常用称呼"],
+      "role": "角色/职责",
+      "organization": "组织/部门/公司",
+      "note": "为什么值得入库或需要补充什么",
+      "confidence": "高/中/低",
+      "evidence": ["纪要中的依据短句"]
+    }
+  ],
+  "todos": [
+    {
+      "task": "具体行动",
+      "owner": "责任人；无法判断留空字符串",
+      "due": "截止时间；无法判断留空字符串",
+      "sourceTime": "如 12:34；没有则空",
+      "note": "依据或补充说明"
+    }
+  ],
+  "learningCards": [
+    {
+      "type": "概念/机制/案例/QA/追问/观点",
+      "title": "卡片标题",
+      "summary": "可独立复用的解释或摘要",
+      "sourceTime": "如 12:34；没有则空",
+      "tags": ["标签"],
+      "reusableLine": "可复用句；没有则空"
+    }
+  ],
+  "hotwords": {
+    "people": ["人名或称呼"],
+    "brands": ["品牌/机构"],
+    "projects": ["项目/产品/模型/系统"],
+    "terms": ["行业术语"],
+    "corrections": ["错误写法 => 标准写法"],
+    "other": ["其他专有名词"]
+  }
+}
+
+纪要正文：
+${source}`;
+}
+
+async function generateSedimentObjects(plugin, file, markdown) {
+  if (!plugin.settings.llmApiKey && !isLocalLlmEndpoint(plugin.settings.llmEndpoint)) throw new Error("请先在 API 页配置大模型服务");
+  const sys = "你是 LexVoice 的纪要沉淀助手。你只根据当前纪要提炼结构化信息对象，输出合法 JSON，不编造，不泄露或要求任何配置。";
+  const raw = await callLlm(plugin, sys, buildSedimentExtractionPrompt(file && file.basename ? file.basename : "当前笔记", markdown), { timeoutMs: 90000 });
+  const objects = normalizeSedimentExtractionModel(extractJsonObject(raw));
+  const people = await loadPeopleDirectory(plugin);
+  objects.people = objects.people
+    .filter(item => !isPeopleSuggestionIgnored(plugin.settings, item))
+    .map(item => Object.assign(item, {
+      match: findMatchingPersonEntry(people, item),
+      sourcePath: file && file.path ? file.path : "",
+      sourceBasename: file && file.basename ? file.basename : "",
+    }));
+  return objects;
+}
+
+function buildLexVoiceObjectTags(baseTag, extraTags) {
+  const tags = [baseTag, "lexvoice"];
+  for (const tag of normalizeSedimentTextList(extraTags || [], 28)) {
+    const clean = tag.replace(/^#/, "").replace(/\s+/g, "-");
+    if (clean && !tags.includes(clean)) tags.push(clean);
+  }
+  return tags;
+}
+
+function formatSedimentLearningCardMarkdown(sourceFile, card) {
+  const sourceLink = makeFileWikiLink(sourceFile);
+  const fm = {
+    type: "lexvoice-learning-card",
+    "卡片类型": card.type || "概念",
+    "标题": card.title,
+    "摘要": card.summary,
+    "来源笔记": sourceLink,
+    "来源时间": card.sourceTime || "",
+    tags: buildLexVoiceObjectTags(LEARNING_CARD_TAG, [CONCEPT_CARD_TAG, ...(card.tags || [])]),
+  };
+  const body = [
+    `# ${card.title}`,
+    "",
+    `> [!summary] 摘要`,
+    `> ${card.summary}`,
+    "",
+    card.reusableLine ? `## 可复用句\n\n${card.reusableLine}\n` : "",
+    "## 来源",
+    "",
+    sourceLink ? `- ${sourceLink}${card.sourceTime ? ` · ${card.sourceTime}` : ""}` : "",
+    "",
+  ].filter(Boolean).join("\n");
+  return upsertFrontmatterInMarkdown(body, fm);
+}
+
+function formatSedimentTodoCardMarkdown(sourceFile, todo) {
+  const sourceLink = makeFileWikiLink(sourceFile);
+  const task = sanitizeSedimentText(todo && todo.task, 160) || "未命名待办";
+  const owner = sanitizeSedimentText(todo && todo.owner, 40) || "未指定";
+  const due = sanitizeSedimentText(todo && todo.due, 40) || "未指定";
+  const sourceTime = sanitizeSedimentText(todo && todo.sourceTime, 20);
+  const recordingDate = getSedimentSourceDateLabel(sourceFile);
+  const subtasks = normalizeSedimentTodoSubtasks(todo && (todo.subtasks || todo.children || todo.steps || todo.items));
+  const taskMeta = [
+    recordingDate ? `日期：${recordingDate}` : "",
+    `责任人：${owner}`,
+    sourceTime ? `时间：${sourceTime}` : "",
+    `事项：${task}`,
+    `截止：${due}`,
+  ].filter(Boolean).join(" ");
+  const taskLines = [`- [ ] ${taskMeta}`].concat(subtasks.map(item => `  - [ ] ${item}`));
+  const fm = {
+    type: "lexvoice-todo-card",
+    "事项": task,
+    "责任人": owner,
+    "截止": due,
+    "状态": "待办",
+    "录音日期": recordingDate,
+    "来源笔记": sourceLink,
+    "来源时间": sourceTime || "",
+    "子任务数": subtasks.length,
+    tags: buildLexVoiceObjectTags(TODO_CARD_TAG, []),
+  };
+  const body = [
+    `# ${task}`,
+    "",
+    taskLines.join("\n"),
+    "",
+    todo.note ? `## 依据\n\n${todo.note}\n` : "",
+    "## 来源",
+    "",
+    sourceLink ? `- ${sourceLink}${sourceTime ? ` · ${sourceTime}` : ""}` : "",
+    "",
+  ].filter(Boolean).join("\n");
+  return upsertFrontmatterInMarkdown(body, fm);
+}
+
+async function upsertLexVoiceObjectNote(plugin, folder, name, content) {
+  await plugin.ensureFolder(folder);
+  const path = obsidian.normalizePath(`${folder}/${sanitizeFilename(name) || "未命名"}.md`);
+  const file = plugin.app.vault.getAbstractFileByPath(path);
+  if (file instanceof obsidian.TFile) {
+    const previousContent = await plugin.app.vault.read(file);
+    await plugin.app.vault.modify(file, content);
+    return { file, path: file.path, created: false, previousContent };
+  }
+  const target = plugin.getAvailableVaultPath(path);
+  if (!target) throw new Error("无法生成可用的对象文件路径");
+  const createdFile = await plugin.app.vault.create(target, content);
+  return { file: createdFile, path: createdFile.path, created: true, previousContent: "" };
+}
+
+async function writeSedimentObjectCards(plugin, sourceFile, objects) {
+  const result = { learning: 0, todos: 0, entries: [] };
+  const baseStem = sanitizeFilename(sourceFile && sourceFile.basename || "LexVoice");
+  const learningFolder = obsidian.normalizePath(plugin.settings.learningCardsFolder || DEFAULT_SETTINGS.learningCardsFolder);
+  for (const card of objects.learningCards || []) {
+    const name = `${baseStem}-${sanitizeFilename(card.title) || "学习卡片"}`;
+    const entry = await upsertLexVoiceObjectNote(plugin, learningFolder, name, formatSedimentLearningCardMarkdown(sourceFile, card));
+    result.entries.push(Object.assign({ kind: "card" }, entry));
+    result.learning++;
+  }
+  // 待办：优先写入当日日记的"## 待办"段（Tasks / Dataview 双兼容），不再每条建新 MD。
+  // 兜底：若 Daily Notes 插件未启用，回退到旧的卡片文件方式。
+  const todos = objects.todos || [];
+  if (todos.length) {
+    const dailyFile = await ensureTodayDailyNoteFile(plugin.app);
+    if (dailyFile instanceof obsidian.TFile) {
+      let dailyContent = "";
+      try { dailyContent = await plugin.app.vault.read(dailyFile); } catch {}
+      for (const todo of todos) {
+        const todoId = getSedimentTodoId(todo);
+        const entry = buildSedimentTodoDailyEntry(todo, sourceFile, todoId);
+        const updated = upsertSedimentTodoInDailyNote(dailyContent, todoId, entry, plugin.settings);
+        const created = !dailyContent.includes(`<!-- lexvoice-todo:${todoId} -->`);
+        dailyContent = updated;
+        result.entries.push({
+          kind: "todo",
+          file: dailyFile,
+          path: dailyFile.path,
+          created,
+          previousContent: "",
+          todoId,
+          target: "daily",
+        });
+        result.todos++;
+      }
+      await plugin.app.vault.modify(dailyFile, dailyContent);
+    } else {
+      // 兜底：Daily Notes 插件未启用，回退到旧的卡片文件路径
+      const todoFolder = obsidian.normalizePath(plugin.settings.todoCardsFolder || DEFAULT_SETTINGS.todoCardsFolder);
+      for (const todo of todos) {
+        const name = `${baseStem}-${sanitizeFilename(todo.task) || "待办"}`;
+        const entry = await upsertLexVoiceObjectNote(plugin, todoFolder, name, formatSedimentTodoCardMarkdown(sourceFile, todo));
+        result.entries.push(Object.assign({ kind: "todo", target: "card" }, entry));
+        result.todos++;
+      }
+    }
+  }
+  return result;
+}
+
 function countVocabularyGroups(groups) {
   return flattenVocabularyGroups(groups).length;
 }
@@ -4192,9 +5089,9 @@ function formatVocabularyMarkdown(input, profile) {
   const moment = window.moment;
   const total = countVocabularyGroups(groups);
   const lines = [
-    "# LexVoice 领域词汇表",
+    "# LexVoice ASR 热词表",
     "",
-    "> 此文件由 LexVoice 维护。词汇表会作为 ASR 术语提示发送给你配置的转写服务；人员角色、称呼和组织关系请维护在 LexVoice 人员信息表，人员信息表不会自动作为 AI 上下文发送。",
+    "> 此文件由 LexVoice 维护，是“纪要信息对象”里专门服务语音转写的一类对象。它只保存术语、名称和易错写法，用于在转写时提示 ASR；人员关系、角色和长期备注请维护在人员资料中。",
     "",
     `- 行业 / 角色：${(profile && profile.industry) || "（未设置）"}`,
     `- 词汇数：${total}`,
@@ -4206,7 +5103,7 @@ function formatVocabularyMarkdown(input, profile) {
     "- 可以手动新增、删除或把词条移动到更准确的分区。",
     "- 以 `#` `>` `<!--` `//` 开头的行会被忽略。",
     "- 列表标记 `- *` `1.` 会被自动剥离。",
-    "- LexVoice 会读取所有分区，并带着分区名发送给 ASR 转写服务。",
+    "- LexVoice 会读取所有分区，并在调用转写服务时作为 ASR 热词提示使用。",
     "",
     "---",
     "",
@@ -4247,31 +5144,473 @@ const MODE_PREFIX_TO_KEY = {
   "圆桌讨论": "huddle",
 };
 
+function normalizeModeFromLabel(settings, label) {
+  const text = String(label || "").trim();
+  if (!text) return "";
+  if (isKnownPolishMode(settings, text)) return text;
+  if (MODE_PREFIX_TO_KEY[text]) return MODE_PREFIX_TO_KEY[text];
+  const normalized = text.replace(/^lexvoice\//i, "").trim();
+  if (isKnownPolishMode(settings, normalized)) return normalized;
+  if (MODE_PREFIX_TO_KEY[normalized]) return MODE_PREFIX_TO_KEY[normalized];
+  for (const [mode, name] of getVisibleModeEntries(settings, false)) {
+    if (text === name || normalized === name) return mode;
+  }
+  return "";
+}
+
+function detectRecentModeFromFrontmatter(settings, frontmatter) {
+  const fm = frontmatter && typeof frontmatter === "object" ? frontmatter : {};
+  const explicitMode = normalizeModeFromLabel(settings, fm.mode || fm["mode"] || "");
+  if (explicitMode) return explicitMode;
+  const explicitType = normalizeModeFromLabel(settings, fm["类型"] || fm.type || fm["模板"] || fm.template || "");
+  if (explicitType) return explicitType;
+  const tags = getFrontmatterTags(fm);
+  for (const tag of tags) {
+    const mode = normalizeModeFromLabel(settings, tag);
+    if (mode) return mode;
+  }
+  return "";
+}
+
+function stripRecentDatePrefix(basename) {
+  return String(basename || "")
+    .replace(/^\d{4}-\d{2}-\d{2}(?:\s+\d{4})?\s*/, "")
+    .replace(/^[-·\s]+/, "")
+    .trim();
+}
+
+function getRecentModePrefixEntries(settings) {
+  const entries = Object.entries(MODE_PREFIX_TO_KEY).map(([prefix, mode]) => [prefix, mode]);
+  for (const [mode, label] of getVisibleModeEntries(settings, false)) entries.push([label, mode]);
+  return entries
+    .filter(([prefix, mode]) => prefix && mode && isKnownPolishMode(settings, mode))
+    .sort((a, b) => String(b[0]).length - String(a[0]).length);
+}
+
+function detectRecentModeFromFilename(settings, basename) {
+  const stem = stripRecentDatePrefix(basename);
+  if (!stem) return "off";
+  const inlineTag = stem.match(/(?:^|·\s*)(访谈|会议|研讨会|研讨|沙龙|小会|手记|学习记录|学习|个人笔记|招聘评估|工作纪要|学术研讨|主题沙龙|访谈调研|圆桌讨论)(?=$|[-·\s])/);
+  if (inlineTag) return normalizeModeFromLabel(settings, inlineTag[1]) || "off";
+  for (const [prefix, mode] of getRecentModePrefixEntries(settings)) {
+    const re = new RegExp("^" + escapeRegExp(prefix) + "(?:[-·\\s]|$)");
+    if (re.test(stem)) return mode;
+  }
+  return "off";
+}
+
+function detectRecentNoteMode(plugin, file, frontmatter) {
+  const settings = plugin && plugin.settings ? plugin.settings : DEFAULT_SETTINGS;
+  const fromFrontmatter = detectRecentModeFromFrontmatter(settings, frontmatter);
+  const fromFilename = detectRecentModeFromFilename(settings, file && file.basename);
+  if (fromFrontmatter && fromFrontmatter !== "off") return fromFrontmatter;
+  if (fromFilename && fromFilename !== "off") return fromFilename;
+  return fromFrontmatter || fromFilename || "off";
+}
+
+const LEXVOICE_EN_WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+const RECENT_TIME_FILTER_OPTIONS = [
+  { id: "week", label: "本周" },
+  { id: "today", label: "今日" },
+  { id: "month", label: "本月" },
+  { id: "all", label: "全部日期" },
+];
+
+const RECENT_STATUS_FILTER_OPTIONS = [
+  { id: "all", label: "全部状态" },
+  { id: "pending", label: "待沉淀" },
+  { id: "failed", label: "转写失败" },
+  { id: "raw", label: "待整理" },
+  { id: "done", label: "已整理" },
+];
+
+const RECENT_TOPIC_FALLBACKS = ["招聘", "学习", "会议", "访谈", "PPT", "AI"];
+
+function formatRecentDurationLabel(raw) {
+  if (raw == null) return "";
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+    return formatElapsed(raw < 24 * 60 * 60 ? raw * 1000 : raw);
+  }
+  const text = String(raw || "").trim();
+  if (!text) return "";
+  const ms = parseLexVoiceDurationLabel(text);
+  return ms > 0 ? formatElapsed(ms) : text;
+}
+
+function normalizeRecentTopicToken(raw) {
+  let text = String(raw == null ? "" : raw).trim();
+  if (!text) return "";
+  text = text
+    .replace(/^#/, "")
+    .replace(/^主题[:：]/, "")
+    .replace(/^topic[:：]/i, "")
+    .trim();
+  if (!text || /^lexvoice(?:\/|$)/i.test(text)) return "";
+  if (/^(recording|transcript|meeting|learning-card)$/i.test(text)) return "";
+  if (text.length > 18) text = text.slice(0, 18);
+  return text;
+}
+
+function collectRecentTopicValues(value, out) {
+  if (value == null) return;
+  if (Array.isArray(value)) {
+    for (const item of value) collectRecentTopicValues(item, out);
+    return;
+  }
+  const text = String(value || "");
+  const parts = text.split(/[，,、;；\n\r]+|\s+#/).map((part) => part.trim()).filter(Boolean);
+  for (const part of parts.length ? parts : [text]) {
+    const token = normalizeRecentTopicToken(part);
+    if (token) out.add(token);
+  }
+}
+
+function collectRecentNoteTopics(frontmatter, title, mode) {
+  const topics = new Set();
+  const fm = frontmatter || {};
+  collectRecentTopicValues(fm["主题"], topics);
+  collectRecentTopicValues(fm.topic, topics);
+  collectRecentTopicValues(fm.topics, topics);
+  collectRecentTopicValues(fm.tags, topics);
+  collectRecentTopicValues(fm["tags"], topics);
+
+  const source = `${title || ""} ${mode || ""}`;
+  if (mode === "recruit" || /招聘|面试|JD|HR|候选人|人才/.test(source)) topics.add("招聘");
+  if (mode === "learning" || /学习|课程|讲座|视频|B站|YouTube/i.test(source)) topics.add("学习");
+  if (["meeting", "huddle", "seminar"].includes(mode) || /会议|纪要|同步|复盘|研讨/.test(source)) topics.add("会议");
+  if (mode === "interview" || /访谈|调研|用户研究/.test(source)) topics.add("访谈");
+  if (/PPT|幻灯片|AIPPT/i.test(source)) topics.add("PPT");
+  if (/\bAI\b|大模型|LLM|智能/.test(source)) topics.add("AI");
+  return Array.from(topics).slice(0, 8);
+}
+
+function getRecentPendingDepositPathSet(plugin) {
+  const pending = normalizePeopleSuggestionCache(plugin && plugin.settings && plugin.settings.peopleSuggestionCache).pending || [];
+  const set = new Set();
+  for (const record of pending) {
+    const path = record && (record.sourcePath || record.source);
+    if (path) set.add(obsidian.normalizePath(path));
+  }
+  return set;
+}
+
+function getRecentNoteQuickStatus(plugin, file, pendingPathSet) {
+  const queueState = getRecentQueueProcessingState(plugin, file);
+  if (queueState) return queueState.kind;
+  const path = file && file.path ? obsidian.normalizePath(file.path) : "";
+  if (path && pendingPathSet && pendingPathSet.has(path)) return "pending";
+  const frontmatter = ((plugin.app.metadataCache.getFileCache(file) || {}).frontmatter) || {};
+  const statusText = String(frontmatter.status || frontmatter["状态"] || "").trim();
+  if (/失败|failed/i.test(statusText)) return "failed";
+  if (/待|草稿|未整理|raw|draft/i.test(statusText)) return "raw";
+  return "done";
+}
+
+function getMarkdownFilesUnderFolder(app, folderPath) {
+  const norm = obsidian.normalizePath(String(folderPath || "").trim());
+  const folder = app && app.vault ? app.vault.getAbstractFileByPath(norm) : null;
+  if (!(folder instanceof obsidian.TFolder)) return [];
+  const prefix = norm ? norm + "/" : "";
+  return app.vault.getMarkdownFiles()
+    .filter((file) => {
+      const path = obsidian.normalizePath(file && file.path || "");
+      return path.startsWith(prefix);
+    });
+}
+
 function getRecentNotes(plugin, limit) {
   const norm = obsidian.normalizePath(plugin.settings.mdFolder);
   const folder = plugin.app.vault.getAbstractFileByPath(norm);
   if (!(folder instanceof obsidian.TFolder)) return [];
   const moment = window.moment;
+  const currentYear = moment ? moment().year() : new Date().getFullYear();
   const items = [];
-  for (const f of folder.children) {
+  const pendingPathSet = getRecentPendingDepositPathSet(plugin);
+  for (const f of getMarkdownFilesUnderFolder(plugin.app, norm)) {
     if (!(f instanceof obsidian.TFile) || f.extension !== "md") continue;
     const m = f.basename.match(/^(\d{4}-\d{2}-\d{2})(?:\s+(\d{4}))?/);
     if (!m) continue;
     const stamp = m[2] ? `${m[1]} ${m[2]}` : m[1];
     const t = moment(stamp, m[2] ? "YYYY-MM-DD HHmm" : "YYYY-MM-DD", true);
     if (!t.isValid()) continue;
-    let mode = "off";
-    const tagMatch = f.basename.match(/·\s*(访谈|会议|研讨会|研讨|沙龙|小会|手记|学习记录|学习|个人笔记|招聘评估)/);
-    if (tagMatch) mode = MODE_PREFIX_TO_KEY[tagMatch[1]] || "off";
+    const frontmatter = ((plugin.app.metadataCache.getFileCache(f) || {}).frontmatter) || {};
+    const mode = detectRecentNoteMode(plugin, f, frontmatter);
+    const meta = getModeMeta(plugin.settings, mode) || MODE_META.off;
+    let title = stripRecentDatePrefix(f.basename);
+    if (meta && meta.prefix) {
+      title = title.replace(new RegExp("^" + escapeRegExp(meta.prefix) + "[-·\\s]*"), "").trim();
+    }
+    if (!title) title = f.basename;
+    const weekday = LEXVOICE_EN_WEEKDAYS[t.day()] || t.format("dddd");
+    const sameYear = t.year() === currentYear;
+    const durationLabel = formatRecentDurationLabel(frontmatter["时长"] || frontmatter.duration || frontmatter["duration"]);
+    const topics = collectRecentNoteTopics(frontmatter, title, mode);
+    const quickStatus = getRecentNoteQuickStatus(plugin, f, pendingPathSet);
     items.push({
       file: f,
       timestamp: t.valueOf(),
       mode,
-      displayTime: t.format(m[2] ? "MM-DD HH:mm" : "MM-DD"),
+      title,
+      topics,
+      quickStatus,
+      dateKey: t.format("YYYY-MM-DD"),
+      groupTitle: weekday,
+      axisPrimary: sameYear ? t.format("DD") : t.format("YYYY"),
+      axisSecondary: sameYear ? t.format("M月") : t.format("M月D日"),
+      displayTime: t.format(m[2] ? "HH:mm" : "MM-DD"),
+      durationLabel,
     });
   }
   items.sort((a, b) => b.timestamp - a.timestamp);
-  return items.slice(0, limit || 5);
+  return items.slice(0, limit || 24);
+}
+
+function isSameVaultPath(a, b) {
+  return !!a && !!b && obsidian.normalizePath(a) === obsidian.normalizePath(b);
+}
+
+function getQueueTasksForMarkdown(plugin, file, opts = {}) {
+  if (!plugin || !plugin.queue || !Array.isArray(plugin.queue.tasks) || !(file instanceof obsidian.TFile)) return [];
+  const mdPath = obsidian.normalizePath(file.path);
+  const types = opts.types && opts.types.length ? new Set(opts.types) : null;
+  const statuses = opts.statuses && opts.statuses.length ? new Set(opts.statuses) : null;
+  return plugin.queue.tasks.filter((task) => {
+    if (!task || !task.mdPath || !isSameVaultPath(task.mdPath, mdPath)) return false;
+    if (types && !types.has(task.type)) return false;
+    const status = task.status || "pending";
+    if (statuses && !statuses.has(status)) return false;
+    if (opts.failedOnly && !["failed", "missing"].includes(status)) return false;
+    return true;
+  });
+}
+
+function clampLexVoiceProgress(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function getSessionWorkProgressState(session, recorderState) {
+  if (!session) return null;
+  const progress = session.workProgress || session.aiProgress || {};
+  const pct = clampLexVoiceProgress(progress.percent);
+  const label = String(progress.label || "").trim();
+  const detail = String(progress.detail || "").trim();
+  if (session.finalizing) {
+    return {
+      kind: "processing",
+      label: label || "AI 整理中",
+      title: detail || "正在调用大模型整理纪要",
+      detail: detail || "正在调用大模型整理纪要",
+      percent: pct == null ? 65 : pct,
+    };
+  }
+  if (recorderState === "recording") {
+    return {
+      kind: "processing",
+      label: "录音中",
+      title: "正在录音；分段转写会陆续写入纪要",
+      detail: "正在录音；分段转写会陆续写入纪要",
+      percent: pct,
+    };
+  }
+  if (recorderState === "paused") {
+    return {
+      kind: "processing",
+      label: "已暂停",
+      title: "录音已暂停，继续后会接着处理",
+      detail: "录音已暂停，继续后会接着处理",
+      percent: pct,
+    };
+  }
+  return {
+    kind: "processing",
+    label: label || "转写中",
+    title: detail || "正在处理最后的音频片段",
+    detail: detail || "正在处理最后的音频片段",
+    percent: pct,
+  };
+}
+
+function getActiveSessionProcessingState(plugin, file) {
+  const session = plugin && plugin.session;
+  if (!session || !(file instanceof obsidian.TFile) || !session.mdPath) return null;
+  if (!isSameVaultPath(session.mdPath, file.path)) return null;
+  const recorderState = plugin.recorder && plugin.recorder.state;
+  return getSessionWorkProgressState(session, recorderState);
+}
+
+function getRecentQueueProcessingState(plugin, file) {
+  const liveState = getActiveSessionProcessingState(plugin, file);
+  if (liveState) return liveState;
+  const tasks = getQueueTasksForMarkdown(plugin, file, { types: ["transcribe", "merge"] });
+  if (!tasks.length) return null;
+  const statusOf = (task) => String((task && task.status) || "pending");
+  const transcribeTasks = tasks.filter((task) => task && task.type === "transcribe");
+  const mergeTasks = tasks.filter((task) => task && task.type === "merge");
+  const failedStatuses = new Set(["failed", "missing"]);
+  const activeStatuses = new Set(["running", "processing"]);
+  const blockedMergeTask = mergeTasks.find((task) => statusOf(task) === "blocked");
+  if (blockedMergeTask) {
+    const serviceBlocked = isLlmServiceBlockedError(blockedMergeTask.lastError || "");
+    const configBlocked = isLlmConfigError(blockedMergeTask.lastError || "");
+    return {
+      kind: "raw",
+      label: configBlocked ? "待配置" : "AI 不可用",
+      title: configBlocked
+        ? "AI 整理需要先补齐大模型配置；补齐后可重新整理"
+        : (serviceBlocked ? "大模型服务端或账号池暂不可用；可切换模型/端点后重试" : "AI 整理请求不可自动重试；请检查错误后手动重试"),
+    };
+  }
+  if (transcribeTasks.some((task) => failedStatuses.has(statusOf(task)))) {
+    return {
+      kind: "failed",
+      label: "转写失败",
+      title: "有音频片段转写失败；可点击重试转写片段",
+    };
+  }
+  if (mergeTasks.some((task) => activeStatuses.has(statusOf(task)))) {
+    return {
+      kind: "processing",
+      label: "整理中",
+      title: "转写已完成，正在调用大模型整理纪要",
+      percent: 65,
+    };
+  }
+  if (transcribeTasks.some((task) => activeStatuses.has(statusOf(task)))) {
+    return {
+      kind: "processing",
+      label: "转写中",
+      title: "音频片段正在发送到转写服务",
+    };
+  }
+  if (transcribeTasks.some((task) => statusOf(task) === "pending")) {
+    return {
+      kind: "processing",
+      label: "待转写",
+      title: "转写任务正在队列中等待处理",
+    };
+  }
+  if (mergeTasks.some((task) => statusOf(task) === "pending")) {
+    return {
+      kind: "processing",
+      label: "待整理",
+      title: "转写已进入后续整理队列",
+    };
+  }
+  if (mergeTasks.some((task) => failedStatuses.has(statusOf(task)))) {
+    return {
+      kind: "raw",
+      label: "整理失败",
+      title: "AI 整理失败；原始转写仍可重新整理",
+    };
+  }
+  return null;
+}
+
+function stripLexVoiceFrontmatterSimple(text) {
+  return String(text || "").replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+}
+
+// \u5265\u6389 <details>...</details> \u6298\u53E0\u5757\uFF08\u542B\u5D4C\u5957\uFF09\uFF0C\u7528\u4E8E\u5224\u5B9A\u5F53\u524D\u6001\u65F6\u8DF3\u8FC7\u5386\u53F2\u5F52\u6863\u3002
+// \u5386\u53F2\u5F52\u6863\u91CC\u6B8B\u7559\u7684\u5931\u8D25\u6807\u8BB0\u4E0D\u5E94\u8BA9"\u5F53\u524D\u5DF2\u6210\u529F"\u7684\u7EAA\u8981\u7EE7\u7EED\u4EAE\u8B66\u544A\u3002
+function stripArchivedDetailsBlocks(text) {
+  let s = String(text || "");
+  // \u53CD\u590D\u6D88\u6700\u5185\u5C42 details\uFF0C\u907F\u514D\u5D4C\u5957\uFF08"\u4E0A\u4E00\u7248\u7EAA\u8981" \u91CC\u5D4C\u53E6\u4E00\u4E2A "\u4E0A\u4E00\u7248\u7EAA\u8981"\uFF09\u6F0F\u5265
+  for (let i = 0; i < 16; i++) {
+    const next = s.replace(/<details\b[^>]*>(?:(?!<details\b)[\s\S])*?<\/details>/gi, "");
+    if (next === s) break;
+    s = next;
+  }
+  return s;
+}
+
+function normalizeRecentNoteMeaningfulText(text) {
+  return String(text || "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/!\[\[[^\]]+\]\]/g, "")
+    .replace(/^#\s+.*$/gm, "")
+    .replace(/^>\s*\[![^\]]+\].*$/gm, "")
+    .replace(/^\s*(开始|时间|时长|模式|分段|模型|状态)[:：].*$/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function noteHasSuccessfulLlmBriefing(content) {
+  const fullText = String(content || "");
+  // 关键：先剥掉历史归档 <details>，只看当前可见正文。
+  // 否则"重新整理"成功后，旧版本里的失败标记会让本函数永远 false → 警告永远不消。
+  const text = stripArchivedDetailsBlocks(fullText);
+
+  // 新格式（v3 之后）：## ✨ 当前纪要（…）
+  const currentMatch = text.match(/(?:^|\n)##\s+✨\s+当前纪要[^\n]*\n+([\s\S]*?)(?:\n---|\n##\s|$)/);
+  if (currentMatch) {
+    const body = currentMatch[1] || "";
+    const meaningful = normalizeRecentNoteMeaningfulText(body);
+    if (meaningful.length > 60 && !/合并润色失败|AI 整理失败|_\[无输出\]_|_\[转写失败/.test(body)) return true;
+  }
+
+  const rawMatch = /\n##\s+📁\s+原始材料/.exec(text);
+  if (rawMatch) {
+    const beforeRaw = stripLexVoiceFrontmatterSimple(text.slice(0, rawMatch.index));
+    const meaningful = normalizeRecentNoteMeaningfulText(beforeRaw);
+    if (meaningful.length > 60 && !/合并润色失败|AI 整理失败|_\[无输出\]_/.test(beforeRaw)) return true;
+  }
+
+  const mergeMatch = text.match(/(?:^|\n)##\s+✨\s+整合版[^\n]*\n+([\s\S]*?)(?:\n---|\n##\s|$)/);
+  if (mergeMatch) {
+    const body = mergeMatch[1] || "";
+    const meaningful = normalizeRecentNoteMeaningfulText(body);
+    if (meaningful.length > 40 && !/合并润色失败|AI 整理失败|_\[无输出\]_/.test(body)) return true;
+  }
+
+  // frontmatter 兜底：状态已整理 且 *当前可见正文里* 没有失败标记
+  return /(?:^|\n)(?:status:\s*(?:published|done|completed)|状态:\s*已整理)\s*$/im.test(fullText)
+    && !/合并润色失败（已加入重试队列）|AI 整理失败/.test(text);
+}
+
+function noteHasUsableRawTranscriptDespiteFailures(content) {
+  const cleaned = String(content || "")
+    .replace(/_\[转写失败(?:（已进入重试队列）)?：[^\]]*\]_/g, "")
+    .replace(/_\[合并润色失败（已加入重试队列）：[^\]]*\]_/g, "")
+    .replace(/_\[AI 整理失败：[^\]]*\]_/g, "")
+    .replace(/_\[(?:此段暂无有效转写|此段无内容|无输出)\]_/g, "");
+  const meaningful = normalizeRecentNoteMeaningfulText(stripLexVoiceFrontmatterSimple(cleaned));
+  return meaningful.length > 160 && (/<!--\s*lexvoice-segments-start/.test(content) || /^###\s+段落\s+\d+/m.test(content));
+}
+
+function getRecentNoteProcessingState(content) {
+  const fullText = String(content || "");
+  if (noteHasSuccessfulLlmBriefing(fullText)) return null;
+  // 关键：失败标记的匹配同样要先剥掉 <details> 历史归档，
+  // 避免旧版本里的 "_[合并润色失败...]_" 永久把当前纪要标成警告态。
+  const visibleText = stripArchivedDetailsBlocks(fullText);
+  if (/合并润色失败|AI 整理失败|转写失败|已进入重试队列|转写重试|Transcription failed|transcribe failed/i.test(visibleText)) {
+    const hasMergeFailure = /合并润色失败|AI 整理失败/i.test(visibleText);
+    if (noteHasUsableRawTranscriptDespiteFailures(visibleText)) {
+      return {
+        kind: "raw",
+        label: hasMergeFailure ? "整理失败" : "待整理",
+        title: hasMergeFailure
+          ? "AI 整理失败；原始转写仍可重新整理生成最终纪要"
+          : "原始转写里有失败片段，但已没有可重试任务；可以右键重新整理生成最终纪要",
+      };
+    }
+    return {
+      kind: "failed",
+      label: "转写失败",
+      title: "这篇纪要仍含有转写或整理失败标记",
+    };
+  }
+  if (/<!--\s*lexvoice-segments-start/.test(visibleText) || /^###\s+段落\s+\d+/m.test(visibleText)) {
+    return {
+      kind: "raw",
+      label: "待整理",
+      title: "这篇纪要目前主要是原始分段转写，还没有 LLM 整理版",
+    };
+  }
+  return null;
 }
 
 function getAudioDurationMs(blob) {
@@ -4402,6 +5741,7 @@ async function transcribeImportAudioChunk(plugin, blob, mime, concurrency) {
 }
 
 const AUDIO_EXT = new Set(["webm", "mp3", "m4a", "aac", "acc", "wav", "ogg", "flac", "mp4", "mpeg", "mpga", "oga"]);
+const TEXT_IMPORT_EXT = new Set(["md", "txt"]);
 function mimeFromExt(ext) {
   const e = (ext || "").toLowerCase();
   if (e === "m4a" || e === "mp4") return "audio/mp4";
@@ -4417,6 +5757,174 @@ function mimeFromExt(ext) {
 function shouldTranscodeImportedAudio(file, mime) {
   const ext = String((file && file.extension) || "").toLowerCase();
   return ext === "aac" || ext === "acc" || String(mime || "").toLowerCase().includes("audio/aac");
+}
+
+function stripLexVoiceImportAppendices(text) {
+  return stripSedimentPreExtractionBlocks(String(text || ""))
+    .replace(/<details>\s*<summary>\s*导入文本信息[\s\S]*?<\/details>/gi, "\n")
+    .replace(/<details>\s*<summary>\s*导入文本原文[\s\S]*?<\/details>/gi, "\n")
+    .replace(/<details>\s*<summary>\s*录音中实时大纲[\s\S]*?<\/details>/gi, "\n")
+    .replace(/<details>\s*<summary>\s*回听时间轴[\s\S]*?<\/details>/gi, "\n")
+    .replace(/<details>\s*<summary>\s*分段原始转写[\s\S]*?<\/details>/gi, "\n");
+}
+
+function cleanImportedTextForPrompt(text) {
+  return String(text || "")
+    .replace(/<!--[\s\S]*?-->/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function extractIntegratedLexVoiceBriefing(text) {
+  const source = String(text || "");
+  const matches = [...source.matchAll(/^##\s+(?:✨\s*)?整合版[^\n]*$/gm)];
+  if (!matches.length) return "";
+  const match = matches[matches.length - 1];
+  const start = (match.index || 0) + match[0].length;
+  const tail = source.slice(start);
+  const stopPatterns = [
+    /\n<details>\s*<summary>\s*导入文本信息/i,
+    /\n<details>\s*<summary>\s*导入文本原文/i,
+    /\n<!--\s*LEXVOICE_SEDIMENT_BEGIN/i,
+  ];
+  const stop = stopPatterns
+    .map((re) => {
+      const m = re.exec(tail);
+      return m ? m.index : -1;
+    })
+    .filter((idx) => idx >= 0)
+    .sort((a, b) => a - b)[0];
+  return cleanImportedTextForPrompt(stop >= 0 ? tail.slice(0, stop) : tail);
+}
+
+function extractLexVoiceRawTranscriptForImport(text) {
+  const segments = extractLexVoiceTranscriptSegments(text);
+  if (!segments.length) return "";
+  return segments
+    .map((seg, i) => {
+      const label = Number.isFinite(seg.index) ? seg.index + 1 : i + 1;
+      return [`### 原始转写 ${label}`, "", String(seg.text || "").trim()].join("\n");
+    })
+    .filter((block) => block.trim())
+    .join("\n\n");
+}
+
+function stripImportedTextSource(text) {
+  const withoutFrontmatter = String(text || "")
+    .replace(/^\uFEFF/, "")
+    .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "")
+    .trim();
+  if (!withoutFrontmatter) return "";
+
+  const withoutAppendices = stripLexVoiceImportAppendices(withoutFrontmatter);
+  const hasLexVoiceMarker = /<!--\s*lexvoice-session(?::|\s*--)/.test(withoutFrontmatter)
+    || /<!--\s*lexvoice-segments-start/.test(withoutFrontmatter)
+    || /##\s+(?:✨\s*)?整合版/.test(withoutFrontmatter);
+  if (hasLexVoiceMarker) {
+    const integrated = extractIntegratedLexVoiceBriefing(withoutAppendices);
+    if (integrated) return integrated;
+    const rawTranscript = extractLexVoiceRawTranscriptForImport(withoutFrontmatter);
+    if (rawTranscript) return rawTranscript;
+  }
+
+  return cleanImportedTextForPrompt(withoutAppendices);
+}
+
+function makeImportTextCheckboxId(path, index) {
+  const source = String(path || "");
+  let hash = 2166136261;
+  for (let i = 0; i < source.length; i++) {
+    hash ^= source.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `lv-import-text-${Math.max(0, Number(index) || 0)}-${(hash >>> 0).toString(36)}`;
+}
+
+function buildImportedTextSegment(source, index) {
+  const file = source && source.file;
+  const name = source && source.name ? source.name : (file && file.name) || `文本 ${index + 1}`;
+  const path = source && source.path ? source.path : (file && file.path) || "";
+  const link = path ? `[[${path}|${name}]]` : name;
+  const body = String(source && source.text || "").trim();
+  return [`【文本来源 ${index + 1}：${link}】`, "", body].join("\n");
+}
+
+function splitImportedTextIntoNormalSegments(sources) {
+  const result = [];
+  let offsetMs = 0;
+  const virtualSegmentMs = 5 * 60 * 1000;
+  for (const source of sources || []) {
+    const text = buildImportedTextSegment(source, result.length);
+    if (!text.trim()) continue;
+    result.push({
+      index: result.length,
+      startOffsetMs: offsetMs,
+      endOffsetMs: offsetMs + virtualSegmentMs,
+      audioName: "",
+      audioPath: "",
+      sourceName: source.name,
+      sourcePath: source.path,
+      rawText: source.text,
+      text,
+      error: null,
+      isFinal: false,
+    });
+    offsetMs += virtualSegmentMs;
+  }
+  if (result.length) result[result.length - 1].isFinal = true;
+  return result;
+}
+
+function isTextImportSession(session) {
+  return !!(session && session.source === "text-import");
+}
+
+function buildTextImportInfoDetails(session, modeLabel, model) {
+  if (!isTextImportSession(session)) return "";
+  const lines = [];
+  if (session.startedAt && window.moment) lines.push(`- 时间：${window.moment(session.startedAt).format("YYYY-MM-DD HH:mm:ss")}`);
+  if (modeLabel) lines.push(`- 模式：${modeLabel}`);
+  const sources = Array.isArray(session.textImportSources) ? session.textImportSources : [];
+  lines.push(`- 来源文件：${sources.length || (session.segments || []).length || 1}`);
+  if (model) lines.push(`- 模型：${model}`);
+  if (sources.length) {
+    lines.push("", "来源：");
+    for (const item of sources) {
+      const name = item.name || (item.path ? item.path.split("/").pop() : "") || "未命名文本";
+      lines.push(`- ${item.path ? `[[${item.path}|${name}]]` : name}`);
+    }
+  }
+  return [
+    "<details>",
+    "<summary>导入文本信息</summary>",
+    "",
+    lines.join("\n"),
+    "",
+    "</details>",
+  ].join("\n");
+}
+
+function buildTextImportSourceDetails(session) {
+  if (!isTextImportSession(session)) return "";
+  const segments = Array.isArray(session.segments) ? session.segments : [];
+  if (!segments.length) return "";
+  const lines = [];
+  segments.forEach((seg, i) => {
+    const name = seg.sourceName || `文本 ${i + 1}`;
+    const path = seg.sourcePath || "";
+    const link = path ? `[[${path}|${name}]]` : name;
+    const body = String(seg.rawText || seg.text || "").trim() || "_[此文本来源为空]_";
+    lines.push(`### ${i + 1}. ${link}`, "", body, "");
+  });
+  return [
+    "<details>",
+    `<summary>导入文本原文（${segments.length} 个来源）</summary>`,
+    "",
+    lines.join("\n").trim(),
+    "",
+    "</details>",
+  ].join("\n");
 }
 
 // ============================================================
@@ -4996,6 +6504,9 @@ class RecorderService {
     this.ticker = null;
     this.levelMeters = [];
     this.audioLevel = 0;
+    this.issue = null;
+    this.stopping = false;
+    this.streamInterruptionCleanup = null;
   }
   on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   emit() { const info = this.getInfo(); for (const fn of this.listeners) fn(info); }
@@ -5009,6 +6520,7 @@ class RecorderService {
       segmentIndex: this.segmentIndex,
       audioLevel: this.audioLevel || 0,
       sourceLevels: this.getSourceLevels(),
+      issue: this.issue || null,
     };
   }
   async start(options) {
@@ -5017,6 +6529,9 @@ class RecorderService {
     const captureMode = resolveRuntimeAudioInputMode((options && options.captureMode) || "mic");
     this.stream = await this.acquireStream(captureMode);
     if (!this.stream) throw new Error("未取得可用的麦克风录音流。请检查系统麦克风权限。");
+    this.issue = null;
+    this.stopping = false;
+    this.attachStreamInterruptionHandlers(this.stream);
     this.mime = pickMimeType();
     this.segmentIndex = 0;
     this.segmentStartOffsetMs = 0;
@@ -5040,20 +6555,87 @@ class RecorderService {
     this.ticker = window.setInterval(() => this.tick(), 160);
     this.emit();
   }
+  attachStreamInterruptionHandlers(stream) {
+    if (this.streamInterruptionCleanup) {
+      try { this.streamInterruptionCleanup(); } catch {}
+      this.streamInterruptionCleanup = null;
+    }
+    const tracks = stream && typeof stream.getTracks === "function" ? stream.getTracks() : [];
+    const cleanups = [];
+    const onEnded = () => this.handleStreamInterrupted("ended");
+    const onMute = () => {
+      window.setTimeout(() => {
+        if (this.stopping || this.state === "idle") return;
+        const liveTracks = this.stream && typeof this.stream.getAudioTracks === "function" ? this.stream.getAudioTracks() : [];
+        if (liveTracks.length && liveTracks.every((track) => track.readyState === "ended")) this.handleStreamInterrupted("muted");
+      }, 600);
+    };
+    for (const track of tracks) {
+      try { track.addEventListener("ended", onEnded); cleanups.push(() => track.removeEventListener("ended", onEnded)); } catch {}
+      try { track.addEventListener("mute", onMute); cleanups.push(() => track.removeEventListener("mute", onMute)); } catch {}
+    }
+    this.streamInterruptionCleanup = () => cleanups.forEach((fn) => { try { fn(); } catch {} });
+  }
+  handleStreamInterrupted(reason) {
+    if (this.stopping || this.state === "idle" || (this.issue && this.issue.kind === "microphone")) return;
+    const stoppedAtMs = this.getInfo().elapsed;
+    this.issue = makeRecordingIssue("microphone", {
+      reason,
+      stoppedAtMs,
+      message: "系统在录音过程中收回了麦克风权限。",
+    });
+    this.state = "paused";
+    this.pausedAt = Date.now();
+    try {
+      if (this.plugin && typeof this.plugin.setRecordingIssue === "function") {
+        this.plugin.setRecordingIssue("microphone", this.issue);
+      }
+    } catch {}
+    this.emit();
+  }
   getStreamLabel(stream, fallback) {
     const track = stream && stream.getAudioTracks ? stream.getAudioTracks()[0] : null;
     return (track && track.label) || fallback;
   }
   createLevelMeter(kind, icon, label, stream) {
     const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx || !stream) return null;
-    const ctx = new Ctx();
-    const source = ctx.createMediaStreamSource(stream);
+    if (!Ctx || !stream) {
+      console.warn(`[LexVoice][meter] ${kind} 创建失败：no AudioContext / no stream`, { hasCtx: !!Ctx, hasStream: !!stream });
+      return null;
+    }
+    let ctx;
+    try { ctx = new Ctx(); }
+    catch (e) {
+      console.error(`[LexVoice][meter] ${kind} new AudioContext 失败`, e);
+      return null;
+    }
+    let source;
+    try { source = ctx.createMediaStreamSource(stream); }
+    catch (e) {
+      console.error(`[LexVoice][meter] ${kind} createMediaStreamSource 失败`, e, {
+        tracks: stream.getAudioTracks().map(t => ({ label: t.label, enabled: t.enabled, muted: t.muted, readyState: t.readyState })),
+      });
+      try { ctx.close(); } catch {}
+      return null;
+    }
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 1024;
     analyser.smoothingTimeConstant = 0.56;
     source.connect(analyser);
-    if (ctx.state === "suspended" && ctx.resume) ctx.resume().catch(() => {});
+    if (ctx.state === "suspended" && ctx.resume) {
+      ctx.resume().then(
+        () => console.log(`[LexVoice][meter] ${kind} AudioContext resumed`),
+        (e) => console.warn(`[LexVoice][meter] ${kind} AudioContext resume 失败`, e)
+      );
+    }
+    const tracks = stream.getAudioTracks();
+    console.log(`[LexVoice][meter] ${kind} 已挂载：`, {
+      label,
+      ctxState: ctx.state,
+      sampleRate: ctx.sampleRate,
+      trackCount: tracks.length,
+      tracks: tracks.map(t => ({ label: t.label, enabled: t.enabled, muted: t.muted, readyState: t.readyState })),
+    });
     return {
       kind,
       icon,
@@ -5065,6 +6647,7 @@ class RecorderService {
       freqData: new Uint8Array(analyser.frequencyBinCount),
       level: 0,
       bars: new Array(12).fill(0),
+      _resumeAttempts: 0,
     };
   }
   startLevelMeter(stream) {
@@ -5110,6 +6693,17 @@ class RecorderService {
     let maxLevel = 0;
     for (const meter of this.levelMeters) {
       try {
+        // 自愈：AudioContext 如果被浏览器挂起（autoplay 限制 / 长时间无交互），
+        // 分析器读不到数据，电平条会假装"有输入"但每个频段全 0。这里每若干帧重试 resume。
+        if (meter.context && meter.context.state === "suspended" && meter.context.resume) {
+          meter._resumeAttempts = (meter._resumeAttempts || 0) + 1;
+          if (meter._resumeAttempts <= 30 || meter._resumeAttempts % 60 === 0) {
+            meter.context.resume().then(
+              () => console.log(`[LexVoice][meter] ${meter.kind} 重新 resume 成功（尝试 ${meter._resumeAttempts}）`),
+              () => {}
+            );
+          }
+        }
         meter.analyser.getByteTimeDomainData(meter.timeData);
         meter.analyser.getByteFrequencyData(meter.freqData);
         let sum = 0;
@@ -5325,6 +6919,7 @@ class RecorderService {
   }
   async stop() {
     if (this.state === "idle") return null;
+    this.stopping = true;
     const elapsedAtStop = this.getInfo().elapsed;
     const startOffset = this.segmentStartOffsetMs;
     const index = this.segmentIndex;
@@ -5340,10 +6935,16 @@ class RecorderService {
     const master = await this.stopMasterRecorder(finalBlob, mime);
 
     this.stopLevelMeter();
+    if (this.streamInterruptionCleanup) {
+      try { this.streamInterruptionCleanup(); } catch {}
+      this.streamInterruptionCleanup = null;
+    }
     if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
     this.releaseStream();
     this.stream = null; this.recorder = null; this.chunks = [];
+    this.issue = null;
     this.state = "idle";
+    this.stopping = false;
     if (this.ticker) { window.clearInterval(this.ticker); this.ticker = null; }
     this.segmentIndex++;
     this.emit();
@@ -5678,6 +7279,32 @@ function isLocalServiceEndpoint(endpoint) {
   }
 }
 
+function getErrorMessage(error) {
+  if (!error) return "";
+  if (typeof error === "string") return error;
+  if (error && typeof error.message === "string") return error.message;
+  try { return String(error); } catch { return ""; }
+}
+
+function isNetworkLikeError(error) {
+  const message = getErrorMessage(error);
+  if (!message) return false;
+  return /failed to fetch|networkerror|fetch failed|err_internet_disconnected|err_network|dns|enotfound|econn(?:reset|refused|aborted)|etimedout|net::/i.test(message);
+}
+
+function classifyRecordingIssue(error) {
+  return isNetworkLikeError(error) ? "network" : "service";
+}
+
+function makeRecordingIssue(kind, patch) {
+  return Object.assign({
+    kind: kind || "service",
+    at: Date.now(),
+    message: "",
+    stoppedAtMs: null,
+  }, patch || {});
+}
+
 function getTranscribeRequestTimeoutMs(provider) {
   return isLocalServiceEndpoint(provider && provider.endpoint) ? 10 * 60 * 1000 : 120 * 1000;
 }
@@ -5750,6 +7377,39 @@ function isLocalLlmEndpoint(endpoint) {
   }
 }
 
+const DEFAULT_LLM_REQUEST_TIMEOUT_MS = 180 * 1000;
+
+function resolveLlmRequestTimeoutMs(options) {
+  const hasTimeout = options && Object.prototype.hasOwnProperty.call(options, "timeoutMs");
+  const value = hasTimeout ? Number(options.timeoutMs) : NaN;
+  if (Number.isFinite(value) && value > 0) return Math.max(1000, Math.round(value));
+  if (hasTimeout && value === 0 && options && options.allowNoTimeout === true) return 0;
+  return DEFAULT_LLM_REQUEST_TIMEOUT_MS;
+}
+
+function withPromiseTimeout(promise, timeoutMs, makeError) {
+  if (!(timeoutMs > 0)) return promise;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      try {
+        reject(makeError ? makeError() : new Error("请求超时"));
+      } catch (e) {
+        reject(e);
+      }
+    }, timeoutMs);
+    Promise.resolve(promise).then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
 function isMoonshotKimiModel(endpoint, model) {
   try {
     const url = new URL(normalizeLlmEndpoint(endpoint));
@@ -5797,6 +7457,94 @@ async function readLlmError(res) {
   return text.slice(0, 500);
 }
 
+function createLlmHttpError(status, detail) {
+  const cleanDetail = String(detail || "").slice(0, 500);
+  const err = new Error(`LLM 调用失败 ${status}：${cleanDetail}`) as any;
+  err.status = status;
+  err.statusDetail = cleanDetail;
+  err.nonRetryable = isNonRetryableLlmHttpFailure(status, cleanDetail);
+  return err;
+}
+
+function pickLlmRequestError(fetchError, fallbackError) {
+  const fallbackMessage = String((fallbackError && fallbackError.message) || fallbackError || "");
+  const fetchMessage = String((fetchError && fetchError.message) || fetchError || "");
+  if (fallbackError && (fallbackError.status || /LLM 调用失败\s+\d+/.test(fallbackMessage))) return fallbackError;
+  if (/Obsidian requestUrl 不可用/.test(fallbackMessage)) return fetchError;
+  if (/Failed to fetch/i.test(fetchMessage) && fallbackMessage) return fallbackError;
+  return fetchError || fallbackError;
+}
+
+function countLlmMessageChars(messages) {
+  if (!Array.isArray(messages)) return 0;
+  return messages.reduce((sum, msg) => {
+    const content = msg && msg.content;
+    if (typeof content === "string") return sum + content.length;
+    if (Array.isArray(content)) {
+      return sum + content.reduce((n, part) => {
+        if (typeof part === "string") return n + part.length;
+        if (!part || typeof part !== "object") return n;
+        return n + String(part.text || part.content || "").length;
+      }, 0);
+    }
+    return sum;
+  }, 0);
+}
+
+async function logLlmRequestDiagnostic(plugin, level, code, message, data) {
+  try {
+    if (plugin && typeof plugin.logDiagnostic === "function") {
+      await plugin.logDiagnostic(level, code, message, data);
+    }
+  } catch (e) {
+    console.warn("[LexVoice] llm diagnostic failed", e);
+  }
+}
+
+function parseRequestUrlJson(response) {
+  if (!response) return null;
+  const json = response.json;
+  if (typeof json === "function") return json.call(response);
+  if (json !== undefined && json !== null) return json;
+  const text = String(response.text || "").trim();
+  if (!text) return null;
+  return JSON.parse(text);
+}
+
+function getRequestUrlText(response) {
+  if (!response) return "";
+  if (typeof response.text === "string") return response.text;
+  if (response.arrayBuffer && typeof TextDecoder !== "undefined") {
+    try { return new TextDecoder("utf-8").decode(response.arrayBuffer); } catch {}
+  }
+  return "";
+}
+
+async function requestLlmChatCompletionViaObsidian(endpoint, headers, payloadText, timeoutMs) {
+  if (!obsidian || typeof obsidian.requestUrl !== "function") {
+    throw new Error("Obsidian requestUrl 不可用");
+  }
+  const request = obsidian.requestUrl({
+    url: endpoint,
+    method: "POST",
+    headers,
+    body: payloadText,
+    throw: false,
+  });
+  const response = await withPromiseTimeout(request, timeoutMs, () => new Error(`LLM 兜底调用超时：${Math.round(timeoutMs / 1000)} 秒内没有响应`));
+  const status = Number(response && response.status) || 0;
+  if (status && (status < 200 || status >= 300)) {
+    const text = getRequestUrlText(response);
+    let detail = text;
+    try {
+      const json = JSON.parse(text);
+      detail = json && (json.error && json.error.message || json.message || json.detail) || text;
+    } catch {}
+    throw createLlmHttpError(status, detail);
+  }
+  return parseRequestUrlJson(response);
+}
+
 async function requestLlmChatCompletion(plugin, messages, options) {
   const { llmEndpoint, llmApiKey, llmModel } = plugin.settings;
   const endpoint = normalizeLlmEndpoint(llmEndpoint);
@@ -5813,7 +7561,11 @@ async function requestLlmChatCompletion(plugin, messages, options) {
   };
   if (!isMoonshotKimiModel(endpoint, llmModel)) basePayload.temperature = 0.3;
   const payload = Object.assign(basePayload, options && options.payload ? options.payload : {});
-  const timeoutMs = Math.max(0, Number(options && options.timeoutMs) || 0);
+  const payloadText = JSON.stringify(payload);
+  const messageChars = countLlmMessageChars(messages);
+  const payloadChars = payloadText.length;
+  const headers = buildLlmHeaders(llmApiKey, endpoint);
+  const timeoutMs = resolveLlmRequestTimeoutMs(options || {});
   const controller = timeoutMs > 0 && typeof AbortController !== "undefined" ? new AbortController() : null;
   let timer = null;
   if (controller) timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -5821,21 +7573,74 @@ async function requestLlmChatCompletion(plugin, messages, options) {
   try {
     res = await fetch(endpoint, {
       method: "POST",
-      headers: buildLlmHeaders(llmApiKey, endpoint),
-      body: JSON.stringify(payload),
+      headers,
+      body: payloadText,
       signal: controller ? controller.signal : undefined,
     });
   } catch (e) {
     if (controller && controller.signal && controller.signal.aborted) {
-      throw new Error(`LLM 调用超时：${Math.round(timeoutMs / 1000)} 秒内没有响应`);
+      const err = new Error(`LLM 调用超时：${Math.round(timeoutMs / 1000)} 秒内没有响应`);
+      await logLlmRequestDiagnostic(plugin, "error", "llm.fetch_failed", "LLM 请求发送失败", {
+        endpoint,
+        model: llmModel ? "<set>" : "",
+        messageChars,
+        payloadChars,
+        timeoutMs,
+        aborted: true,
+        error: diagnosticError(err),
+      });
+      throw err;
     }
-    throw e;
+    await logLlmRequestDiagnostic(plugin, "error", "llm.fetch_failed", "LLM 请求发送失败", {
+      endpoint,
+      model: llmModel ? "<set>" : "",
+      messageChars,
+      payloadChars,
+      timeoutMs,
+      aborted: false,
+      error: diagnosticError(e),
+    });
+    await logLlmRequestDiagnostic(plugin, "warn", "llm.requesturl_fallback_start", "fetch 失败后尝试 Obsidian requestUrl 兜底", {
+      endpoint,
+      model: llmModel ? "<set>" : "",
+      messageChars,
+      payloadChars,
+      fetchError: diagnosticError(e),
+    });
+    try {
+      const fallbackData = await requestLlmChatCompletionViaObsidian(endpoint, headers, payloadText, timeoutMs);
+      await logLlmRequestDiagnostic(plugin, "info", "llm.requesturl_fallback_succeeded", "Obsidian requestUrl 兜底成功", {
+        endpoint,
+        model: llmModel ? "<set>" : "",
+        messageChars,
+        payloadChars,
+      });
+      return fallbackData;
+    } catch (fallbackError) {
+      await logLlmRequestDiagnostic(plugin, "error", "llm.requesturl_fallback_failed", "Obsidian requestUrl 兜底失败", {
+        endpoint,
+        model: llmModel ? "<set>" : "",
+        messageChars,
+        payloadChars,
+        fetchError: diagnosticError(e),
+        fallbackError: diagnosticError(fallbackError),
+      });
+      throw pickLlmRequestError(e, fallbackError);
+    }
   } finally {
     if (timer) clearTimeout(timer);
   }
   if (!res.ok) {
     const msg = await readLlmError(res);
-    throw new Error(`LLM 调用失败 ${res.status}：${msg}`);
+    await logLlmRequestDiagnostic(plugin, "error", "llm.http_failed", "LLM 返回非成功状态", {
+      endpoint,
+      model: llmModel ? "<set>" : "",
+      status: res.status,
+      messageChars,
+      payloadChars,
+      statusDetail: msg,
+    });
+    throw createLlmHttpError(res.status, msg);
   }
   return await res.json();
 }
@@ -5852,11 +7657,79 @@ async function testLlmConnection(plugin) {
   };
 }
 
+function isTransientLlmError(error) {
+  if (isLlmNonRetryableError(error)) return false;
+  const msg = String((error && error.message) || error || "");
+  return /Failed to fetch|network|ECONNRESET|ETIMEDOUT|\b(429|500|502|503|504)\b|rate\s*limit|temporarily|service unavailable/i.test(msg);
+}
+
+function getLlmConfigIssue(settings) {
+  const endpoint = normalizeLlmEndpoint(settings && settings.llmEndpoint);
+  const model = String((settings && settings.llmModel) || "").trim();
+  const apiKey = String((settings && settings.llmApiKey) || "").trim();
+  if (!endpoint) return "大模型服务地址未配置";
+  if (!model) return "大模型名称未配置";
+  if (!apiKey && !isLocalLlmEndpoint(endpoint)) return "大模型访问密钥未配置；只有本地 localhost 服务可以留空";
+  return "";
+}
+
+function isLlmConfigError(error) {
+  const msg = String((error && error.message) || error || "");
+  return /大模型(?:服务地址|名称|访问密钥)未配置|请先在 API 页配置大模型服务|LLM 配置/i.test(msg);
+}
+
+function isLlmServiceBlockedError(error) {
+  const msg = String((error && error.message) || error || "");
+  return /暂无可用账号|no available account|账号不可用|账号池|余额不足|insufficient\s+quota|quota\s+exceeded|invalid[_\s-]*api[_\s-]*key|unauthorized|forbidden|access\s*denied|model[_\s-]*not[_\s-]*found|模型(?:不存在|不可用|无可用)|context[_\s-]*length|maximum context|too many tokens|上下文(?:过长|超限)|内容过长/i.test(msg);
+}
+
+function isNonRetryableLlmHttpFailure(status, detail) {
+  const code = Number(status) || 0;
+  const msg = String(detail || "");
+  if (isLlmServiceBlockedError(msg)) return true;
+  return [400, 401, 403, 404].includes(code);
+}
+
+function isLlmNonRetryableError(error) {
+  if (error && error.nonRetryable) return true;
+  return isLlmConfigError(error) || isLlmServiceBlockedError(error);
+}
+
+function formatLlmConfigIssue(issue) {
+  const text = String(issue || "").trim();
+  if (!text) return "";
+  if (/请到「设置/.test(text)) return text;
+  return `${text}。请到「设置 → API → AI 整理服务」补齐后先测试连接。`;
+}
+
+function formatLlmFailureIssue(issue) {
+  const text = String(issue || "").trim();
+  if (!text) return "";
+  if (isLlmConfigError(text)) return formatLlmConfigIssue(text);
+  if (isLlmServiceBlockedError(text)) {
+    return `${text}。这是大模型服务端或账号池返回的问题，不是文本长度、ASR 或文本导入路径导致的；请切换模型/端点，或稍后手动重试。`;
+  }
+  return text;
+}
+
 async function callLlm(plugin, system, user, options) {
-  const data = await requestLlmChatCompletion(plugin, [
-    { role: "system", content: system },
-    { role: "user", content: user },
-  ], options);
+  let data;
+  let lastError = null;
+  const attempts = (options && options.noRetry) ? 1 : 2;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      data = await requestLlmChatCompletion(plugin, [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ], options);
+      break;
+    } catch (e) {
+      lastError = e;
+      if (i >= attempts - 1 || !isTransientLlmError(e)) throw e;
+      await delayMs(1000 + Math.floor(Math.random() * 700));
+    }
+  }
+  if (!data && lastError) throw lastError;
   return stripModeSuggestionBlocks(extractLlmContent(data).trim());
 }
 
@@ -6134,6 +8007,339 @@ function sanitizeReportFileStem(name) {
     .replace(/\s+/g, " ")
     .trim();
   return stem || "LexVoice-HTML报告";
+}
+
+const EMAIL_DRAFT_FOLDER = "LexVoice/邮件草稿";
+const EMAIL_DRAFT_ATTACHMENT_FOLDER = `${EMAIL_DRAFT_FOLDER}/附件`;
+const EMAIL_ATTENDEE_FIELDS = ["参会人", "与会人", "参与者", "出席人", "受访者", "访问者", "面试官", "候选人", "当事人", "相关人员", "人员"];
+
+function normalizeEmailAddressList(value) {
+  const raw = Array.isArray(value) ? value.flatMap(normalizeEmailAddressList) : String(value || "").split(/[，,、;；\s]+/);
+  const emails = [];
+  for (const item of raw) {
+    const text = String(item || "").trim().replace(/^<|>$/g, "");
+    if (!text) continue;
+    const match = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    if (match) emails.push(match[0]);
+  }
+  return Array.from(new Set(emails.map(e => e.toLowerCase())));
+}
+
+function normalizePersonNameForEmail(value) {
+  let text = String(value || "").trim();
+  if (!text) return "";
+  text = text
+    .replace(/^\[\[|\]\]$/g, "")
+    .replace(/\|.*$/g, "")
+    .replace(/^@+/, "")
+    .replace(/^[姓名人员：:\s]+/, "")
+    .replace(/[（(][^）)]*[）)]/g, "")
+    .replace(/【[^】]*】/g, "")
+    .trim();
+  const arrow = text.split(/\s*(?:->|=>|→|➡|：|:)\s*/).filter(Boolean);
+  if (arrow.length > 1) text = arrow[arrow.length - 1].trim();
+  const dash = text.split(/\s+(?:-|—|–)\s+|\s*--\s*/).filter(Boolean);
+  if (dash.length > 1) text = dash[0].trim();
+  text = text.replace(/\s+/g, " ").trim();
+  if (!text || text.length > 30) return "";
+  if (/^(未提及|未知|待补充|无|暂无|不详|发言人\d*|说话人\d*|参会人|参与者|人员|业务需求方|技术负责人|负责人|某负责人|某同学)$/i.test(text)) return "";
+  return text;
+}
+
+function extractMeetingAttendeeNames(frontmatter) {
+  if (!frontmatter || typeof frontmatter !== "object") return [];
+  const raw = [];
+  const walk = (value) => {
+    if (Array.isArray(value)) {
+      value.forEach(walk);
+    } else if (value && typeof value === "object") {
+      const direct = value["姓名"] || value.name || value["人员"] || value.person || value.label;
+      if (direct) raw.push(direct);
+      else Object.values(value).forEach(walk);
+    } else if (value != null) {
+      raw.push(...splitPersonFieldValue(value));
+    }
+  };
+  for (const key of EMAIL_ATTENDEE_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(frontmatter, key)) walk(frontmatter[key]);
+  }
+  const out = [];
+  const seen = new Set();
+  for (const item of raw) {
+    const name = normalizePersonNameForEmail(item);
+    const key = normalizePersonLookupText(name);
+    if (!name || !key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out;
+}
+
+function getEmailBuffer() {
+  try {
+    if (typeof Buffer !== "undefined") return Buffer;
+  } catch {}
+  try {
+    return require("buffer").Buffer;
+  } catch {
+    return null;
+  }
+}
+
+function utf8ToBase64(value) {
+  const BufferRef = getEmailBuffer();
+  const text = String(value || "");
+  if (BufferRef) return BufferRef.from(text, "utf8").toString("base64");
+  return btoa(unescape(encodeURIComponent(text)));
+}
+
+function arrayBufferToBase64(buffer) {
+  const BufferRef = getEmailBuffer();
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer || []);
+  if (BufferRef) return BufferRef.from(bytes).toString("base64");
+  let binary = "";
+  const size = 0x8000;
+  for (let i = 0; i < bytes.length; i += size) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + size)));
+  }
+  return btoa(binary);
+}
+
+function wrapBase64Lines(value) {
+  return String(value || "").replace(/.{1,76}/g, "$&\r\n").trimEnd();
+}
+
+function encodeMailHeader(value) {
+  const text = String(value || "").replace(/[\r\n]+/g, " ").trim();
+  return /[^\x20-\x7E]/.test(text) ? `=?UTF-8?B?${utf8ToBase64(text)}?=` : text;
+}
+
+function sanitizeMailHeader(value) {
+  return String(value || "").replace(/[\r\n]+/g, " ").trim();
+}
+
+function guessEmailAttachmentMime(file) {
+  const ext = String(file && file.extension || "").toLowerCase();
+  if (ext === "md") return "text/markdown; charset=utf-8";
+  if (ext === "pdf") return "application/pdf";
+  if (ext === "html" || ext === "htm") return "text/html; charset=utf-8";
+  if (ext === "pptx") return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+  if (ext === "ppt") return "application/vnd.ms-powerpoint";
+  return "application/octet-stream";
+}
+
+function buildEmailDraftContent({ to = [], subject = "", body = "", attachments = [] }) {
+  const boundary = `----=_LexVoice_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const lines = [
+    `To: ${to.map(sanitizeMailHeader).join(", ")}`,
+    `Subject: ${encodeMailHeader(subject || "LexVoice 会议纪要")}`,
+    `Date: ${new Date().toUTCString()}`,
+    "MIME-Version: 1.0",
+    "X-Unsent: 1",
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    wrapBase64Lines(utf8ToBase64(body || "")),
+    "",
+  ];
+  for (const attachment of attachments) {
+    const name = attachment.name || "attachment";
+    const encodedName = encodeMailHeader(name);
+    lines.push(
+      `--${boundary}`,
+      `Content-Type: ${attachment.mime || "application/octet-stream"}; name="${encodedName}"`,
+      "Content-Transfer-Encoding: base64",
+      `Content-Disposition: attachment; filename="${encodedName}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+      "",
+      wrapBase64Lines(attachment.base64 || ""),
+      "",
+    );
+  }
+  lines.push(`--${boundary}--`, "");
+  return lines.join("\r\n");
+}
+
+function stripMarkdownForEmailBrief(markdown) {
+  let text = stripLexVoiceFrontmatterSimple(String(markdown || ""));
+  text = text.replace(/<details[\s\S]*?<\/details>/gi, "\n");
+  text = text.replace(/<!--[\s\S]*?-->/g, "\n");
+  const rawSplit = text.split(/\n(?=#{1,6}\s+(?:📁\s*)?(?:原始材料|原始转写|逐字稿|录音原文|回听时间轴|录音中实时大纲)\b)/);
+  return (rawSplit[0] || text).trim();
+}
+
+function cleanEmailMarkdownLine(line) {
+  let s = String(line || "").trim();
+  if (!s) return "";
+  if (/^```/.test(s)) return "";
+  s = s.replace(/^>\s?/, "").trim();
+  s = s.replace(/^\[![^\]]+\][+-]?\s*/i, "").trim();
+  s = s.replace(/^\s{0,3}#{1,6}\s+/, "").replace(/\s+#+\s*$/, "").trim();
+  if (!s || /^(录音信息|回听时间轴|原始材料|原始转写|逐字稿|录音原文)$/i.test(s)) return "";
+  if (/^!\[\[.+?\]\]$/.test(s) || /^!\[[^\]]*\]\([^)]+\)$/.test(s)) return "";
+  s = s.replace(/!\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g, "");
+  s = s.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2");
+  s = s.replace(/\[\[([^\]]+)\]\]/g, "$1");
+  s = s.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  s = s.replace(/`([^`]+)`/g, "$1");
+  s = s.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1");
+  s = s.replace(/<[^>]+>/g, "").trim();
+  return s;
+}
+
+function normalizeEmailBullet(line) {
+  let s = cleanEmailMarkdownLine(line);
+  if (!s) return "";
+  if (/^[-*+]\s+\[[ xX]\]\s+/.test(s)) return s.replace(/^[-*+]\s+/, "- ");
+  s = s.replace(/^[-*+]\s+/, "").replace(/^\d+[.)]\s+/, "").trim();
+  return s ? `- ${s}` : "";
+}
+
+function pushUniqueEmailLine(target, line, limit) {
+  const value = cleanEmailMarkdownLine(line);
+  if (!value || target.includes(value)) return;
+  if (limit && target.length >= limit) return;
+  target.push(value);
+}
+
+function pushUniqueEmailBullet(target, line, limit) {
+  const value = normalizeEmailBullet(line);
+  if (!value || target.includes(value)) return;
+  if (limit && target.length >= limit) return;
+  target.push(value);
+}
+
+function categorizeEmailBriefSection(title) {
+  const t = String(title || "").replace(/\s+/g, "");
+  if (!t) return "";
+  if (/摘要|概要|核心摘要|研讨摘要|学习摘要|整体综述|主要内容/.test(t)) return "summary";
+  if (/决策|决议|结论|定调|共识/.test(t)) return "decisions";
+  if (/待办|行动项|下一步|后续动作|TODO|ToDo/i.test(t)) return "todos";
+  if (/悬而未决|未决|待澄清|待确认|会后跟进|跟进|风险|开放问题|问题清单/.test(t)) return "pending";
+  return "";
+}
+
+function addEmailBriefLines(result, category, lines) {
+  const list = Array.isArray(lines) ? lines : [];
+  if (category === "summary") {
+    for (const line of list) pushUniqueEmailLine(result.summary, line, 8);
+    return;
+  }
+  if (category === "decisions") {
+    for (const line of list) pushUniqueEmailBullet(result.decisions, line, 12);
+    return;
+  }
+  if (category === "todos") {
+    for (const line of list) pushUniqueEmailBullet(result.todos, line, 14);
+    return;
+  }
+  if (category === "pending") {
+    for (const line of list) pushUniqueEmailBullet(result.pending, line, 12);
+  }
+}
+
+function extractEmailCalloutBlocks(text, result) {
+  const lines = String(text || "").split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const first = lines[i] || "";
+    if (!/^\s*>\s*\[!/.test(first)) continue;
+    const block = [];
+    let j = i;
+    while (j < lines.length && (/^\s*>/.test(lines[j]) || !String(lines[j] || "").trim())) {
+      block.push(lines[j]);
+      j++;
+    }
+    const marker = first.match(/\[!([a-zA-Z-]+)\][+-]?\s*(.*)$/);
+    const type = marker ? marker[1].toLowerCase() : "";
+    const title = marker ? marker[2] : first;
+    let category = categorizeEmailBriefSection(title);
+    if (!category) {
+      if (/abstract|summary|note/.test(type)) category = "summary";
+      else if (/success|important|check|done/.test(type)) category = "decisions";
+      else if (/todo|tip/.test(type)) category = "todos";
+      else if (/question|warning|danger|caution|failure/.test(type)) category = "pending";
+    }
+    if (category) addEmailBriefLines(result, category, block.slice(1));
+    i = Math.max(i, j - 1);
+  }
+}
+
+function extractEmailHeadingBlocks(text, result) {
+  const lines = String(text || "").split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const match = String(lines[i] || "").match(/^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/);
+    if (!match) continue;
+    const category = categorizeEmailBriefSection(match[2]);
+    if (!category) continue;
+    const body = [];
+    for (let j = i + 1; j < lines.length; j++) {
+      if (/^\s{0,3}#{1,6}\s+/.test(lines[j] || "")) break;
+      body.push(lines[j]);
+    }
+    addEmailBriefLines(result, category, body);
+  }
+}
+
+function extractEmailTodoLines(text, result) {
+  const lines = String(text || "").split(/\r?\n/);
+  for (const line of lines) {
+    if (/^\s*>?\s*[-*+]\s+\[[ xX]\]\s+/.test(line || "")) {
+      pushUniqueEmailBullet(result.todos, line, 14);
+    }
+  }
+}
+
+function extractEmailFallbackSummary(text, result) {
+  if (result.summary.length) return;
+  const lines = String(text || "").split(/\r?\n/)
+    .map(cleanEmailMarkdownLine)
+    .filter(line => line && !/^[-*+]\s+/.test(line) && line.length >= 12);
+  for (const line of lines.slice(0, 3)) pushUniqueEmailLine(result.summary, line, 3);
+}
+
+function extractEmailBriefing(markdown) {
+  const source = stripMarkdownForEmailBrief(markdown);
+  const result = { summary: [], decisions: [], todos: [], pending: [] };
+  extractEmailCalloutBlocks(source, result);
+  extractEmailHeadingBlocks(source, result);
+  extractEmailTodoLines(source, result);
+  extractEmailFallbackSummary(source, result);
+  return result;
+}
+
+function buildEmailSection(title, lines) {
+  const list = Array.isArray(lines) ? lines.filter(Boolean) : [];
+  if (!list.length) return [];
+  return [title, ...list, ""];
+}
+
+function buildMeetingEmailBody({ file, markdown, attendeeNames = [], attachmentsCount = 0 }) {
+  const brief = extractEmailBriefing(markdown);
+  const body = [
+    "你好，",
+    "",
+    "以下是本次纪要的简要同步，完整 Markdown、PDF 及已生成的报告 / PPT 已随邮件附上。",
+    "",
+    `纪要：${file && file.basename ? file.basename : "LexVoice 会议纪要"}.md`,
+    `自动匹配参会人：${attendeeNames.length ? attendeeNames.join("、") : "未识别到可匹配人员"}`,
+    `附件数量：${attachmentsCount}`,
+    "",
+  ];
+  const sections = [
+    buildEmailSection("一、摘要", brief.summary),
+    buildEmailSection("二、决策", brief.decisions),
+    buildEmailSection("三、待办", brief.todos),
+    buildEmailSection("四、会后跟进 / 悬而未决", brief.pending),
+  ].flat();
+  if (sections.length) {
+    body.push(...sections);
+  } else {
+    body.push("本篇纪要未识别到可直接写入邮件正文的摘要、决策、待办或悬而未决事项，请以附件中的完整纪要为准。", "");
+  }
+  body.push("此邮件草稿由 LexVoice 在本地生成。发送前请确认收件人、正文和附件是否正确。");
+  return body.join("\n");
 }
 
 function extractJsonObject(text) {
@@ -8425,6 +10631,103 @@ function buildDailyMeetingOverviewEntry(session, polished, settings) {
   ].join("\n");
 }
 
+// 为日记里插一条 Markdown 复选 todo 行（兼容 Tasks 插件 + Dataview 查询）
+// 格式：- [ ] {task} 📅 {due} 👤 {owner} (来源: [[source]]) <!-- lexvoice-todo:{id} -->
+// 备注：
+//   - 📅 是 Tasks 插件识别的截止日期约定（仅当 due 能解析为日期时使用）
+//   - 否则用 Dataview inline 字段 [截止:: {due}]
+//   - 👤 owner 作为视觉标记（Tasks 插件没有 owner 约定）；同时给 Dataview 友好的 [责任人:: owner]
+//   - HTML 注释里的 id 用于幂等 upsert（同 id 待办只插入一次）
+function buildSedimentTodoDailyEntry(todo, sourceFile, todoId) {
+  const task = sanitizeSedimentText(todo && todo.task, 200) || "未命名待办";
+  const owner = sanitizeSedimentText(todo && todo.owner, 40) || "";
+  const dueRaw = sanitizeSedimentText(todo && todo.due, 40) || "";
+  const sourceTime = sanitizeSedimentText(todo && todo.sourceTime, 20);
+  const sourceLink = makeFileWikiLink(sourceFile);
+  const subtasks = normalizeSedimentTodoSubtasks(todo && (todo.subtasks || todo.children || todo.steps || todo.items));
+
+  const parts = [`- [ ] ${task}`];
+
+  // 截止：尝试解析成 ISO 日期，命中则用 Tasks 插件能识别的 📅；否则降级到 Dataview inline 字段
+  if (dueRaw && !/^(未指定|无|待定|TBD|N\/A|null|none)$/i.test(dueRaw)) {
+    const moment = window.moment;
+    const parsed = moment ? moment(dueRaw, [
+      "YYYY-MM-DD", "YYYY/M/D", "YYYY/MM/DD", "YYYY.M.D", "YYYY.MM.DD",
+      "M月D日", "MM月DD日", "M-D", "MM-DD",
+    ], true) : null;
+    if (parsed && parsed.isValid && parsed.isValid()) {
+      parts.push(`📅 ${parsed.format("YYYY-MM-DD")}`);
+    } else {
+      parts.push(`[截止:: ${dueRaw}]`);
+    }
+  }
+
+  if (owner && !/^(未指定|无|待定|TBD|N\/A|null|none)$/i.test(owner)) {
+    parts.push(`👤 ${owner}`);
+  }
+
+  // 来源回链 + 录音时间，方便从日记跳回纪要原文
+  if (sourceLink) {
+    const sourceText = sourceTime ? `${sourceLink} · ${sourceTime}` : sourceLink;
+    parts.push(`(来源: ${sourceText})`);
+  }
+
+  // 隐藏的 id 注释，用于 upsert
+  parts.push(`<!-- lexvoice-todo:${todoId} -->`);
+
+  const lines = [parts.join(" ")];
+  for (const sub of subtasks) {
+    if (sub) lines.push(`  - [ ] ${sub}`);
+  }
+  return lines.join("\n");
+}
+
+// 把待办插入 / 更新到日记的指定标题下（默认 "## 待办"）。
+// 同 id 的待办存在时整段（含子任务缩进行）替换；不存在时追加到 ## 待办 列表末尾；
+// 标题都不存在时在文末新建 ## 待办 段。
+function upsertSedimentTodoInDailyNote(content, todoId, entry, settings) {
+  const text = String(content || "");
+  const marker = `<!-- lexvoice-todo:${todoId} -->`;
+  const markerIdx = text.indexOf(marker);
+  if (markerIdx >= 0) {
+    const lineStart = text.lastIndexOf("\n", markerIdx) + 1;
+    let lineEnd = text.indexOf("\n", markerIdx);
+    if (lineEnd < 0) lineEnd = text.length;
+    // 把后续缩进的子任务行（^  - …）也算进去一起替换
+    while (lineEnd < text.length) {
+      const nextStart = lineEnd + 1;
+      const nextNL = text.indexOf("\n", nextStart);
+      const actualEnd = nextNL < 0 ? text.length : nextNL;
+      const nextLine = text.slice(nextStart, actualEnd);
+      if (/^\s{2,}-\s/.test(nextLine)) lineEnd = actualEnd;
+      else break;
+    }
+    return text.slice(0, lineStart) + entry + text.slice(lineEnd);
+  }
+
+  const heading = String((settings && settings.dailyTodoHeading) || "待办").replace(/^#+\s*/, "").trim() || "待办";
+  const headingRe = new RegExp("^##\\s+" + escapeRegExp(heading) + "\\s*$", "m");
+  const match = headingRe.exec(text);
+  if (!match) {
+    const sep = text.trim() ? "\n\n" : "";
+    return text.replace(/\s*$/, "") + sep + `## ${heading}\n\n` + entry + "\n";
+  }
+
+  const afterHeading = text.indexOf("\n", match.index) + 1;
+  const rest = text.slice(afterHeading);
+  // 跨过已有的待办行 + 子任务缩进行 + 空行，把新待办追加到现有列表末尾
+  let consumed = 0;
+  for (const line of rest.split("\n")) {
+    if (/^\s*-\s\[[ xX/-]\]/.test(line) || /^\s{2,}-\s/.test(line) || /^\s*$/.test(line)) {
+      consumed += line.length + 1;
+    } else break;
+  }
+  const insertAt = afterHeading + consumed;
+  const before = text.slice(0, insertAt).replace(/\s*$/, "\n");
+  const after = text.slice(insertAt).replace(/^\n*/, "\n");
+  return before + entry + after;
+}
+
 function upsertDailyMeetingOverview(content, sessionId, entry, settings) {
   const start = `<!-- lexvoice-daily-overview:${sessionId} -->`;
   const end = `<!-- lexvoice-daily-overview-end:${sessionId} -->`;
@@ -8533,6 +10836,70 @@ function splitLeadingFrontmatter(markdown) {
     frontmatter: match[0].replace(/\n*$/, "\n"),
     body: text.slice(match[0].length).replace(/^\n+/, ""),
   };
+}
+
+// \u4ECE\u5168\u6587\u91CC\u628A\u6240\u6709"\u539F\u59CB / \u5143\u6570\u636E"\u5757\uFF08\u4EFB\u610F\u6DF1\u5EA6\uFF09\u62BD\u51FA\u6765\uFF0C\u4F5C\u4E3A rawTail \u4FDD\u7559\u5230\u672B\u5C3E\u3002
+// \u8C03\u7528\u8005\u62FF\u5230 withoutRaw \u4E4B\u540E\u53EF\u4EE5\u5B89\u5168\u5730\u628A"\u5DF2\u6574\u7406\u5185\u5BB9"\u5377\u6210 <details>\u4E0A\u4E00\u7248\u7EAA\u8981>\uFF0C
+// \u4E0D\u4F1A\u518D\u628A\u6BB5\u843D / \u539F\u59CB\u97F3\u9891 / \u6C89\u6DC0\u5757\u8FD9\u4E9B\u91CD\u578B\u5185\u5BB9\u5D4C\u5957\u8FDB details \u9020\u6210\u7206\u70B8\u5F0F\u589E\u957F\u3002
+//
+// \u89E3\u51B3\u7684\u5177\u4F53 bug\uFF1A
+//   appendRepolishBlock \u539F\u672C\u53EA\u8BC6\u522B ## \uD83D\uDCC1 \u539F\u59CB\u6750\u6599 \u4F5C\u4E3A raw \u8FB9\u754C\uFF0C\u5BF9 appendPolishBlock
+//   \u4EA7\u51FA\u7684 "## \u2728 \u6574\u5408\u7248 + \u2039details\u203A\u5F55\u97F3\u4FE1\u606F/\u539F\u59CB\u97F3\u9891/...\u2039/details\u203A" \u7ED3\u6784\u8BC6\u522B\u4E0D\u5230\uFF0C
+//   \u5BFC\u81F4\u6BCF\u6B21\u91CD\u65B0\u6574\u7406\u90FD\u628A\u6574\u4E2A\u65E7\u6587\u4EF6\u5D4C\u5957\u8FDB\u65B0\u7684 \u2039details\u203A\u4E0A\u4E00\u7248\u7EAA\u8981\u203A\uFF0C\u91CD\u590D\u5B58\u653E\u6BB5\u843D\u548C\u5143\u6570\u636E\u3002
+function extractAllRawBlocksFromText(text) {
+  let s = String(text || "");
+  const seen = new Set();
+  const tailParts = [];
+  const stash = (block) => {
+    const trimmed = String(block || "").trim();
+    if (!trimmed) return "";
+    if (seen.has(trimmed)) return "";
+    seen.add(trimmed);
+    tailParts.push(trimmed);
+    return "";
+  };
+
+  // 1. \u4EFB\u610F\u6DF1\u5EA6\u7684 \u2039details\u203A \u5143\u6570\u636E\u5757\uFF08summary \u5173\u952E\u5B57\u767D\u540D\u5355\uFF09
+  const detailsPatterns = [
+    /<details>\s*\n?<summary>[^<\n]*?\u5F55\u97F3\u4FE1\u606F[^<\n]*?<\/summary>[\s\S]*?<\/details>/gi,
+    /<details>\s*\n?<summary>[^<\n]*?\u539F\u59CB\u97F3\u9891[^<\n]*?<\/summary>[\s\S]*?<\/details>/gi,
+    /<details>\s*\n?<summary>[^<\n]*?\u5F55\u97F3\u4E2D\u5B9E\u65F6\u5927\u7EB2[^<\n]*?<\/summary>[\s\S]*?<\/details>/gi,
+    /<details>\s*\n?<summary>[^<\n]*?\u56DE\u542C\u65F6\u95F4\u8F74[^<\n]*?<\/summary>[\s\S]*?<\/details>/gi,
+    /<details>\s*\n?<summary>[^<\n]*?\u5206\u6BB5\u539F\u59CB\u8F6C\u5199[^<\n]*?<\/summary>[\s\S]*?<\/details>/gi,
+    /<details>\s*\n?<summary>[^<\n]*?\u6587\u672C\u5BFC\u5165\u6765\u6E90[^<\n]*?<\/summary>[\s\S]*?<\/details>/gi,
+    /<details>\s*\n?<summary>[^<\n]*?\u4F1A\u8BAE\u5DE5\u4F5C\u53F0[^<\n]*?<\/summary>[\s\S]*?<\/details>/gi,
+  ];
+  // \u8FED\u4EE3\u62BD\u53D6\uFF0C\u9632\u6B62\u5D4C\u5957\u5305\u88F9\u672A\u4E00\u6B21\u6027\u6D88\u5E72\u51C0
+  for (let iter = 0; iter < 32; iter++) {
+    let changed = false;
+    for (const re of detailsPatterns) {
+      const before = s;
+      s = s.replace(re, (m) => stash(m));
+      if (s !== before) changed = true;
+    }
+    if (!changed) break;
+  }
+
+  // 2. \u6BB5\u843D\u539F\u6587\uFF1A<!-- lexvoice-segments-start --> ... <!-- lexvoice-segments-end -->
+  s = s.replace(/<!--\s*lexvoice-segments-start(?::[^>]*)?\s*-->[\s\S]*?<!--\s*lexvoice-segments-end(?::[^>]*)?\s*-->/gi,
+    (m) => stash(m));
+
+  // 3. session \u6807\u8BB0\uFF08\u5982\u679C\u8FD8\u6B8B\u7559\uFF09
+  s = s.replace(/^[ \t]*<!--\s*lexvoice-session(?::[^>]*|\s*--)[^>]*-->[ \t]*\r?\n?/gm,
+    (m) => stash(m.trim()));
+
+  // 4. \u6C89\u6DC0\u5757\uFF1A<!--LEXVOICE_SEDIMENT_BEGIN ... LEXVOICE_SEDIMENT_END-->
+  s = s.replace(/<!--\s*LEXVOICE_SEDIMENT_BEGIN[\s\S]*?LEXVOICE_SEDIMENT_END\s*-->/gi,
+    (m) => stash(m));
+
+  // 5. \u65E7\u7248\u672C\u91CC"\u5931\u8D25\u7684\u6574\u5408\u7248"\u6B8B\u9AB8\uFF08\u5DF2\u88AB\u65B0\u7248\u672C\u66FF\u4EE3\uFF0C\u4E0D\u5FC5\u4FDD\u7559\uFF09
+  s = s.replace(/##\s+\u2728\s+\u6574\u5408\u7248[^\n]*\n+_\[(?:\u5408\u5E76\u6DA6\u8272\u5931\u8D25|AI \u6574\u7406\u5931\u8D25)[^\]]*\]_\s*\n?/g, "");
+
+  // 6. \u6E05\u7406\u53EF\u80FD\u6B8B\u7559\u7684\u7A7A details \u58F3
+  s = s.replace(/<details>\s*<\/details>/gi, "");
+  s = s.replace(/<details>\s*\n+\s*<\/details>/gi, "");
+
+  return { tail: tailParts.join("\n\n"), withoutRaw: s };
 }
 
 function mergeLeadingFrontmatterIntoDocument(documentText, generatedMarkdown) {
@@ -8765,11 +11132,187 @@ function buildSessionMetaPrefix(meta, mode) {
   return lines.join("\n");
 }
 
+function getSessionMetaDurationMs(meta) {
+  if (!meta) return 0;
+  const direct = Number(meta.durationMs || meta.elapsedMs || meta.totalMs || 0);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  const raw = meta.duration || meta["时长"] || "";
+  return parseLexVoiceDurationLabel(raw);
+}
+
+function getSegmentsDurationMs(segments) {
+  if (!Array.isArray(segments) || !segments.length) return 0;
+  let minStart = Infinity;
+  let maxEnd = 0;
+  for (const seg of segments) {
+    const start = Number(seg && seg.startOffsetMs);
+    const end = Number(seg && seg.endOffsetMs);
+    if (Number.isFinite(start) && start >= 0) minStart = Math.min(minStart, start);
+    if (Number.isFinite(end) && end > 0) maxEnd = Math.max(maxEnd, end);
+  }
+  if (!maxEnd) return 0;
+  return Number.isFinite(minStart) && minStart > 0 ? Math.max(0, maxEnd - minStart) : maxEnd;
+}
+
+function buildAdaptiveBriefingLengthInstruction(mode, stats) {
+  const durationMs = Math.max(0, Number(stats && stats.durationMs) || 0);
+  const transcriptChars = Math.max(0, Number(stats && stats.transcriptChars) || 0);
+  const segmentCount = Math.max(0, Number(stats && stats.segmentCount) || 0);
+  const hours = durationMs / 3600000;
+  const isUltraLong = hours >= 4 || transcriptChars >= 120000 || segmentCount >= 48;
+  const isLong = isUltraLong || hours >= 2 || transcriptChars >= 60000 || segmentCount >= 24;
+  const isMediumLong = isLong || hours >= 1 || transcriptChars >= 30000 || segmentCount >= 12;
+  const lines = [
+    "## 篇幅与信息密度策略",
+    "",
+    "- 内置模板里的句数、字数和条数是常规材料的起步基准，不是封顶线；请按录音时长、信息密度和主题数量自动扩展。",
+    "- 顶部摘要要便于快速扫读，但主体内容不能因为摘要短而缩水；必须覆盖开头、中段、结尾和所有主要主题。",
+    "- 如果模型上下文或输出能力有限，优先保证全篇覆盖：宁可每个主题略短，也不要只整理前半段或少数高频片段。",
+  ];
+  if (isUltraLong) {
+    lines.push("- 当前材料属于超长录音或多文件合并材料。请先按时间顺序建立全景章节，再逐章整理；章节、概念、卡片、追问数量都应明显多于普通 1 小时材料。");
+  } else if (isLong) {
+    lines.push("- 当前材料属于长录音。请按主题/章节展开，不要压缩成普通短会纪要；每个主要章节都要有独立标题、核心观点和必要支撑。");
+  } else if (isMediumLong) {
+    lines.push("- 当前材料偏长。摘要仍保持清晰，但主体应比短录音更充分，避免把多个主题合并成过粗的一两段。");
+  }
+  if (mode === "learning") {
+    lines.push("- 学习笔记尤其要随材料长度扩展：学习要点、概念术语、可收纳卡片和追问问题都应跟随内容密度增加；长课程优先按章节输出全景学习笔记。");
+  } else if (mode === "meeting" || mode === "seminar" || mode === "huddle") {
+    lines.push("- 会议/研讨类内容应随议题数量扩展：主要议题、观点谱系、决策、风险、待办和悬而未决问题都要按实际出现情况保留，不要为保持短小而合并掉关键差异。");
+  } else if (mode === "interview" || mode === "recruit") {
+    lines.push("- 访谈/招聘类内容应随问题数量和证据密度扩展：保留每个关键问题、回答证据、追问和判断依据，不要只输出总评。");
+  } else if (mode === "monologue") {
+    lines.push("- 个人口述应随思路分叉扩展：保留所有有信息量的判断、问题和延伸方向，不要把长独白压成一段摘要。");
+  }
+  return lines.join("\n");
+}
+
 // 把 prompt 里的 {{STRUCTURE_INSTRUCTION}} 占位符替换为用户当前选择的结构化程度指令
-function applyStructureLevelInstruction(prompt, settings) {
-  const level = (settings && settings.briefingStructureLevel) || "balanced";
+function applyStructureLevelInstruction(prompt, settings, overrideLevel) {
+  const level = overrideLevel || (settings && settings.briefingStructureLevel) || "balanced";
   const block = buildStructureLevelInstruction(level);
   return prompt.replace("{{STRUCTURE_INSTRUCTION}}", block);
+}
+
+const REPOLISH_PREFERENCE_PRESETS = {
+  detailed: {
+    label: "更详细",
+    detailLevel: "detailed",
+    structureLevel: "balanced",
+    fidelity: "faithful",
+    description: "主体内容更充分，保留更多事实、论证、例子和上下文。",
+  },
+  concise: {
+    label: "更精炼",
+    detailLevel: "concise",
+    structureLevel: "balanced",
+    fidelity: "faithful",
+    description: "压缩重复表达，保留结论、依据、待办和关键分歧。",
+  },
+  structured: {
+    label: "更结构化",
+    detailLevel: "balanced",
+    structureLevel: "strict",
+    fidelity: "faithful",
+    description: "强化标题、层级、论点—支撑—证据关系，适合复杂讨论。",
+  },
+  natural: {
+    label: "更自然",
+    detailLevel: "balanced",
+    structureLevel: "loose",
+    fidelity: "faithful",
+    description: "减少框架感，用更连贯的散文段落呈现。",
+  },
+  markdown: {
+    label: "MD 强化",
+    detailLevel: "balanced",
+    structureLevel: "balanced",
+    fidelity: "expanded",
+    markdownEnhanced: true,
+    description: "更多使用 Markdown 高亮、下划线和少量 callout，让重点更容易扫读。",
+  },
+  detailedExpanded: {
+    label: "详细拓展",
+    detailLevel: "detailed",
+    structureLevel: "balanced",
+    fidelity: "expanded",
+    markdownEnhanced: true,
+    description: "在更完整保留上下文的同时，补充概念、疑问和分歧视角。",
+  },
+  structuredExpanded: {
+    label: "结构拓展",
+    detailLevel: "balanced",
+    structureLevel: "strict",
+    fidelity: "expanded",
+    markdownEnhanced: true,
+    description: "在更清晰的结构里加入必要的 AI 补充和 Markdown 标记。",
+  },
+  faithful: {
+    label: "忠于原文",
+    detailLevel: "balanced",
+    structureLevel: "balanced",
+    fidelity: "faithful",
+    description: "不主动外推，只整理录音中明确出现的内容。",
+  },
+  expanded: {
+    label: "适度拓展",
+    detailLevel: "balanced",
+    structureLevel: "balanced",
+    fidelity: "expanded",
+    description: "在不编造事实的前提下，补足背景、逻辑关系和可执行建议。",
+  },
+};
+
+function getRepolishPreferencePreset(key) {
+  const preset = REPOLISH_PREFERENCE_PRESETS[key];
+  return preset ? Object.assign({ key }, preset) : null;
+}
+
+function buildRepolishPreferenceInstruction(options) {
+  const opt = options && typeof options === "object" ? options : {};
+  const lines = [];
+  if (opt.label || opt.description) {
+    lines.push(`**本次重新整理偏好：${opt.label || "自定义"}**`);
+    if (opt.description) lines.push(`- 目标：${opt.description}`);
+  }
+  if (opt.detailLevel === "detailed") {
+    lines.push("- 详略：请比默认版本更详细。保留更多上下文、讨论过程、关键例子、反对意见、风险和待办依据；长录音要按主题分层展开，不要把内容压成短摘要。");
+    lines.push("- 详细不是堆原文：每个重要主题都要写清楚背景、核心判断、依据、影响和下一步；如果原文有例子，要保留能支撑判断的例子。");
+  } else if (opt.detailLevel === "concise") {
+    lines.push("- 详略：请比默认版本更精炼。去掉重复口语、边缘闲聊和低信息量细节；保留结论、证据、待办、风险和可追溯线索。");
+  }
+  if (opt.structureLevel === "strict") {
+    lines.push("- 结构：请强化层级。用清楚的二级/三级标题组织内容；每个主题优先采用「结论 → 依据 → 影响/待办」的顺序，不要只罗列流水账。");
+    lines.push("- 结构化时不要过度嵌套，最多 3 级列表；能用一段话说清楚的内容不要拆成碎片。");
+  } else if (opt.structureLevel === "loose") {
+    lines.push("- 结构：请减少模板感。保留必要标题，但主体尽量用自然段落承接讨论脉络，只在待办、风险、概念清单等确有必要时使用列表。");
+  }
+  if (opt.fidelity === "faithful") {
+    lines.push("- 处理方式：严格忠于原文。不要补充录音里没有出现的新事实、新数据、新结论；可以归纳逻辑，但所有判断都必须能从原文找到依据。");
+    lines.push("- 如果原文存在疑问、概念或激烈讨论，只记录原文里的问题、概念和分歧，不主动写 AI 的外部观点。");
+  } else if (opt.fidelity === "expanded") {
+    lines.push("- 处理方式：允许适度思考和拓展。可以补充必要背景、解释概念关系、整理隐含逻辑和下一步建议，但必须明确基于原文推导，不能编造事实、数据、人名、责任人或结论。");
+    lines.push("- 当原文出现明确疑问、未闭合问题或待澄清点时，可以用 `> [!question] AI 补充：疑问与待澄清` 写 2-5 条简短分析，说明问题为何重要、可能影响什么、下一步应确认什么。");
+    lines.push("- 当原文涉及关键概念、专业术语、方法论或上下位关系时，可以用 `> [!tip] AI 补充：概念背景` 解释概念如何使用、上位/下位概念、常见误区和与本次讨论的关系。");
+    lines.push("- 当双方讨论明显激烈、分歧集中或立场冲突时，可以用 `> [!warning] AI 观察：争议与分歧` 概括争议焦点、各方关切和未解决风险；不要臆测情绪或动机。");
+    lines.push("- 所有 AI 补充必须明确写在 callout 标题里，和会议原始记录区分开；没有足够依据时宁可不补。");
+  }
+  if (opt.markdownEnhanced) {
+    lines.push("- Markdown 表达：适度使用 `==重点==` 标记最值得回看的关键词、结论或风险；适度使用 `<u>关键概念</u>` 标出需要用户关注的术语或判断。");
+    lines.push("- Markdown 表达要克制：每个小节最多标记 2-4 处重点，不要整段高亮；callout 只用于 AI 补充、疑问、概念背景或分歧观察。");
+  }
+  if (!lines.length) return "";
+  return lines.join("\n");
+}
+
+function applyRepolishPreferenceInstruction(prompt, options, settings) {
+  let block = buildRepolishPreferenceInstruction(options);
+  const addendum = String(settings && settings.repolishPreferencePromptAddendum || "").trim();
+  if (addendum && options) {
+    block = [block, "## 用户自定义重新整理偏好", addendum].filter(Boolean).join("\n");
+  }
+  return block ? block + "\n\n---\n\n" + prompt : prompt;
 }
 
 // 解析活跃 prompt 模板：优先用户在管理页选中的活跃模板，
@@ -8789,16 +11332,233 @@ function resolveTemplatePromptForMode(plugin, mode, isMerged) {
   return fallback;
 }
 
-async function polishTranscript(plugin, transcript, mode, recruitContext, sessionMeta, originalFrontmatter) {
+const TEXT_IMPORT_PRE_SUMMARY_THRESHOLD_CHARS = 120000;
+const TEXT_IMPORT_PRE_SUMMARY_CHUNK_CHARS = 30000;
+const TEXT_IMPORT_PRE_SUMMARY_MAX_CHUNKS = 24;
+const TEXT_IMPORT_RECRUIT_CONTEXT_CHARS = 12000;
+const TEXT_IMPORT_FINAL_CONTEXT_COMPACT_THRESHOLD_CHARS = 120000;
+
+function truncateForLlmPrompt(text, maxChars) {
+  const raw = String(text || "");
+  const limit = Math.max(0, Number(maxChars) || 0);
+  if (!limit || raw.length <= limit) return raw;
+  return raw.slice(0, limit) + "\n\n_[LexVoice：此处为长文本预处理截断，仅用于分段摘要；完整原文仍保留在笔记折叠区。]_";
+}
+
+function buildCompactRecruitContextPrefix(ctx) {
+  if (!ctx) return "";
+  const parts = ["## 招聘评估上下文（评分锚点）"];
+  if (ctx.position) parts.push(`- 应聘岗位：${ctx.position}`);
+  if (ctx.candidateName) parts.push(`- 候选人：${ctx.candidateName}`);
+  if (ctx.round) parts.push(`- 轮次：${ctx.round}`);
+  if (ctx.interviewer) parts.push(`- 面试官：${ctx.interviewer}`);
+  if (ctx.seniority) parts.push(`- 岗位资历级别：${ctx.seniority}`);
+  if (ctx.customNote) parts.push(`- 特殊关注：${truncateForLlmPrompt(ctx.customNote, 900)}`);
+  if (ctx.jd) {
+    parts.push("", "### JD（用于拆解硬性要求和加分项）");
+    parts.push(truncateForLlmPrompt(String(ctx.jd).trim(), 5200));
+  }
+  if (ctx.resume) {
+    parts.push("", "### 简历（用于核验候选人陈述）");
+    parts.push(truncateForLlmPrompt(String(ctx.resume).trim(), 3200));
+  }
+  parts.push("");
+  return parts.join("\n");
+}
+
+function buildRecruitTextImportMergePrompt(joined, recruitContext) {
+  const context = buildCompactRecruitContextPrefix(recruitContext);
+  return [
+    "你正在处理 LexVoice 的「导入文本 / MD 结构化整理」。输入已经是文字，可能来自速录稿、已有纪要、面试记录或多份文本合并；不会经过 ASR。没有时间戳、没有音频链接、不是逐字问答时，直接忽略时间戳要求，不要抱怨素材缺失。",
+    "",
+    context,
+    "## 输出文件格式",
+    "",
+    "**必须以 YAML frontmatter 开头**，只写这些字段，缺失写「未提及」：",
+    "",
+    "```yaml",
+    "---",
+    FRONTMATTER_SCHEMA.recruit,
+    "---",
+    "```",
+    "",
+    "frontmatter 后空一行，再输出正文。正文收尾处必须给标签注释，例如：",
+    "<!-- lexvoice-tags: 主题/招聘流程, 主题/岗位匹配, 人物/候选人 -->",
+    "",
+    "## 招聘评估纪律",
+    "",
+    "- 先按 JD 拆出硬性要求、加分项和 seniority 标杆，再对照文本证据评估。",
+    "- 默认候选人不达标；只有文本中有明确正向证据才加分。",
+    "- 诚实、不夸大、承认边界属于基础职业素养，不算亮点。",
+    "- 简历与文本陈述矛盾、结果未闭环、独立主导边界不清、行业或经验跨度不匹配，必须列入风险。",
+    "- 未问到或文本没有证据的 JD 要求，写「未验证」，不要默认及格。",
+    "- 如果文本是已有纪要而非问答，按能力维度和证据组织；不要强行编造题号、面试官问题或时间戳。",
+    "- 如果文本里有候选人原话或明确事实，保留为证据；没有证据就写「未提及 / 未验证」。",
+    "",
+    "## 推荐正文结构",
+    "",
+    "> [!summary] 面试评价",
+    "> 结论：<强烈推荐 / 推荐 / 倾向推荐 / 倾向不推荐 / 不推荐>",
+    "> 核心原因：<2-4 条，必须对应文本证据和 JD 要求>",
+    "",
+    "### 候选人画像",
+    "用 1-3 段说明候选人背景、主要能力表现、与 JD seniority 的差距。",
+    "",
+    "### JD 匹配度",
+    "用简洁表格列出 3-6 条关键 JD 要求：要求 / 证据 / 判断 / 风险或缺口。",
+    "",
+    "### 关键证据",
+    "按能力维度或面试问题整理，不强制题号。每点包含：候选人说了什么、能证明什么、仍缺什么。",
+    "",
+    "### 红旗与待追问",
+    "只写确实由文本触发的风险和追问；不要生成泛泛的面试题库。",
+    "",
+    "### 录用建议",
+    "给出最终建议、适合/不适合的岗位边界，以及下一步验证建议。",
+    "",
+    "## 导入文本",
+    "",
+    joined,
+  ].filter(Boolean).join("\n");
+}
+
+function splitLongTextForLlm(text, maxChars) {
+  const raw = String(text || "").trim();
+  const limit = Math.max(2000, Number(maxChars) || TEXT_IMPORT_PRE_SUMMARY_CHUNK_CHARS);
+  if (!raw) return [];
+  if (raw.length <= limit) return [raw];
+  const chunks = [];
+  const blocks = raw.split(/\n{2,}/);
+  let current = "";
+  const pushCurrent = () => {
+    const value = current.trim();
+    if (value) chunks.push(value);
+    current = "";
+  };
+  for (const block of blocks) {
+    const piece = String(block || "").trim();
+    if (!piece) continue;
+    if (piece.length > limit) {
+      pushCurrent();
+      for (let i = 0; i < piece.length; i += limit) {
+        chunks.push(piece.slice(i, i + limit).trim());
+      }
+      continue;
+    }
+    if (current && current.length + piece.length + 2 > limit) pushCurrent();
+    current = current ? current + "\n\n" + piece : piece;
+  }
+  pushCurrent();
+  return chunks;
+}
+
+function formatMergeSegmentForPrompt(seg, fallbackIndex) {
+  const safeIndex = Number.isFinite(Number(seg && seg.index)) ? Number(seg.index) : fallbackIndex;
+  const start = Number(seg && seg.startOffsetMs) || 0;
+  const end = Number(seg && seg.endOffsetMs) || 0;
+  const anchor = seg && seg.audioName ? ` ${getAudioTimeLink(seg.audioName, start)}` : "";
+  const tag = `===SEG ${safeIndex + 1} (${formatElapsed(start)}-${formatElapsed(end)})${anchor}===`;
+  return `${tag}\n${(seg && seg.text) || "_[此段无内容]_"}`;
+}
+
+async function maybePreSummarizeTextImportForMerge(plugin, segments, mode, recruitContext, sessionMeta) {
+  if (!sessionMeta || sessionMeta.source !== "text-import") return segments;
+  const joined = (segments || []).map((s, i) => formatMergeSegmentForPrompt(s, i)).join("\n\n");
+  if (joined.length <= TEXT_IMPORT_PRE_SUMMARY_THRESHOLD_CHARS) return segments;
+
+  const chunkSize = Math.max(
+    TEXT_IMPORT_PRE_SUMMARY_CHUNK_CHARS,
+    Math.ceil(joined.length / TEXT_IMPORT_PRE_SUMMARY_MAX_CHUNKS),
+  );
+  const chunks = splitLongTextForLlm(joined, chunkSize);
+  if (chunks.length <= 1) return segments;
+
+  await logLlmRequestDiagnostic(plugin, "warn", "llm.merge_long_text_presummary_start", "长文本导入启动分段预摘要", {
+    mode,
+    source: sessionMeta.source,
+    segmentCount: Array.isArray(segments) ? segments.length : 0,
+    inputChars: joined.length,
+    chunkCount: chunks.length,
+    chunkSize,
+  });
+
+  const recruitPrefix = mode === "recruit" && recruitContext
+    ? truncateForLlmPrompt(buildRecruitContextPrefix(recruitContext), TEXT_IMPORT_RECRUIT_CONTEXT_CHARS)
+    : "";
+  const sys = mode === "recruit"
+    ? "你是严格的招聘评估预处理助手。你的任务是把长文本片段压缩为可用于最终招聘评估的证据摘要，不做最终录用结论。"
+    : "你是 LexVoice 的长文本预处理助手。你的任务是把长文本片段压缩为可用于最终整理的结构化证据摘要。";
+  const summaries = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const user = [
+      recruitPrefix,
+      "## 任务",
+      "",
+      `这是导入文本的第 ${i + 1}/${chunks.length} 个片段。请生成结构化预摘要，供后续最终整理使用。`,
+      "",
+      "要求：",
+      "- 只依据本片段，不补充片段外事实。",
+      "- 保留人物、待办、决策、问题、概念、争议点和明确证据。",
+      "- 如果是招聘评估，重点保留 JD 匹配证据、红旗、追问、简历与陈述不一致处。",
+      "- 输出 Markdown bullet，尽量短，但不要丢失关键事实。",
+      "",
+      "## 片段原文",
+      "",
+      chunks[i],
+    ].filter(Boolean).join("\n");
+    try {
+      const summary = await callLlm(plugin, sys, user, { timeoutMs: 90000 });
+      summaries.push(summary || "_[本片段预摘要为空]_");
+    } catch (e) {
+      await logLlmRequestDiagnostic(plugin, "error", "llm.merge_long_text_presummary_failed", "长文本导入分段预摘要失败", {
+        mode,
+        source: sessionMeta.source,
+        chunkIndex: i + 1,
+        chunkCount: chunks.length,
+        chunkChars: chunks[i].length,
+        error: diagnosticError(e),
+      });
+      throw e;
+    }
+  }
+
+  await logLlmRequestDiagnostic(plugin, "info", "llm.merge_long_text_presummary_done", "长文本导入分段预摘要完成", {
+    mode,
+    source: sessionMeta.source,
+    inputChars: joined.length,
+    chunkCount: chunks.length,
+    summaryChars: summaries.reduce((sum, text) => sum + String(text || "").length, 0),
+  });
+
+  return summaries.map((summary, i) => ({
+    index: i,
+    startOffsetMs: 0,
+    endOffsetMs: 0,
+    audioName: "",
+    sourceName: `长文本预摘要 ${i + 1}`,
+    sourcePath: "",
+    rawText: "",
+    text: `【长文本预摘要 ${i + 1}/${summaries.length}】\n${summary}`,
+  }));
+}
+
+async function polishTranscript(plugin, transcript, mode, recruitContext, sessionMeta, originalFrontmatter, repolishOptions) {
   if (!transcript || !transcript.trim()) return "";
   if (mode === "off") return transcript;
   const tpl = resolveTemplatePromptForMode(plugin, mode, false);
   const sys = mode === "recruit"
     ? "你是严格的招聘评估官，立场是替面试官筛掉不达标候选人，而不是替候选人辩护。默认假设候选人不达标，需要看到正向证据才能加分。诚实/不夸大/承认边界是基础职业素养，不计入亮点。结果未闭环、独立主导不清、行业不匹配、关键能力仅'接触过'级别——这些必须列入红旗。"
     : "你是一位专业的文字编辑助手，擅长整理访谈、会议与口述的录音转写。";
-  let userPrompt = applyStructureLevelInstruction(tpl, plugin.settings).replace("{{TRANSCRIPT}}", transcript);
+  let userPrompt = applyStructureLevelInstruction(tpl, plugin.settings, repolishOptions && repolishOptions.structureLevel).replace("{{TRANSCRIPT}}", transcript);
+  userPrompt = applyRepolishPreferenceInstruction(userPrompt, repolishOptions, plugin.settings);
   userPrompt = applyBriefingLanguageInstruction(userPrompt, plugin.settings);
   userPrompt = userPrompt.replace("{{STRUCTURE_INSTRUCTION}}", "");
+  const adaptiveLength = buildAdaptiveBriefingLengthInstruction(mode, {
+    durationMs: getSessionMetaDurationMs(sessionMeta),
+    transcriptChars: transcript.length,
+    segmentCount: 1,
+  });
+  if (adaptiveLength) userPrompt = adaptiveLength + "\n\n---\n\n" + userPrompt;
   const metaPrefix = buildSessionMetaPrefix(sessionMeta, mode);
   if (metaPrefix) userPrompt = metaPrefix + "\n\n---\n\n" + userPrompt;
   const meetingWorkbenchPrompt = buildMeetingWorkbenchPrompt(sessionMeta && sessionMeta.meetingWorkbench);
@@ -8806,45 +11566,103 @@ async function polishTranscript(plugin, transcript, mode, recruitContext, sessio
   const peopleContext = await buildPeopleContextForLlm(plugin);
   if (peopleContext) userPrompt = peopleContext + "\n\n---\n\n" + userPrompt;
   if (mode === "recruit" && recruitContext) {
-    userPrompt = buildRecruitContextPrefix(recruitContext) + "\n\n" + userPrompt;
+    const recruitPrefix = buildRecruitContextPrefix(recruitContext);
+    const compactRecruitContext = sessionMeta
+      && sessionMeta.source === "text-import"
+      && recruitPrefix.length + userPrompt.length > TEXT_IMPORT_FINAL_CONTEXT_COMPACT_THRESHOLD_CHARS;
+    if (compactRecruitContext) {
+      await logLlmRequestDiagnostic(plugin, "warn", "llm.merge_recruit_context_compacted", "招聘文本导入上下文过长，已压缩注入", {
+        mode,
+        source: sessionMeta.source,
+        recruitContextChars: recruitPrefix.length,
+        promptCharsBeforeContext: userPrompt.length,
+        compactChars: TEXT_IMPORT_RECRUIT_CONTEXT_CHARS,
+      });
+    }
+    userPrompt = (compactRecruitContext
+      ? truncateForLlmPrompt(recruitPrefix, TEXT_IMPORT_RECRUIT_CONTEXT_CHARS)
+      : recruitPrefix) + "\n\n" + userPrompt;
   }
+  userPrompt = appendSedimentPreExtractionInstruction(userPrompt);
   const raw = await callLlm(plugin, sys, userPrompt);
-  return postProcessBriefingOutput(raw, mode, sessionMeta, originalFrontmatter);
+  const sedimentPreExtraction = extractSedimentPreExtractionBlock(raw);
+  const polished = postProcessBriefingOutput(sedimentPreExtraction.cleaned, mode, sessionMeta, originalFrontmatter);
+  return sedimentPreExtraction.objects ? appendSedimentPreExtractionBlock(polished, sedimentPreExtraction.objects) : polished;
 }
 
-async function mergeAndPolish(plugin, segments, mode, recruitContext, sessionMeta, originalFrontmatter) {
+async function mergeAndPolish(plugin, segments, mode, recruitContext, sessionMeta, originalFrontmatter, repolishOptions) {
   if (!segments || segments.length === 0) return "";
   if (mode === "off") return segments.map(s => s.text).join("\n\n");
-  const joined = segments.map((s) => {
-    const anchor = s.audioName ? ` ${getAudioTimeLink(s.audioName, s.startOffsetMs)}` : "";
-    const tag = `===SEG ${s.index + 1} (${formatElapsed(s.startOffsetMs)}-${formatElapsed(s.endOffsetMs)})${anchor}===`;
-    return `${tag}\n${s.text || "_[此段无内容]_"}`;
-  }).join("\n\n");
-  const tpl = resolveTemplatePromptForMode(plugin, mode, true);
-  const sys = mode === "recruit"
-    ? "你是严格的招聘评估官，正在合并分段转写并产出最终面试评价。立场是替面试官筛掉不达标候选人，不替候选人辩护。默认假设候选人不达标，需要正向证据才加分。诚实/不夸大/承认边界是基础职业素养，不计入亮点。结果未闭环、独立主导不清、行业不匹配、关键能力仅'接触过'——必须列入红旗。多极化岗位（A 端 + B 端）若两端均未达 senior 深度，必须诊断为'两头不接'，录用建议倾向不推荐。"
-    : "你是一位专业的文字编辑助手，擅长把分段录音转写合并为连续、干净、忠实原意、结构清晰的 Markdown 文档。";
-  let userPrompt = applyStructureLevelInstruction(tpl, plugin.settings).replace("{{TRANSCRIPT}}", joined);
-  userPrompt = applyBriefingLanguageInstruction(userPrompt, plugin.settings);
-  userPrompt = userPrompt.replace("{{STRUCTURE_INSTRUCTION}}", "");
-  // 会话元信息前置
+  segments = await maybePreSummarizeTextImportForMerge(plugin, segments, mode, recruitContext, sessionMeta);
+  const joined = segments.map((s, i) => formatMergeSegmentForPrompt(s, i)).join("\n\n");
   let computedMeta = sessionMeta || null;
   if (!computedMeta && segments.length > 0) {
     // 兜底：mergeAndPolish 没传 sessionMeta 时，从 segments 推 duration（startedAt 仍需调用方传）
     const last = segments[segments.length - 1];
     computedMeta = { duration: formatElapsed(last.endOffsetMs || 0) };
   }
+  const isRecruitTextImport = mode === "recruit" && computedMeta && computedMeta.source === "text-import";
+  const tpl = resolveTemplatePromptForMode(plugin, mode, true);
+  const sys = mode === "recruit"
+    ? "你是严格的招聘评估官，正在合并分段转写并产出最终面试评价。立场是替面试官筛掉不达标候选人，不替候选人辩护。默认假设候选人不达标，需要正向证据才加分。诚实/不夸大/承认边界是基础职业素养，不计入亮点。结果未闭环、独立主导不清、行业不匹配、关键能力仅'接触过'——必须列入红旗。多极化岗位（A 端 + B 端）若两端均未达 senior 深度，必须诊断为'两头不接'，录用建议倾向不推荐。"
+    : "你是一位专业的文字编辑助手，擅长把分段录音转写合并为连续、干净、忠实原意、结构清晰的 Markdown 文档。";
+  let userPrompt;
+  if (isRecruitTextImport) {
+    userPrompt = buildRecruitTextImportMergePrompt(joined, recruitContext);
+    userPrompt = applyBriefingLanguageInstruction(userPrompt, plugin.settings);
+    await logLlmRequestDiagnostic(plugin, "info", "llm.merge_recruit_text_import_compact_prompt", "招聘文本导入使用精简评估提示词", {
+      mode,
+      source: computedMeta.source,
+      segmentCount: segments.length,
+      transcriptChars: joined.length,
+      recruitContextChars: buildCompactRecruitContextPrefix(recruitContext).length,
+      promptChars: userPrompt.length,
+    });
+  } else {
+    userPrompt = applyStructureLevelInstruction(tpl, plugin.settings, repolishOptions && repolishOptions.structureLevel).replace("{{TRANSCRIPT}}", joined);
+    userPrompt = applyRepolishPreferenceInstruction(userPrompt, repolishOptions, plugin.settings);
+    userPrompt = applyBriefingLanguageInstruction(userPrompt, plugin.settings);
+    userPrompt = userPrompt.replace("{{STRUCTURE_INSTRUCTION}}", "");
+    const adaptiveLength = buildAdaptiveBriefingLengthInstruction(mode, {
+      durationMs: sessionMeta && sessionMeta.source === "text-import"
+        ? getSessionMetaDurationMs(sessionMeta)
+        : (getSegmentsDurationMs(segments) || getSessionMetaDurationMs(sessionMeta)),
+      transcriptChars: joined.length,
+      segmentCount: segments.length,
+    });
+    if (adaptiveLength) userPrompt = adaptiveLength + "\n\n---\n\n" + userPrompt;
+  }
   const metaPrefix = buildSessionMetaPrefix(computedMeta, mode);
   if (metaPrefix) userPrompt = metaPrefix + "\n\n---\n\n" + userPrompt;
   const meetingWorkbenchPrompt = buildMeetingWorkbenchPrompt(computedMeta && computedMeta.meetingWorkbench);
   if (meetingWorkbenchPrompt) userPrompt = meetingWorkbenchPrompt + "\n\n---\n\n" + userPrompt;
-  const peopleContext = await buildPeopleContextForLlm(plugin);
-  if (peopleContext) userPrompt = peopleContext + "\n\n---\n\n" + userPrompt;
-  if (mode === "recruit" && recruitContext) {
-    userPrompt = buildRecruitContextPrefix(recruitContext) + "\n\n" + userPrompt;
+  if (!isRecruitTextImport) {
+    const peopleContext = await buildPeopleContextForLlm(plugin);
+    if (peopleContext) userPrompt = peopleContext + "\n\n---\n\n" + userPrompt;
   }
+  if (mode === "recruit" && recruitContext && !isRecruitTextImport) {
+    const recruitPrefix = buildRecruitContextPrefix(recruitContext);
+    const compactRecruitContext = computedMeta
+      && computedMeta.source === "text-import"
+      && recruitPrefix.length + userPrompt.length > TEXT_IMPORT_FINAL_CONTEXT_COMPACT_THRESHOLD_CHARS;
+    if (compactRecruitContext) {
+      await logLlmRequestDiagnostic(plugin, "warn", "llm.merge_recruit_context_compacted", "招聘文本导入上下文过长，已压缩注入", {
+        mode,
+        source: computedMeta.source,
+        recruitContextChars: recruitPrefix.length,
+        promptCharsBeforeContext: userPrompt.length,
+        compactChars: TEXT_IMPORT_RECRUIT_CONTEXT_CHARS,
+      });
+    }
+    userPrompt = (compactRecruitContext
+      ? truncateForLlmPrompt(recruitPrefix, TEXT_IMPORT_RECRUIT_CONTEXT_CHARS)
+      : recruitPrefix) + "\n\n" + userPrompt;
+  }
+  userPrompt = appendSedimentPreExtractionInstruction(userPrompt);
   const raw = await callLlm(plugin, sys, userPrompt);
-  return postProcessBriefingOutput(raw, mode, computedMeta, originalFrontmatter);
+  const sedimentPreExtraction = extractSedimentPreExtractionBlock(raw);
+  const polished = postProcessBriefingOutput(sedimentPreExtraction.cleaned, mode, computedMeta, originalFrontmatter);
+  return sedimentPreExtraction.objects ? appendSedimentPreExtractionBlock(polished, sedimentPreExtraction.objects) : polished;
 }
 
 async function generateTitleTag(plugin, polished, mode) {
@@ -8861,9 +11679,9 @@ async function generateTitleTag(plugin, polished, mode) {
 - 使用中文。
 
 【内容】
-${snippet}`;
+  ${snippet}`;
   try {
-    const title = await callLlm(plugin, sys, user);
+    const title = await callLlm(plugin, sys, user, { timeoutMs: 30 * 1000 });
     return sanitizeFilename(title);
   } catch (e) {
     console.error("[LexVoice] generateTitleTag failed", e);
@@ -8904,7 +11722,31 @@ class TaskQueue {
           task.status = "pending";
           task.lastError = task.lastError || "上次运行中断，已恢复为待处理";
         }
-        if (!["pending", "failed", "missing", "processing"].includes(task.status)) task.status = "pending";
+        if (!["pending", "failed", "missing", "processing", "blocked"].includes(task.status)) task.status = "pending";
+        const maxRetries = (this.plugin && this.plugin.settings && this.plugin.settings.maxRetries) || 3;
+        if (task.type === "transcribe"
+          && task.status === "failed"
+          && task.retries >= maxRetries
+          && /音频不存在/.test(String(task.lastError || ""))) {
+          task.status = "pending";
+          task.retries = Math.max(0, maxRetries - 1);
+          task.lastError = "临时切片缺失，已升级为从完整录音恢复切片后重试";
+        }
+        if (task.type === "merge"
+          && task.status === "failed"
+          && isLlmNonRetryableError(task.lastError || "")) {
+          task.status = "blocked";
+          task.lastError = task.lastError || "大模型不可用，等待用户处理后再重试";
+        }
+        if (task.type === "merge"
+          && task.status === "failed"
+          && task.retries >= maxRetries
+          && !isLlmNonRetryableError(task.lastError || "")
+          && /Failed to fetch|LLM 调用超时|429|500|502|503|504/.test(String(task.lastError || ""))) {
+          task.status = "pending";
+          task.retries = Math.max(0, maxRetries - 1);
+          task.lastError = "上次整理疑似网络或服务端瞬时失败，已升级为可重试";
+        }
         return task;
       });
   }
@@ -8918,7 +11760,37 @@ class TaskQueue {
       t.status !== "missing"
     );
   }
+  findDuplicateTask(task) {
+    if (!task || !task.type) return null;
+    const samePath = (a, b) => obsidian.normalizePath(String(a || "")) === obsidian.normalizePath(String(b || ""));
+    if (task.type === "transcribe") {
+      return this.tasks.find(t => t && t.type === "transcribe"
+        && samePath(t.mdPath, task.mdPath)
+        && samePath(t.audioPath, task.audioPath)
+        && Number(t.segmentIndex) === Number(task.segmentIndex));
+    }
+    if (task.type === "merge") {
+      return this.tasks.find(t => t && t.type === "merge"
+        && samePath(t.mdPath, task.mdPath)
+        && String(t.sessionId || "") === String(task.sessionId || ""));
+    }
+    if (task.type === "generate-prompt") return this.findActiveGeneratePromptTask(task.mode);
+    return null;
+  }
   async add(task) {
+    const existing = this.findDuplicateTask(task);
+    if (existing) {
+      Object.assign(existing, task, {
+        id: existing.id,
+        createdAt: existing.createdAt || task.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        retries: Math.max(0, Number(existing.retries) || 0),
+        status: task.status || existing.status || "pending",
+      });
+      await this.plugin.saveAll();
+      try { this.plugin.refreshOutlineView(); } catch {}
+      return existing;
+    }
     task.id = task.id || genId();
     task.createdAt = task.createdAt || new Date().toISOString();
     task.updatedAt = new Date().toISOString();
@@ -8926,23 +11798,26 @@ class TaskQueue {
     task.status = task.status || "pending";
     this.tasks.push(task);
     await this.plugin.saveAll();
+    try { this.plugin.refreshOutlineView(); } catch {}
     return task;
   }
   async remove(id) {
     this.tasks = this.tasks.filter(t => t.id !== id);
     await this.plugin.saveAll();
+    try { this.plugin.refreshOutlineView(); } catch {}
   }
   async update(id, patch) {
     const t = this.tasks.find(x => x.id === id);
     if (!t) return;
     Object.assign(t, patch, { updatedAt: new Date().toISOString() });
     await this.plugin.saveAll();
+    try { this.plugin.refreshOutlineView(); } catch {}
   }
   async processAll() {
     if (this.running) return;
     this.running = true;
     try {
-      const pending = this.tasks.filter(t => t.status !== "running" && t.retries < (this.plugin.settings.maxRetries || 3));
+      const pending = this.tasks.filter(t => t.status !== "running" && t.status !== "missing" && t.status !== "blocked" && t.retries < (this.plugin.settings.maxRetries || 3));
       for (const t of pending) {
         await this.processOne(t).catch((e) => console.error("[LexVoice] queue task failed", e));
       }
@@ -8959,14 +11834,18 @@ class TaskQueue {
       else throw new Error(`未知任务类型：${task.type}`);
       await this.remove(task.id);
     } catch (e) {
+      const message = (e && e.message) || String(e);
+      const isMissingAudio = task.type === "transcribe" && /音频不存在|临时切片不存在/.test(message);
+      const isBlockedMerge = task.type === "merge" && isLlmNonRetryableError(e);
+      const nextRetries = isBlockedMerge ? (task.retries || 0) : (task.retries || 0) + 1;
       await this.update(task.id, {
-        status: "failed",
-        retries: (task.retries || 0) + 1,
-        lastError: (e && e.message) || String(e),
+        status: isMissingAudio ? "missing" : isBlockedMerge ? "blocked" : "failed",
+        retries: nextRetries,
+        lastError: message,
       });
       await this.plugin.logDiagnostic("error", "queue.task_failed", "队列任务失败", {
         taskType: task.type,
-        retries: (task.retries || 0) + 1,
+        retries: nextRetries,
         maxRetries: this.plugin.settings.maxRetries || 3,
         mdPath: task.mdPath || "",
         audioPath: task.audioPath || "",
@@ -8990,17 +11869,29 @@ class OutlineView extends obsidian.ItemView {
     this.aiOutline = "";
     this.outlineRunning = false;
     this.lastOutlineSegmentCount = 0;
+    this.lastOutlineWorkbenchSignature = "";
     this.outlineSessionId = "";
     this.outlineRunSeq = 0;
     this._renderRaf = 0;
     this._lastSig = "";
     this._lastRenderedOutline = "";
-    this.showRecentHome = false;
+    this.showRecentHome = true;
+    this.idlePanelTab = "";
+    this.recentFilters = { time: "week", mode: "all" };
+    this.sedimentGroup = "person";
+    this.sedimentSwitcherOpen = false;
+    this.sedimentCandidatesByPath = {};
     this.notePanelCacheKey = "";
     this.notePanelCacheData = undefined;
     this.notePanelLoading = false;
     this.inlineAudioEl = null;
     this.inlineAudioFile = null;
+    this.inlineOutlineBody = null;
+    this.outlineViewingMs = null;
+    this.sedimentToastTimer = 0;
+    this.sedimentAdvanceTimer = 0;
+    this.sedimentScanToken = 0;
+    this.sedimentLastUndo = null;
   }
   getViewType() { return VIEW_TYPE_OUTLINE; }
   getDisplayText() { return "LexVoice 实时纪要"; }
@@ -9012,7 +11903,8 @@ class OutlineView extends obsidian.ItemView {
     // 节流：recorder 每 500ms 滴答一次。只更新计时文本，结构不变时不重建 DOM。
     this.unsubscribeRecorder = this.plugin.recorder.on(() => this.scheduleUpdate());
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => {
-      this.showRecentHome = false;
+      this.showRecentHome = true;
+      this.idlePanelTab = "";
       this.scheduleUpdate();
     }));
     if (this.plugin.settings.enableRealtimeOutline
@@ -9025,13 +11917,24 @@ class OutlineView extends obsidian.ItemView {
   async onClose() {
     if (this.unsubscribeRecorder) { this.unsubscribeRecorder(); this.unsubscribeRecorder = null; }
     if (this._renderRaf) { cancelAnimationFrame(this._renderRaf); this._renderRaf = 0; }
+    if (this.sedimentToastTimer) { clearTimeout(this.sedimentToastTimer); this.sedimentToastTimer = 0; }
+    if (this.sedimentAdvanceTimer) { clearTimeout(this.sedimentAdvanceTimer); this.sedimentAdvanceTimer = 0; }
   }
   syncSessionOutline(session) {
     const id = session && session.id ? session.id : "";
-    if (id === this.outlineSessionId) return;
+    const previousId = this.outlineSessionId || "";
+    if (id === previousId) return;
     this.outlineSessionId = id;
+    if (id) {
+      this.showRecentHome = false;
+      this.idlePanelTab = "outline";
+    } else if (previousId) {
+      this.showRecentHome = false;
+      this.idlePanelTab = "outline";
+    }
     this.aiOutline = session && session.realtimeOutline ? session.realtimeOutline : "";
     this.lastOutlineSegmentCount = session && session.realtimeOutlineSegmentCount ? session.realtimeOutlineSegmentCount : 0;
+    this.lastOutlineWorkbenchSignature = session && session.realtimeOutlineWorkbenchSignature ? session.realtimeOutlineWorkbenchSignature : "";
     this.outlineQueued = false;
   }
   // 通过 rAF 合并连续 emit；如签名（结构性状态）未变只做轻量更新，否则全量 render
@@ -9057,7 +11960,10 @@ class OutlineView extends obsidian.ItemView {
     const queueN = this.plugin.queue ? this.plugin.queue.tasks.length : 0;
     const mode = session ? session.mode : getEffectivePolishMode(this.plugin.settings, this.plugin.settings.polishMode);
     const captureMode = this.plugin.settings.captureMode || "mic";
-    const activeNote = !session && !this.showRecentHome ? this.getActiveLexVoiceNoteFile() : null;
+    const activeNote = !session ? this.getActiveLexVoiceNoteFile() : null;
+    const recentFilters = this.getRecentFilters ? this.getRecentFilters() : (this.recentFilters || {});
+    const recentFilterSig = [recentFilters.time, recentFilters.mode].join(":");
+    const sedimentSig = this.getSedimentCandidateSignature ? this.getSedimentCandidateSignature() : "";
     // 招聘上下文卡片的"已填" vs "未填"也要进 signature——填完 JD 后卡片要重渲染
     const ctx = this.plugin.settings.recruitContext || {};
     const ctxFilled = (ctx.jd && ctx.jd.trim()) ? 1 : 0;
@@ -9082,7 +11988,12 @@ class OutlineView extends obsidian.ItemView {
       captureMode,     // ← 音频输入方式切换会触发设备状态条重渲染
       ctxFilled,       // ← JD 填写状态变化触发卡片状态更新
       workbenchSig,
-      this.showRecentHome ? 1 : 0,
+      session && session.workProgress ? `${session.workProgress.stage || ""}:${session.workProgress.label || ""}:${session.workProgress.percent ?? ""}` : "",
+      this.idlePanelTab || (this.showRecentHome ? "recent" : "outline"),
+      recentFilterSig,
+      sedimentSig,
+      this.sedimentGroup || "person",
+      this.sedimentSwitcherOpen ? 1 : 0,
       activeNote ? activeNote.path : "",
       activeNote ? activeNote.stat.mtime : 0,
     ].join("|");
@@ -9110,23 +12021,54 @@ class OutlineView extends obsidian.ItemView {
 
     const session = this.plugin.session;
     const recInfo = this.plugin.recorder.getInfo();
+    const recordingIssue = this.getRecordingIssue(recInfo);
+    if (recordingIssue && recordingIssue.kind) {
+      root.addClass("has-recording-issue");
+      root.addClass(`has-recording-issue-${recordingIssue.kind}`);
+    }
     this.syncSessionOutline(session);
 
     if (session) {
       root.addClass("has-meeting-composer");
-      this.renderActiveHead(root, session, recInfo);
-      this.renderAIOutline(root, session);
+      const sessionNote = this.getSessionNoteFile(session);
+      const activeTab = this.idlePanelTab || "outline";
+      this.renderActiveHead(root, session, recInfo, recordingIssue);
+      this.renderIdleTabs(root, activeTab);
+      if (activeTab === "recent") {
+        this.renderRecent(root);
+      } else if (activeTab === "extract") {
+        if (sessionNote) this.renderExtractionPanel(root, sessionNote);
+        else this.renderPanelEmpty(root, "当前录音笔记尚未生成，录音开始写入纪要后可进行沉淀。");
+      } else {
+        this.renderAIOutline(root, session, recInfo, recordingIssue);
+      }
+      if (recordingIssue && recordingIssue.kind === "microphone") {
+        this.renderMicrophoneBlockedOverlay(root, recordingIssue, recInfo);
+      }
     } else {
       this.renderIdleHead(root);
-      const activeNote = !this.showRecentHome ? this.getActiveLexVoiceNoteFile() : null;
-      if (activeNote) {
-        this.renderCompletedNote(root, activeNote);
+      const activeNote = this.getActiveLexVoiceNoteFile();
+      const activeTab = this.idlePanelTab || "outline";
+      this.renderIdleTabs(root, activeTab);
+      if (activeTab === "outline") {
+        if (activeNote) this.renderCompletedNote(root, activeNote);
+        else this.renderNoOpenNoteEmpty(root, "outline");
+      } else if (activeTab === "extract") {
+        if (activeNote) this.renderExtractionPanel(root, activeNote);
+        else this.renderNoOpenNoteEmpty(root, "extract");
       } else {
         this.renderRecent(root);
       }
     }
     if (session) this.renderMeetingComposer(root, session);
     this._lastSig = this.computeSignature();
+  }
+
+  getSessionNoteFile(session) {
+    const path = session && session.mdPath ? obsidian.normalizePath(session.mdPath) : "";
+    if (!path) return null;
+    const file = this.app.vault.getAbstractFileByPath(path);
+    return file instanceof obsidian.TFile && file.extension === "md" ? file : null;
   }
 
   getActiveLexVoiceNoteFile() {
@@ -9165,23 +12107,2212 @@ class OutlineView extends obsidian.ItemView {
     return undefined;
   }
 
-  renderCompletedNote(root, file) {
-    const data = this.getCompletedNotePanelData(file);
-    const head = root.createDiv({ cls: "lexvoice-outline-head lexvoice-outline-note-head" });
-    this.renderTitleRow(head, "当前纪要");
-    head.createDiv({
-      cls: "lexvoice-outline-meta",
-      text: data && data.title ? data.title : file.basename,
+  renderIdleTabs(root, activeTab) {
+    const tabs = root.createDiv({ cls: "lexvoice-outline-panel-tabs" });
+    const outlineBtn = tabs.createEl("button", {
+      text: "大纲",
+      cls: activeTab === "outline" ? "is-active" : "",
+      attr: { type: "button" },
     });
-    const actions = head.createDiv({ cls: "lexvoice-outline-actions" });
-    const openBtn = actions.createEl("button", { text: "打开笔记" });
-    openBtn.onclick = () => this.app.workspace.getLeaf(false).openFile(file);
-    const homeBtn = actions.createEl("button", { text: "最近记录" });
-    homeBtn.onclick = () => {
-      this.showRecentHome = true;
+    outlineBtn.onclick = () => {
+      this.showRecentHome = false;
+      this.idlePanelTab = "outline";
       this.render();
     };
+    const extractBtn = tabs.createEl("button", {
+      text: "沉淀",
+      cls: activeTab === "extract" ? "is-active" : "",
+      attr: { type: "button" },
+    });
+    extractBtn.onclick = () => {
+      this.showRecentHome = false;
+      this.idlePanelTab = "extract";
+      this.render();
+    };
+    const recentBtn = tabs.createEl("button", {
+      text: "纪要",
+      cls: activeTab === "recent" ? "is-active" : "",
+      attr: { type: "button" },
+    });
+    recentBtn.onclick = () => {
+      this.showRecentHome = true;
+      this.idlePanelTab = "recent";
+      this.render();
+    };
+  }
 
+  renderPanelEmpty(root, text) {
+    const sec = root.createDiv({ cls: "lexvoice-outline-section lexvoice-outline-panel-empty" });
+    sec.createDiv({ cls: "lexvoice-outline-empty", text });
+  }
+
+  renderNoOpenNoteEmpty(root, kind = "outline") {
+    const isExtract = kind === "extract";
+    const sec = root.createDiv({ cls: "lexvoice-outline-section lexvoice-outline-panel-empty lexvoice-empty-state-section" });
+    const box = sec.createDiv({ cls: "lexvoice-empty-state" });
+    const iconWrap = box.createDiv({ cls: "lexvoice-empty-state-icon" });
+    try { obsidian.setIcon(iconWrap, "file-text"); } catch {}
+    box.createDiv({ cls: "lexvoice-empty-state-title", text: "还没有打开纪要" });
+    const desc = box.createDiv({ cls: "lexvoice-empty-state-desc" });
+    desc.createSpan({ text: "从纪要列表选一篇打开，" });
+    desc.createEl("br");
+    desc.createSpan({ text: isExtract ? "就能开始沉淀人、事、知、热词" : "就能查看大纲和回听时间轴" });
+    const btn = box.createEl("button", {
+      cls: "lexvoice-empty-state-action",
+      attr: { type: "button" },
+    });
+    try { obsidian.setIcon(btn.createSpan({ cls: "lexvoice-empty-state-action-icon" }), "list"); } catch {}
+    btn.createSpan({ text: "打开纪要列表" });
+    btn.onclick = () => {
+      this.showRecentHome = true;
+      this.idlePanelTab = "recent";
+      this.render();
+    };
+  }
+
+  renderExtractionPanel(root, file) {
+    const sec = root.createDiv({ cls: "lexvoice-outline-section lexvoice-outline-extract lexvoice-sediment" });
+    const panelData = this.getCompletedNotePanelData(file);
+    if (panelData && panelData.preExtractedSediment) this.hydrateSedimentCandidatesFromEmbedded(file, panelData.preExtractedSediment);
+    const state = this.getSedimentPanelState(file);
+
+    if (panelData === undefined) {
+      sec.createDiv({ cls: "lexvoice-outline-empty", text: "读取沉淀数据…" });
+      return;
+    }
+
+    if (state.scanning) {
+      this.renderSedimentScanning(sec, file, state);
+      return;
+    }
+
+    if (!state.hasPipelineStarted) {
+      this.renderSedimentStart(sec, file, state);
+      return;
+    }
+
+    const groupKey = this.getActiveSedimentGroup(state.groups);
+
+    this.renderSedimentBaton(sec, state, groupKey, file);
+    this.renderSedimentGroup(sec, file, state, groupKey);
+  }
+
+  hydrateSedimentCandidatesFromEmbedded(file, objects) {
+    if (!(file instanceof obsidian.TFile) || !objects) return false;
+    const current = this.getSedimentCandidateBucket(file);
+    const hasExisting = !!(
+      current.scannedAt
+      || (current.people || []).length
+      || (current.todos || []).length
+      || (current.cards || []).length
+      || countVocabularyGroups(current.hotwords)
+    );
+    if (hasExisting) return false;
+    const path = obsidian.normalizePath(file.path || "");
+    const normalized = withSedimentCandidateIds(objects, path, file.basename);
+    this.setSedimentCandidateBucket(file, {
+      people: normalized.people || [],
+      todos: normalized.todos || [],
+      cards: normalized.learningCards || [],
+      hotwords: normalized.hotwords || createVocabularyGroups(),
+      scannedAt: new Date(file.stat && file.stat.mtime ? file.stat.mtime : Date.now()).toISOString(),
+      source: "pre-extracted",
+      initialCounts: this.getSedimentInitialCountsFromObjects(normalized),
+      doneGroups: [],
+      selectedByGroup: {},
+      decisionLogByGroup: {},
+      transitionGroup: "",
+    });
+    return true;
+  }
+
+  getSedimentPanelState(file) {
+    const currentPath = obsidian.normalizePath(file.path || "");
+    const bucket = this.getSedimentCandidateBucket(file);
+    const pendingRecords = normalizePeopleSuggestionCache(this.plugin.settings.peopleSuggestionCache).pending || [];
+    const allPeople = pendingRecords.map(record => peopleSuggestionRecordToSuggestion(record)).filter(Boolean);
+    const cachedPeople = allPeople.filter(item => obsidian.normalizePath(item.sourcePath || "") === currentPath);
+    const currentPeople = this.mergeSedimentPeopleCandidates(currentPath, bucket.people || [], cachedPeople);
+    const otherPeopleCount = Math.max(0, allPeople.length - cachedPeople.length);
+    const ignoredPeople = normalizePeopleSuggestionIgnores(this.plugin.settings.peopleSuggestionIgnores)
+      .map(record => peopleSuggestionIgnoreRecordToSuggestion(record))
+      .filter(Boolean)
+      .filter(item => obsidian.normalizePath(item.sourcePath || "") === currentPath);
+    const vocabScanned = isKnowledgeSourceAlreadyScanned(this.plugin.settings, "vocabulary", file);
+    const peopleScanned = isKnowledgeSourceAlreadyScanned(this.plugin.settings, "people", file);
+    const pendingCounts = {
+      person: currentPeople.length,
+      todo: (bucket.todos || []).length,
+      card: (bucket.cards || []).length,
+      hotword: this.countSedimentHotwordCandidates(bucket.hotwords),
+    };
+    const initialCounts = bucket.initialCounts && typeof bucket.initialCounts === "object" ? bucket.initialCounts : {};
+    const doneGroups = new Set(Array.isArray(bucket.doneGroups) ? bucket.doneGroups : []);
+    const hasCandidates = SEDIMENT_GROUP_ORDER.some(key => pendingCounts[key] > 0);
+    const scanning = !!bucket.scanning;
+    const hasPipelineStarted = !!(bucket.scannedAt || hasCandidates || peopleScanned || vocabScanned || ignoredPeople.length);
+    const groups = SEDIMENT_GROUP_ORDER.map((key, index) => {
+      const cfg = SEDIMENT_GROUP_CONFIG[key];
+      const pending = pendingCounts[key] || 0;
+      const oldDone = key === "person" ? peopleScanned : (key === "hotword" ? vocabScanned : false);
+      const initial = Math.max(0, Number(initialCounts[key]) || 0);
+      const hasDoneFlag = doneGroups.has(key) || oldDone;
+      const emptyDone = !!bucket.scannedAt && !pending && !initial && !hasDoneFlag;
+      const total = Math.max(pending, initial, (hasDoneFlag || emptyDone) ? 1 : 0);
+      const done = total ? Math.max(0, Math.min(total, (hasDoneFlag || emptyDone) ? total : total - pending)) : 0;
+      return {
+        key,
+        lead: cfg.lead,
+        label: cfg.label,
+        unit: cfg.unit,
+        dest: cfg.dest,
+        model: cfg.model,
+        pending,
+        total,
+        done,
+        emptyDone,
+        status: total ? (done >= total ? "已处理" : "待加入") : "无候选",
+        next: SEDIMENT_GROUP_ORDER[index + 1] || null,
+      };
+    });
+    return { currentPeople, otherPeopleCount, ignoredPeople, vocabScanned, peopleScanned, groups, bucket, hasPipelineStarted, scanning };
+  }
+
+  getSedimentCandidateBucket(file) {
+    const path = file instanceof obsidian.TFile ? obsidian.normalizePath(file.path || "") : "";
+    const raw = path && this.sedimentCandidatesByPath ? this.sedimentCandidatesByPath[path] : null;
+    return Object.assign({
+      people: [],
+      todos: [],
+      cards: [],
+      hotwords: createVocabularyGroups(),
+      scannedAt: "",
+      initialCounts: {},
+      doneGroups: [],
+      selectedByGroup: {},
+      decisionLogByGroup: {},
+      transitionGroup: "",
+      scanning: false,
+      scanStartedAt: "",
+    }, raw || {});
+  }
+
+  setSedimentCandidateBucket(file, patch) {
+    if (!(file instanceof obsidian.TFile)) return;
+    const path = obsidian.normalizePath(file.path || "");
+    if (!path) return;
+    const current = this.getSedimentCandidateBucket(file);
+    this.sedimentCandidatesByPath[path] = Object.assign({}, current, patch || {});
+  }
+
+  getSedimentInitialCountsFromObjects(objects) {
+    const normalized = normalizeSedimentExtractionModel(objects);
+    return {
+      person: (normalized.people || []).length,
+      todo: (normalized.todos || []).length,
+      card: (normalized.learningCards || []).length,
+      hotword: this.countSedimentHotwordCandidates(normalized.hotwords),
+    };
+  }
+
+  markSedimentGroupDone(file, groupKey, fallbackTotal) {
+    if (!(file instanceof obsidian.TFile) || !SEDIMENT_GROUP_CONFIG[groupKey]) return false;
+    const bucket = this.getSedimentCandidateBucket(file);
+    const initialCounts = Object.assign({}, bucket.initialCounts || {});
+    const fallback = Math.max(0, Number(fallbackTotal) || 0);
+    initialCounts[groupKey] = Math.max(Number(initialCounts[groupKey]) || 0, fallback, 1);
+    const doneGroups = Array.from(new Set([...(Array.isArray(bucket.doneGroups) ? bucket.doneGroups : []), groupKey]));
+    this.setSedimentCandidateBucket(file, { initialCounts, doneGroups, transitionGroup: groupKey });
+    return true;
+  }
+
+  markSedimentGroupDoneIfEmpty(file, groupKey, fallbackTotal) {
+    if (!(file instanceof obsidian.TFile) || !SEDIMENT_GROUP_CONFIG[groupKey]) return false;
+    const state = this.getSedimentPanelState(file);
+    const group = state.groups.find(item => item.key === groupKey);
+    if (group && group.pending > 0) return false;
+    return this.markSedimentGroupDone(file, groupKey, fallbackTotal);
+  }
+
+  getSedimentCandidateSignature() {
+    const buckets = this.sedimentCandidatesByPath || {};
+    return Object.keys(buckets).sort().map((path) => {
+      const bucket = buckets[path] || {};
+      return [
+        path,
+        bucket.scannedAt || "",
+        (bucket.people || []).length,
+        (bucket.todos || []).length,
+        (bucket.cards || []).length,
+        this.countSedimentHotwordCandidates(bucket.hotwords),
+        JSON.stringify(bucket.initialCounts || {}),
+        (bucket.doneGroups || []).join(","),
+        bucket.transitionGroup || "",
+        bucket.scanning ? 1 : 0,
+        JSON.stringify(bucket.selectedByGroup || {}),
+        JSON.stringify(bucket.decisionLogByGroup || {}),
+      ].join(":");
+    }).join(";");
+  }
+
+  mergeSedimentPeopleCandidates(currentPath, memoryPeople, cachedPeople) {
+    const byKey = new Map();
+    for (const item of (cachedPeople || [])) {
+      const key = item && (item.cacheKey || item.key || getPeopleSuggestionCacheKey(item.sourcePath || currentPath, item));
+      if (key) byKey.set(key, item);
+    }
+    for (const raw of (memoryPeople || [])) {
+      const item = Object.assign({}, raw || {}, {
+        sourcePath: raw && raw.sourcePath ? raw.sourcePath : currentPath,
+      });
+      const key = item.cacheKey || item.key || getPeopleSuggestionCacheKey(item.sourcePath || currentPath, item);
+      if (key && !byKey.has(key)) byKey.set(key, item);
+    }
+    return Array.from(byKey.values());
+  }
+
+  countSedimentHotwordCandidates(groups) {
+    let count = 0;
+    const source = groups || {};
+    for (const def of VOCABULARY_SECTIONS) count += Array.isArray(source[def.key]) ? source[def.key].length : 0;
+    return count;
+  }
+
+  getSedimentHotwordItems(groups) {
+    const items = [];
+    const source = groups || {};
+    for (const def of VOCABULARY_SECTIONS) {
+      for (const term of (Array.isArray(source[def.key]) ? source[def.key] : [])) {
+        items.push({ id: getSedimentHotwordId(def.key, term), title: term, sub: def.title, sectionKey: def.key, term });
+      }
+    }
+    return items;
+  }
+
+  getSedimentGroupRawItems(state, groupKey) {
+    const bucket = state && state.bucket || {};
+    if (groupKey === "person") return state && state.currentPeople || [];
+    if (groupKey === "todo") return bucket.todos || [];
+    if (groupKey === "card") return bucket.cards || [];
+    if (groupKey === "hotword") return this.getSedimentHotwordItems(bucket.hotwords);
+    return [];
+  }
+
+  getSedimentDisplayItems(state, groupKey) {
+    const iconName = groupKey === "todo" ? "check-square" : (groupKey === "card" ? "library" : (groupKey === "hotword" ? "badge-check" : "user-round"));
+    if (groupKey === "todo") {
+      return (this.getSedimentGroupRawItems(state, groupKey) || []).map(item => ({
+        id: getSedimentTodoId(item),
+        raw: item,
+        iconName,
+        title: item.task || item.title || "未命名待办",
+        // sub 仅在没有详细字段渲染时作为兜底；owner/due 空时不污染显示
+        sub: [item.owner, item.due].filter(Boolean).join(" · "),
+        meta: "",
+      }));
+    }
+    if (groupKey === "card") {
+      return (this.getSedimentGroupRawItems(state, groupKey) || []).map(item => ({
+        id: getSedimentCardId(item),
+        raw: item,
+        iconName,
+        title: item.title || "未命名卡片",
+        sub: item.type || "卡片",
+        meta: item.summary || item.reusableLine || "",
+      }));
+    }
+    if (groupKey === "hotword") {
+      return (this.getSedimentGroupRawItems(state, groupKey) || []).map(item => Object.assign({}, item, {
+        raw: item,
+        iconName,
+        meta: "",
+      }));
+    }
+    return (this.getSedimentGroupRawItems(state, groupKey) || []).map(item => ({
+      id: getSedimentPersonId(item.sourcePath || "", item),
+      raw: item,
+      iconName,
+      title: item.name || "未命名人员",
+      sub: item.role || "角色待补充",
+      meta: item.org || item.organization || "组织待补充",
+    }));
+  }
+
+  getSedimentSelectedIds(file, groupKey, items) {
+    const bucket = this.getSedimentCandidateBucket(file);
+    const selectedByGroup = Object.assign({}, bucket.selectedByGroup || {});
+    const allIds = (items || []).map(item => item.id).filter(Boolean);
+    const current = Array.isArray(selectedByGroup[groupKey]) ? selectedByGroup[groupKey].filter(id => allIds.includes(id)) : null;
+    if (current) return new Set(current);
+    if (SEDIMENT_GROUP_CONFIG[groupKey] && SEDIMENT_GROUP_CONFIG[groupKey].defaultAllSelected) {
+      selectedByGroup[groupKey] = allIds;
+      this.setSedimentCandidateBucket(file, { selectedByGroup });
+      return new Set(allIds);
+    }
+    return new Set();
+  }
+
+  setSedimentSelectedIds(file, groupKey, ids) {
+    const bucket = this.getSedimentCandidateBucket(file);
+    const selectedByGroup = Object.assign({}, bucket.selectedByGroup || {});
+    selectedByGroup[groupKey] = Array.from(new Set(ids || [])).filter(Boolean);
+    this.setSedimentCandidateBucket(file, { selectedByGroup });
+  }
+
+  getSedimentGroupReview(file, groupKey) {
+    const bucket = this.getSedimentCandidateBucket(file);
+    const logs = bucket.decisionLogByGroup && typeof bucket.decisionLogByGroup === "object" ? bucket.decisionLogByGroup : {};
+    return logs[groupKey] || null;
+  }
+
+  getActiveSedimentGroup(groups) {
+    const keys = new Set((groups || []).map(group => group.key));
+    let key = this.sedimentGroup || "person";
+    if (!keys.has(key)) key = "person";
+    const active = (groups || []).find(group => group.key === key);
+    if (active && active.total > 0) {
+      this.sedimentGroup = key;
+      return key;
+    }
+    const firstPending = this.findSedimentNextPendingGroup(groups);
+    if (firstPending) key = firstPending.key;
+    else {
+      const firstDone = (groups || []).find(group => group.total > 0);
+      if (firstDone) key = firstDone.key;
+    }
+    if (!keys.has(key) && groups && groups.length) key = groups[0].key;
+    this.sedimentGroup = key;
+    return key;
+  }
+
+  setSedimentGroup(key) {
+    this.sedimentGroup = key || "person";
+    this.sedimentSwitcherOpen = false;
+    this.showRecentHome = false;
+    this.idlePanelTab = "extract";
+    this.render();
+  }
+
+  getSedimentNodeState(group, currentKey) {
+    if (!group || !group.total) return "empty";
+    if (group.done >= group.total) return "done";
+    if (group.key === currentKey) return "current";
+    return "pending";
+  }
+
+  findSedimentNextPendingGroup(groups, afterKey = "") {
+    const list = (groups || []).filter(Boolean);
+    if (!list.length) return null;
+    const start = afterKey ? Math.max(0, list.findIndex(group => group.key === afterKey) + 1) : 0;
+    const ordered = list.slice(start).concat(list.slice(0, start));
+    return ordered.find(group => group.total > 0 && group.done < group.total) || null;
+  }
+
+  scheduleSedimentAutoAdvance(file, completedKey) {
+    if (!(file instanceof obsidian.TFile)) return;
+    if (this.sedimentAdvanceTimer) clearTimeout(this.sedimentAdvanceTimer);
+    const path = obsidian.normalizePath(file.path || "");
+    this.sedimentAdvanceTimer = window.setTimeout(() => {
+      this.sedimentAdvanceTimer = 0;
+      const active = this.getActiveLexVoiceNoteFile();
+      const activePath = active && active.path ? obsidian.normalizePath(active.path) : "";
+      if (activePath && path && activePath !== path) return;
+      const state = this.getSedimentPanelState(file);
+      const next = this.findSedimentNextPendingGroup(state.groups, completedKey);
+      this.setSedimentCandidateBucket(file, { transitionGroup: "" });
+      if (next) this.setSedimentGroup(next.key);
+      else this.render();
+    }, 1000);
+  }
+
+  renderSedimentBaton(parent, state, groupKey, file) {
+    const group = state.groups.find(item => item.key === groupKey) || state.groups[0];
+    const allDone = (state.groups || []).length && (state.groups || []).every(item => !item.total || item.done >= item.total);
+    const currentDone = group && group.total && group.done >= group.total;
+    const wrap = parent.createDiv({ cls: "lexvoice-sediment-baton" + (currentDone || allDone ? " is-done" : "") });
+    const top = wrap.createDiv({ cls: "lexvoice-sediment-baton-top" });
+    const status = top.createDiv({ cls: "lexvoice-sediment-status" });
+    status.createDiv({ cls: "lexvoice-sediment-dot" });
+    const noteTitle = file && file.basename ? file.basename : "当前纪要";
+    const title = status.createSpan({ cls: "lexvoice-sediment-status-title", text: allDone ? "这场会沉淀完了" : noteTitle });
+    title.setAttr("title", noteTitle);
+    top.createSpan({ cls: "lexvoice-sediment-progress-text", text: group && group.total ? `${group.done} / ${group.total}` : "0 / 0" });
+
+    const pipeline = wrap.createDiv({ cls: "lexvoice-sediment-pipeline" });
+    (state.groups || []).forEach((item, index) => {
+      const nodeState = this.getSedimentNodeState(item, groupKey);
+      const node = pipeline.createEl("button", {
+        cls: `lexvoice-sediment-pipeline-node is-${nodeState}`,
+        attr: {
+          type: "button",
+          "data-group": item.key,
+          "aria-label": `${item.label}：${item.status}`,
+        },
+      });
+      const clickable = nodeState === "pending" || (nodeState === "done" && item.key !== groupKey);
+      node.disabled = !clickable;
+      const circle = node.createSpan({ cls: "lexvoice-sediment-pipeline-circle" });
+      if (nodeState === "done") {
+        try { obsidian.setIcon(circle, "check"); } catch { circle.setText("✓"); }
+      } else {
+        circle.setText(String(item.total || 0));
+      }
+      node.createSpan({ cls: "lexvoice-sediment-pipeline-label", text: item.label });
+      node.onclick = (evt) => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        if (!clickable) return;
+        this.setSedimentGroup(item.key);
+      };
+      if (index < (state.groups || []).length - 1) {
+        const chevron = pipeline.createSpan({ cls: "lexvoice-sediment-pipeline-chevron", attr: { "aria-hidden": "true" } });
+        try { obsidian.setIcon(chevron, "chevron-right"); } catch { chevron.setText("›"); }
+      }
+    });
+  }
+
+  renderSedimentSwitchPopover(parent, groups, groupKey) {
+    const pop = parent.createDiv({ cls: "lexvoice-sediment-switch-popover" });
+    for (const group of groups) {
+      const item = pop.createEl("button", {
+        cls: "lexvoice-sediment-switch-item" + (group.key === groupKey ? " is-current" : ""),
+        attr: { type: "button" },
+      });
+      const left = item.createSpan({ cls: "lexvoice-sediment-switch-left" });
+      left.createSpan({ cls: "lexvoice-sediment-switch-dot" });
+      left.createSpan({ text: group.label });
+      item.createSpan({ cls: "lexvoice-sediment-switch-count", text: group.pending ? `${group.pending} ${group.unit}` : group.status });
+      item.onclick = (evt) => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        this.setSedimentGroup(group.key);
+      };
+    }
+  }
+
+  renderSedimentGroup(parent, file, state, groupKey) {
+    const body = parent.createDiv({ cls: "lexvoice-sediment-body" });
+    const group = (state.groups || []).find(item => item.key === groupKey);
+    const isReview = group && group.total > 0 && group.done >= group.total;
+    if (isReview) {
+      this.renderSedimentReviewGroup(body, file, state, groupKey);
+      return;
+    }
+    if (groupKey === "person") {
+      this.renderSedimentRescanRow(body, file);
+      this.renderSedimentPeople(body, file, state);
+    } else if (groupKey === "todo") {
+      this.renderSedimentObjectList(body, file, state, "todo");
+    } else if (groupKey === "card") {
+      this.renderSedimentObjectList(body, file, state, "card");
+    } else {
+      this.renderSedimentObjectList(body, file, state, "hotword");
+    }
+  }
+
+  renderSedimentRescanRow(parent, file) {
+    const row = parent.createDiv({ cls: "lexvoice-sediment-rescan-row" });
+    const btn = row.createEl("button", { cls: "lexvoice-sediment-rescan-button", attr: { type: "button" } });
+    try { obsidian.setIcon(btn.createSpan({ cls: "lexvoice-sediment-rescan-icon" }), "refresh-cw"); } catch {}
+    btn.createSpan({ text: "重扫" });
+    btn.onclick = () => this.confirmSedimentRescan(file);
+  }
+
+  formatSedimentNoteLabel(file) {
+    const name = file && file.basename ? String(file.basename) : "";
+    return name.replace(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2})(\d{2})(.*)$/u, "$2-$3 $4:$5$6");
+  }
+
+  renderSedimentStart(parent, file, state) {
+    this.renderSedimentPrompt(parent, {
+      icon: "sparkles",
+      subtitle: this.formatSedimentNoteLabel(file),
+      title: "AI 还没读过这篇纪要",
+      desc: "扫一下，把人、事、知、热词一次整理好",
+      primaryText: "扫描本篇",
+      onPrimary: () => this.requestSedimentExtraction(file, !!(state.peopleScanned || state.vocabScanned || (state.currentPeople && state.currentPeople.length) || (state.ignoredPeople && state.ignoredPeople.length) || state.otherPeopleCount)),
+    });
+  }
+
+  renderSedimentScanning(parent, file, state) {
+    const bucket = state.bucket || {};
+    const counts = bucket.initialCounts || {};
+    const box = parent.createDiv({ cls: "lexvoice-sediment-prompt is-scanning" });
+    const icon = box.createDiv({ cls: "lexvoice-sediment-prompt-icon" });
+    // 不再用旋转 spinner（下方进度条已经表达"进行中"语义），换成静态扫描图标
+    try { obsidian.setIcon(icon, "scan-line"); } catch {}
+    box.createDiv({ cls: "lexvoice-sediment-prompt-subtitle", text: this.formatSedimentNoteLabel(file) });
+    box.createDiv({ cls: "lexvoice-sediment-prompt-title", text: "正在扫描本篇纪要" });
+    const progress = box.createDiv({ cls: "lexvoice-sediment-scan-progress" });
+    progress.createDiv({ cls: "lexvoice-sediment-scan-progress-fill" });
+    const stats = box.createDiv({ cls: "lexvoice-sediment-scan-stats" });
+    for (const key of SEDIMENT_GROUP_ORDER) {
+      const cfg = SEDIMENT_GROUP_CONFIG[key];
+      const count = Math.max(0, Number(counts[key]) || 0);
+      const stat = stats.createDiv({ cls: "lexvoice-sediment-scan-stat" });
+      stat.createDiv({ cls: "lexvoice-sediment-scan-number", text: String(count) });
+      stat.createDiv({ cls: "lexvoice-sediment-scan-label", text: `已识别${cfg.label}${cfg.unit}` });
+    }
+    const actions = box.createDiv({ cls: "lexvoice-sediment-prompt-actions" });
+    actions.createEl("button", { text: "取消扫描", cls: "lexvoice-sediment-button is-secondary", attr: { type: "button" } }).onclick = () => this.cancelSedimentExtraction(file);
+  }
+
+  renderSedimentPeople(parent, file, state) {
+    if (state.currentPeople.length) {
+      const list = parent.createDiv({ cls: "lexvoice-sediment-list" });
+      for (const item of state.currentPeople.slice(0, 8)) this.renderSedimentPeopleItem(list, file, item);
+      if (state.currentPeople.length > 8) {
+        list.createDiv({ cls: "lexvoice-sediment-more", text: `还有 ${state.currentPeople.length - 8} 条` });
+      }
+      this.renderSedimentFooter(parent, state.groups.find(item => item.key === "person"), state.currentPeople.length, {
+        secondaryText: "全部忽略",
+        onSecondary: () => this.ignorePeopleSuggestions(state.currentPeople, file),
+        onPrimary: () => this.keepPeopleSuggestions(file, state.currentPeople),
+      });
+      return;
+    }
+    this.renderSedimentEmptyList(parent);
+    this.renderSedimentFooter(parent, state.groups.find(item => item.key === "person"), 0, {
+      secondaryText: "全部忽略",
+      onSecondary: () => {},
+      onPrimary: () => {},
+    });
+  }
+
+  renderSedimentObjectList(parent, file, state, groupKey) {
+    const group = state.groups.find(item => item.key === groupKey);
+    const items = this.getSedimentDisplayItems(state, groupKey);
+    const selected = this.getSedimentSelectedIds(file, groupKey, items);
+    this.renderSedimentMultiselectHeader(parent, file, groupKey, items, selected);
+    const list = parent.createDiv({ cls: "lexvoice-sediment-list" });
+    if (!items.length) {
+      this.renderSedimentEmptyList(list);
+    } else {
+      for (const item of items.slice(0, 8)) this.renderSedimentObjectItem(list, file, groupKey, item, selected.has(item.id));
+      if (items.length > 8) list.createDiv({ cls: "lexvoice-sediment-more", text: `还有 ${items.length - 8} 条` });
+    }
+    const selectedCount = Array.from(selected).filter(id => items.some(item => item.id === id)).length;
+    const unselectedCount = Math.max(0, items.length - selectedCount);
+    this.renderSedimentFooter(parent, group, selectedCount, {
+      secondaryText: "忽略未选",
+      secondaryDisabled: !unselectedCount,
+      secondaryTitle: unselectedCount ? `未选的 ${unselectedCount} 条会被标为忽略` : "当前没有未选条目",
+      onSecondary: () => this.confirmIgnoreSedimentUnselected(file, groupKey, unselectedCount),
+      onPrimary: () => this.commitSedimentGroup(file, groupKey),
+    });
+  }
+
+  renderSedimentMultiselectHeader(parent, file, groupKey, items, selected) {
+    const total = (items || []).length;
+    const selectedCount = Array.from(selected || []).filter(id => (items || []).some(item => item.id === id)).length;
+    const allSelected = total > 0 && selectedCount === total;
+    const noneSelected = selectedCount === 0;
+    const header = parent.createDiv({ cls: "lexvoice-sediment-multiselect-header" });
+    const left = header.createDiv({ cls: "lexvoice-sediment-multiselect-left" });
+    const master = left.createEl("button", {
+      cls: "lexvoice-sediment-checkbox" + (allSelected ? " is-checked" : (!noneSelected ? " is-indeterminate" : "")),
+      attr: { type: "button", "aria-label": allSelected ? "取消全选" : "全选" },
+    });
+    master.onclick = () => {
+      this.setSedimentSelectedIds(file, groupKey, allSelected ? [] : (items || []).map(item => item.id));
+      this.render();
+    };
+    left.createSpan({ cls: "lexvoice-sediment-multiselect-count", text: `已选 ${selectedCount} / ${total}` });
+    const actions = header.createDiv({ cls: "lexvoice-sediment-multiselect-actions" });
+    const selectAll = actions.createEl("button", { text: "全选", cls: "lexvoice-sediment-text-button", attr: { type: "button" } });
+    selectAll.disabled = allSelected || !total;
+    selectAll.onclick = () => {
+      this.setSedimentSelectedIds(file, groupKey, (items || []).map(item => item.id));
+      this.render();
+    };
+    const invert = actions.createEl("button", { text: "反选", cls: "lexvoice-sediment-text-button", attr: { type: "button" } });
+    invert.disabled = !total;
+    invert.onclick = () => {
+      const next = (items || []).filter(item => !selected.has(item.id)).map(item => item.id);
+      this.setSedimentSelectedIds(file, groupKey, next);
+      this.render();
+    };
+    const rescan = actions.createEl("button", { cls: "lexvoice-sediment-text-button lexvoice-sediment-rescan-inline", attr: { type: "button" } });
+    try { obsidian.setIcon(rescan.createSpan({ cls: "lexvoice-sediment-rescan-icon" }), "refresh-cw"); } catch {}
+    rescan.createSpan({ text: "重扫" });
+    rescan.onclick = () => this.confirmSedimentRescan(file);
+  }
+
+  renderSedimentObjectItem(parent, file, groupKey, item, checked) {
+    const row = parent.createDiv({ cls: `lexvoice-sediment-list-item lexvoice-sediment-select-item is-${groupKey}` + (checked ? " is-checked" : " is-unchecked") });
+    const checkbox = row.createEl("button", {
+      cls: "lexvoice-sediment-checkbox" + (checked ? " is-checked" : ""),
+      attr: { type: "button", "aria-label": checked ? "取消选择" : "选择" },
+    });
+    checkbox.onclick = () => {
+      const state = this.getSedimentPanelState(file);
+      const items = this.getSedimentDisplayItems(state, groupKey);
+      const selected = this.getSedimentSelectedIds(file, groupKey, items);
+      if (selected.has(item.id)) selected.delete(item.id);
+      else selected.add(item.id);
+      this.setSedimentSelectedIds(file, groupKey, selected);
+      this.render();
+    };
+    const content = row.createDiv({ cls: "lexvoice-sediment-item-content" });
+    if (groupKey === "hotword") {
+      const top = content.createDiv({ cls: "lexvoice-sediment-item-title-row" });
+      top.createDiv({ cls: "lexvoice-sediment-item-title", text: item.title || "" });
+      this.renderSedimentTypePill(top, item.sub || "热词", this.getSedimentTypeIcon(groupKey, item.sub, item.sectionKey));
+      return;
+    }
+    if (groupKey === "card") {
+      const raw = item.raw || {};
+      // 学习卡片：标题独占一行可换行；摘要次之；类型胶囊放底部右下角，作为轻量元信息
+      const titleEl = content.createDiv({ cls: "lexvoice-sediment-item-title is-card", text: item.title || "" });
+      void titleEl;
+      const summary = raw.summary || raw.reusableLine || item.meta || "";
+      if (summary) content.createDiv({ cls: "lexvoice-sediment-item-summary is-card", text: summary });
+      const footer = content.createDiv({ cls: "lexvoice-sediment-card-footer" });
+      this.renderSedimentTypePill(footer, item.sub || "卡片", this.getSedimentTypeIcon(groupKey, item.sub, raw.type));
+      return;
+    }
+    if (groupKey === "todo") {
+      const raw = item.raw || {};
+      const todoId = getSedimentTodoId(raw);
+      row.dataset.todoId = todoId;
+      // 标题：可点击进入 contenteditable 编辑态
+      const titleEl = content.createDiv({
+        cls: "lexvoice-sediment-item-title lexvoice-todo-title",
+        text: item.title || "",
+        attr: { "data-field": "title", role: "button", tabindex: "0" },
+      });
+      titleEl.onclick = (evt) => { evt.stopPropagation(); this.enterTodoTitleEdit(titleEl, file, raw); };
+      const meta = content.createDiv({ cls: "lexvoice-sediment-field-row" });
+      const ownerField = this.renderSedimentField(meta, "user", raw.owner || "加责任人", raw.owner ? "" : "is-empty");
+      ownerField.dataset.field = "owner";
+      ownerField.onclick = (evt) => { evt.stopPropagation(); this.enterTodoOwnerEdit(ownerField, content, file, raw); };
+      const dueField = this.renderSedimentField(meta, "calendar-plus", raw.due || "加时间", raw.due ? "is-time" : "is-empty");
+      dueField.dataset.field = "due";
+      dueField.onclick = (evt) => { evt.stopPropagation(); this.enterTodoDueEdit(dueField, content, file, raw); };
+      // Todoist 风格：字段位置永远只是"+ 添加子任务"，已有的子任务在下面常驻一条列表
+      const subtaskField = this.renderSedimentField(meta, "plus", "添加子任务", "is-empty is-add-subtask");
+      subtaskField.dataset.field = "subtasks";
+      subtaskField.onclick = (evt) => { evt.stopPropagation(); this.enterTodoSubtasksAdd(subtaskField, content, file, raw); };
+      // 常驻子任务列表（每行 contenteditable，× 删除）
+      const existingSubs = normalizeSedimentTodoSubtasks(raw.subtasks || raw.children || []);
+      if (existingSubs.length) this.renderTodoSubtaskStrip(content, file, raw, existingSubs);
+      // 渲染完成后，如果有待恢复的 inline 编辑（来自 Tab 切换 / 保存后的下一字段），自动进入
+      if (this.inlineTodoPendingFocus && this.inlineTodoPendingFocus.todoId === todoId) {
+        const pending = this.inlineTodoPendingFocus;
+        this.inlineTodoPendingFocus = null;
+        const target = row.querySelector(`[data-field="${pending.field}"]`);
+        if (target) window.setTimeout(() => target.click(), 20);
+      }
+      return;
+    }
+    const top = content.createDiv({ cls: "lexvoice-sediment-item-top" });
+    top.createDiv({ cls: "lexvoice-sediment-item-title", text: item.title || "" });
+    if (item.sub) content.createDiv({ cls: "lexvoice-sediment-item-sub", text: item.sub });
+    if (item.meta) content.createDiv({ cls: "lexvoice-sediment-item-meta", text: item.meta });
+  }
+
+  getSedimentTypeIcon(groupKey, label, key) {
+    const text = `${label || ""} ${key || ""}`;
+    if (/人|people|person/i.test(text)) return "user";
+    if (/品牌|机构|brand|org|company/i.test(text)) return "building";
+    if (/观点|point|insight/i.test(text)) return "bulb";
+    if (/机制|mechanism|settings/i.test(text)) return "settings-2";
+    if (/案例|case/i.test(text)) return "flask";
+    if (/问答|qa|question/i.test(text)) return "message-question";
+    if (groupKey === "card") return "bookmark";
+    return "tag";
+  }
+
+  renderSedimentTypePill(parent, label, iconName) {
+    const pill = parent.createSpan({ cls: "lexvoice-sediment-type-pill" });
+    try { obsidian.setIcon(pill.createSpan({ cls: "lexvoice-sediment-type-icon" }), iconName || "tag"); } catch {}
+    pill.createSpan({ text: label || "类型" });
+    return pill;
+  }
+
+  renderSedimentField(parent, iconName, text, cls = "") {
+    const field = parent.createSpan({ cls: `lexvoice-sediment-field ${cls}`.trim() });
+    field.setAttr("role", "button");
+    field.setAttr("tabindex", "0");
+    try { obsidian.setIcon(field.createSpan({ cls: "lexvoice-sediment-field-icon" }), iconName); } catch {}
+    field.createSpan({ text: text || "" });
+    return field;
+  }
+
+  // ===================== 待办行内编辑（v3.5 设计稿） =====================
+  // 设计原则：就地编辑、零弹窗、键盘优先。同一时间只允许一个待办处于编辑态。
+  // 切换字段或切换待办时，前一个编辑自动 commit + cleanup。
+  // 保存触发 updateSedimentTodoCandidate → render()，DOM 整体重建。
+  // Tab 切换字段：把 { todoId, field } 写入 this.inlineTodoPendingFocus，
+  // render 时由 todo 渲染分支检测到并自动重新进入对应字段。
+
+  closeInlineTodoEditor() {
+    if (this.inlineTodoEditor && typeof this.inlineTodoEditor.close === "function") {
+      try { this.inlineTodoEditor.close(); } catch (e) { console.warn("[LexVoice] inline close failed", e); }
+    }
+    this.inlineTodoEditor = null;
+  }
+
+  // 标题：contenteditable 就地改
+  enterTodoTitleEdit(titleEl, file, raw) {
+    if (this.inlineTodoEditor && this.inlineTodoEditor._anchor === titleEl) return;
+    this.closeInlineTodoEditor();
+    const original = (titleEl.textContent || "").trim();
+    const todoId = getSedimentTodoId(raw);
+    titleEl.contentEditable = "true";
+    titleEl.classList.add("is-editing");
+    titleEl.focus();
+    // 全选已有文本，方便直接覆盖
+    const sel = window.getSelection();
+    if (sel) {
+      const range = document.createRange();
+      range.selectNodeContents(titleEl);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    let done = false;
+    const finish = async (shouldSave, nextField) => {
+      if (done) return;
+      done = true;
+      titleEl.contentEditable = "false";
+      titleEl.classList.remove("is-editing");
+      titleEl.removeEventListener("keydown", onKey);
+      titleEl.removeEventListener("blur", onBlur);
+      const newText = (titleEl.textContent || "").trim();
+      this.inlineTodoEditor = null;
+      if (nextField) this.inlineTodoPendingFocus = { todoId, field: nextField };
+      if (shouldSave && newText && newText !== original) {
+        await this.updateSedimentTodoCandidate(file, raw, { task: newText });
+      } else if (nextField) {
+        this.render();
+      }
+    };
+    const onKey = (e) => {
+      if (e.key === "Enter") { e.preventDefault(); finish(true, null); }
+      else if (e.key === "Escape") { e.preventDefault(); titleEl.textContent = original; finish(false, null); }
+      else if (e.key === "Tab") {
+        e.preventDefault();
+        finish(true, e.shiftKey ? null : "owner");
+      }
+    };
+    const onBlur = () => finish(true, null);
+    titleEl.addEventListener("keydown", onKey);
+    titleEl.addEventListener("blur", onBlur);
+    this.inlineTodoEditor = { _anchor: titleEl, close: () => finish(true, null) };
+  }
+
+  // 责任人：字段位置改 input，下方展开下拉
+  async enterTodoOwnerEdit(fieldEl, content, file, raw) {
+    if (this.inlineTodoEditor && this.inlineTodoEditor._anchor === fieldEl) return;
+    this.closeInlineTodoEditor();
+    const todoId = getSedimentTodoId(raw);
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "lexvoice-todo-inline-input is-owner";
+    input.placeholder = "搜索或输入新名字";
+    input.value = raw.owner || "";
+    fieldEl.replaceWith(input);
+    const panel = content.createDiv({ cls: "lexvoice-todo-inline-panel is-owner" });
+    const list = panel.createDiv({ cls: "lexvoice-todo-inline-list" });
+    list.createDiv({ cls: "lexvoice-todo-inline-loading", text: "加载人员…" });
+    let people = [];
+    try { people = await loadPeopleDirectory(this) || []; } catch (e) { console.warn("[LexVoice] load people failed", e); }
+    let items = [];
+    let selectedIdx = 0;
+    const highlight = () => items.forEach((it, i) => it.classList.toggle("is-active", i === selectedIdx));
+    const renderList = (query) => {
+      list.empty();
+      items = [];
+      const q = (query || "").trim().toLowerCase();
+      const filtered = !q ? people : people.filter((p) => {
+        const txt = `${p.name || ""} ${p.aliases || ""} ${p.role || ""} ${p.org || ""}`.toLowerCase();
+        return txt.includes(q);
+      });
+      if (raw.owner) {
+        const cur = list.createDiv({ cls: "lexvoice-todo-inline-item is-current" });
+        try { obsidian.setIcon(cur.createSpan({ cls: "lexvoice-todo-inline-item-icon" }), "user-check"); } catch {}
+        cur.createSpan({ cls: "lexvoice-todo-inline-item-name", text: raw.owner });
+        const clr = cur.createSpan({ cls: "lexvoice-todo-inline-item-clear", text: "清除" });
+        clr.onclick = (e) => { e.stopPropagation(); finish("", null); };
+        cur.dataset.value = raw.owner;
+        cur.onclick = () => finish(raw.owner, null);
+        items.push(cur);
+      }
+      for (const p of filtered.slice(0, 8)) {
+        const it = list.createDiv({ cls: "lexvoice-todo-inline-item" });
+        try { obsidian.setIcon(it.createSpan({ cls: "lexvoice-todo-inline-item-icon" }), "user"); } catch {}
+        it.createSpan({ cls: "lexvoice-todo-inline-item-name", text: p.name || "未命名" });
+        if (p.role || p.org) it.createSpan({ cls: "lexvoice-todo-inline-item-meta", text: [p.role, p.org].filter(Boolean).join(" · ") });
+        it.dataset.value = p.name || "";
+        it.onclick = () => finish(p.name || "", null);
+        items.push(it);
+      }
+      if (q && !filtered.some((p) => (p.name || "").toLowerCase() === q)) {
+        const it = list.createDiv({ cls: "lexvoice-todo-inline-item is-new" });
+        try { obsidian.setIcon(it.createSpan({ cls: "lexvoice-todo-inline-item-icon" }), "user-plus"); } catch {}
+        it.createSpan({ cls: "lexvoice-todo-inline-item-name", text: `+ 新建 "${query.trim()}"` });
+        it.dataset.value = query.trim();
+        it.onclick = () => finish(query.trim(), null);
+        items.push(it);
+      }
+      if (!items.length) list.createDiv({ cls: "lexvoice-todo-inline-empty", text: "人员库为空，直接输入新名字 + 回车" });
+      selectedIdx = 0;
+      highlight();
+    };
+    renderList("");
+    let done = false;
+    const finish = async (newOwner, nextField) => {
+      if (done) return;
+      done = true;
+      cleanup();
+      this.inlineTodoEditor = null;
+      if (nextField) this.inlineTodoPendingFocus = { todoId, field: nextField };
+      const trimmed = String(newOwner || "").trim();
+      if (trimmed !== (raw.owner || "")) {
+        await this.updateSedimentTodoCandidate(file, raw, { owner: trimmed });
+      } else {
+        this.render();
+      }
+    };
+    const onInput = () => renderList(input.value);
+    const onKey = (e) => {
+      if (e.key === "ArrowDown") { e.preventDefault(); if (items.length) { selectedIdx = Math.min(selectedIdx + 1, items.length - 1); highlight(); } }
+      else if (e.key === "ArrowUp") { e.preventDefault(); if (items.length) { selectedIdx = Math.max(selectedIdx - 1, 0); highlight(); } }
+      else if (e.key === "Enter") {
+        e.preventDefault();
+        const target = items[selectedIdx];
+        if (target) finish(target.dataset.value || "", null);
+        else if (input.value.trim()) finish(input.value.trim(), null);
+      }
+      else if (e.key === "Escape") { e.preventDefault(); finish(raw.owner || "", null); }
+      else if (e.key === "Tab") { e.preventDefault(); finish(input.value.trim() || (raw.owner || ""), e.shiftKey ? "title" : "due"); }
+    };
+    const onOutside = (e) => {
+      if (!panel.contains(e.target) && e.target !== input && !input.contains(e.target)) finish(input.value.trim() || (raw.owner || ""), null);
+    };
+    const cleanup = () => {
+      input.removeEventListener("input", onInput);
+      input.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onOutside, true);
+    };
+    input.addEventListener("input", onInput);
+    input.addEventListener("keydown", onKey);
+    window.setTimeout(() => document.addEventListener("mousedown", onOutside, true), 0);
+    input.focus();
+    input.select();
+    this.inlineTodoEditor = { _anchor: fieldEl, close: () => finish(input.value.trim() || (raw.owner || ""), null) };
+  }
+
+  // 截止日：5 个快捷 + native date input
+  enterTodoDueEdit(fieldEl, content, file, raw) {
+    if (this.inlineTodoEditor && this.inlineTodoEditor._anchor === fieldEl) return;
+    this.closeInlineTodoEditor();
+    const todoId = getSedimentTodoId(raw);
+    fieldEl.classList.add("is-editing");
+    // 设计稿：字段在编辑态文字变成"选时间"
+    const textSpan = fieldEl.querySelector(":scope > span:not(.lexvoice-sediment-field-icon)");
+    if (textSpan) textSpan.setText("选时间");
+    const panel = content.createDiv({ cls: "lexvoice-todo-inline-panel is-due" });
+    const bar = panel.createDiv({ cls: "lexvoice-todo-inline-quickbar" });
+    const moment = window.moment;
+    const presets = moment ? [
+      { key: "1", label: "今天", value: moment().format("YYYY-MM-DD") },
+      { key: "2", label: "明天", value: moment().add(1, "day").format("YYYY-MM-DD") },
+      { key: "3", label: "本周末", value: moment().endOf("week").format("YYYY-MM-DD") },
+      { key: "4", label: "下周", value: moment().add(1, "week").format("YYYY-MM-DD") },
+    ] : [];
+    let matched = false;
+    for (const p of presets) {
+      const btn = bar.createEl("button", { cls: "lexvoice-todo-inline-preset", text: p.label, attr: { type: "button", "data-key": p.key } });
+      // 只让第一个匹配的 preset 高亮（避免"今天 = 本周末"这种重叠都亮起）
+      if (!matched && raw.due && raw.due === p.value) { btn.classList.add("is-active"); matched = true; }
+      btn.onclick = () => finish(p.value, null);
+    }
+    const customBtn = bar.createEl("button", { cls: "lexvoice-todo-inline-preset is-custom", attr: { type: "button", "data-key": "5" } });
+    try { obsidian.setIcon(customBtn.createSpan({ cls: "lexvoice-todo-inline-preset-icon" }), "calendar"); } catch {}
+    customBtn.createSpan({ text: "自定" });
+    customBtn.onclick = () => showCustom();
+    if (raw.due) {
+      const clr = bar.createEl("button", { cls: "lexvoice-todo-inline-preset is-clear", text: "清除", attr: { type: "button" } });
+      clr.onclick = () => finish("", null);
+    }
+    const showCustom = () => {
+      bar.empty();
+      const dateInput = bar.createEl("input", { cls: "lexvoice-todo-inline-date", attr: { type: "date" } });
+      const currentISO = raw.due && /^\d{4}-\d{2}-\d{2}/.test(raw.due) ? raw.due.slice(0, 10) : "";
+      dateInput.value = currentISO;
+      dateInput.onchange = () => { if (dateInput.value) finish(dateInput.value, null); };
+      dateInput.focus();
+      try { dateInput.click(); } catch {}
+    };
+    let done = false;
+    const finish = async (newDue, nextField) => {
+      if (done) return;
+      done = true;
+      cleanup();
+      this.inlineTodoEditor = null;
+      if (nextField) this.inlineTodoPendingFocus = { todoId, field: nextField };
+      if (newDue !== (raw.due || "")) {
+        await this.updateSedimentTodoCandidate(file, raw, { due: newDue });
+      } else {
+        this.render();
+      }
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); finish(raw.due || "", null); }
+      else if (e.key === "Tab") { e.preventDefault(); finish(raw.due || "", e.shiftKey ? "owner" : "subtasks"); }
+      else if (["1","2","3","4","5"].includes(e.key)) {
+        const btn = bar.querySelector(`[data-key="${e.key}"]`);
+        if (btn) { e.preventDefault(); btn.click(); }
+      }
+    };
+    const onOutside = (e) => { if (!panel.contains(e.target) && e.target !== fieldEl) finish(raw.due || "", null); };
+    const cleanup = () => {
+      document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("mousedown", onOutside, true);
+    };
+    window.setTimeout(() => {
+      document.addEventListener("keydown", onKey, true);
+      document.addEventListener("mousedown", onOutside, true);
+    }, 0);
+    this.inlineTodoEditor = { _anchor: fieldEl, close: () => finish(raw.due || "", null) };
+  }
+
+  // 常驻子任务列表（Todoist 风格）：永远显示已有子任务，行内可改、× 删除
+  renderTodoSubtaskStrip(content, file, raw, subs) {
+    const strip = content.createDiv({ cls: "lexvoice-todo-subtask-strip" });
+    subs.forEach((sub, idx) => {
+      const row = strip.createDiv({ cls: "lexvoice-todo-subtask-strip-row" });
+      row.createSpan({ cls: "lexvoice-todo-subtask-strip-check" });
+      const text = row.createSpan({ cls: "lexvoice-todo-subtask-strip-text", text: sub });
+      text.setAttr("contenteditable", "true");
+      text.setAttr("spellcheck", "false");
+      text.dataset.original = sub;
+      text.addEventListener("focus", () => text.classList.add("is-editing"));
+      const saveIfChanged = async () => {
+        text.classList.remove("is-editing");
+        const val = (text.textContent || "").trim();
+        const original = text.dataset.original || "";
+        if (val === original) return;
+        const next = subs.slice();
+        if (val) next[idx] = val;
+        else next.splice(idx, 1);
+        const cleaned = next.map((s) => String(s || "").trim()).filter(Boolean);
+        await this.updateSedimentTodoCandidate(file, raw, { subtasks: cleaned });
+      };
+      text.addEventListener("blur", () => { saveIfChanged(); });
+      text.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); text.blur(); }
+        else if (e.key === "Escape") {
+          e.preventDefault();
+          text.textContent = text.dataset.original || "";
+          text.blur();
+        }
+        else if (e.key === "Backspace" && !text.textContent) {
+          e.preventDefault();
+          text.dataset.original = ""; // 触发 blur 后按"删除"路径
+          text.blur();
+        }
+      });
+      const del = row.createSpan({ cls: "lexvoice-todo-subtask-strip-del", attr: { "aria-label": "删除" } });
+      try { obsidian.setIcon(del, "x"); } catch { del.setText("×"); }
+      del.onmousedown = (e) => { e.preventDefault(); }; // 防止 text contenteditable 先触发 blur
+      del.onclick = async (e) => {
+        e.stopPropagation();
+        const next = subs.slice();
+        next.splice(idx, 1);
+        await this.updateSedimentTodoCandidate(file, raw, { subtasks: next });
+      };
+    });
+  }
+
+  // "+ 添加子任务" 专职 add：只展开一个紧凑的 input；Enter 即添加 + 即时保存
+  enterTodoSubtasksAdd(fieldEl, content, file, raw) {
+    if (this.inlineTodoEditor && this.inlineTodoEditor._anchor === fieldEl) return;
+    this.closeInlineTodoEditor();
+    const todoId = getSedimentTodoId(raw);
+    const MAX = 5;
+    const existingSubs = normalizeSedimentTodoSubtasks(raw.subtasks || raw.children || []);
+    if (existingSubs.length >= MAX) {
+      try { new obsidian.Notice("最多 5 个子任务"); } catch {}
+      return;
+    }
+    fieldEl.classList.add("is-editing");
+    const addPanel = content.createDiv({ cls: "lexvoice-todo-inline-panel is-subtask-add" });
+    const addRow = addPanel.createDiv({ cls: "lexvoice-todo-inline-subtask-add" });
+    try { obsidian.setIcon(addRow.createSpan({ cls: "lexvoice-todo-inline-subtask-add-icon" }), "plus"); } catch {}
+    const input = addRow.createEl("input", {
+      cls: "lexvoice-todo-inline-subtask-input",
+      attr: { type: "text", placeholder: existingSubs.length ? `已 ${existingSubs.length}/${MAX}，继续添加` : "添加子任务，回车继续" },
+    });
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      cleanup();
+      fieldEl.classList.remove("is-editing");
+      this.inlineTodoEditor = null;
+      try { addPanel.remove(); } catch {}
+    };
+    const onKey = async (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const val = input.value.trim();
+        if (!val) return;
+        const fresh = normalizeSedimentTodoSubtasks(raw.subtasks || raw.children || []).slice();
+        if (fresh.length >= MAX) { try { new obsidian.Notice("最多 5 个子任务"); } catch {}; return; }
+        fresh.push(val);
+        // 即时保存：会触发 render；为了让用户能继续按 Enter 添加下一条，
+        // 把 pending focus 设到 subtasks 字段，render 后会自动重开 add 输入框
+        cleanup();
+        fieldEl.classList.remove("is-editing");
+        this.inlineTodoEditor = null;
+        done = true;
+        if (fresh.length < MAX) this.inlineTodoPendingFocus = { todoId, field: "subtasks" };
+        await this.updateSedimentTodoCandidate(file, raw, { subtasks: fresh });
+      }
+      else if (e.key === "Escape") { e.preventDefault(); finish(); }
+      else if (e.key === "Tab") { e.preventDefault(); finish(); }
+    };
+    const onOutside = (e) => { if (!addPanel.contains(e.target) && e.target !== fieldEl) finish(); };
+    const cleanup = () => {
+      input.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onOutside, true);
+    };
+    input.addEventListener("keydown", onKey);
+    window.setTimeout(() => document.addEventListener("mousedown", onOutside, true), 0);
+    input.focus();
+    this.inlineTodoEditor = { _anchor: fieldEl, close: finish };
+  }
+
+  // (旧实现保留作 dead code；新调用走 enterTodoSubtasksAdd + renderTodoSubtaskStrip)
+  enterTodoSubtasksEdit(fieldEl, content, file, raw) {
+    if (this.inlineTodoEditor && this.inlineTodoEditor._anchor === fieldEl) return;
+    this.closeInlineTodoEditor();
+    const todoId = getSedimentTodoId(raw);
+    fieldEl.classList.add("is-editing");
+    const existing = normalizeSedimentTodoSubtasks(raw.subtasks || raw.children || []).slice();
+    const MAX = 5;
+    const panel = content.createDiv({ cls: "lexvoice-todo-inline-panel is-subtasks" });
+    const listEl = panel.createDiv({ cls: "lexvoice-todo-inline-subtask-list" });
+    const addRow = panel.createDiv({ cls: "lexvoice-todo-inline-subtask-add" });
+    try { obsidian.setIcon(addRow.createSpan({ cls: "lexvoice-todo-inline-subtask-add-icon" }), "plus"); } catch {}
+    const addInput = addRow.createEl("input", {
+      cls: "lexvoice-todo-inline-subtask-input",
+      attr: { type: "text", placeholder: "添加子任务，回车继续" },
+    });
+    const footer = panel.createDiv({ cls: "lexvoice-todo-inline-subtask-footer" });
+    const countEl = footer.createSpan({ cls: "lexvoice-todo-inline-subtask-count" });
+    footer.createSpan({ cls: "lexvoice-todo-inline-subtask-hint", text: "↵ 添加 · Esc 收起" });
+    const updateCount = () => {
+      countEl.setText(`${existing.length}/${MAX} 项`);
+      if (existing.length >= MAX) {
+        addInput.disabled = true;
+        addInput.placeholder = "已达上限";
+      } else {
+        addInput.disabled = false;
+        addInput.placeholder = "添加子任务，回车继续";
+      }
+    };
+    const renderList = () => {
+      listEl.empty();
+      existing.forEach((sub, i) => {
+        const row = listEl.createDiv({ cls: "lexvoice-todo-inline-subtask-row" });
+        row.createSpan({ cls: "lexvoice-todo-inline-subtask-check" });
+        const text = row.createSpan({ cls: "lexvoice-todo-inline-subtask-text", text: sub });
+        text.setAttr("contenteditable", "true");
+        text.oninput = () => { existing[i] = text.textContent || ""; };
+        text.onkeydown = (e) => {
+          if (e.key === "Enter") { e.preventDefault(); addInput.focus(); }
+          if (e.key === "Backspace" && !text.textContent) {
+            e.preventDefault();
+            existing.splice(i, 1);
+            renderList();
+            updateCount();
+          }
+        };
+        const del = row.createSpan({ cls: "lexvoice-todo-inline-subtask-del", attr: { "aria-label": "删除" } });
+        try { obsidian.setIcon(del, "x"); } catch { del.setText("×"); }
+        del.onclick = (e) => {
+          e.stopPropagation();
+          existing.splice(i, 1);
+          renderList();
+          updateCount();
+        };
+      });
+    };
+    renderList();
+    updateCount();
+    let done = false;
+    const finish = async (nextField) => {
+      if (done) return;
+      done = true;
+      cleanup();
+      this.inlineTodoEditor = null;
+      if (nextField) this.inlineTodoPendingFocus = { todoId, field: nextField };
+      // 过滤空项
+      const cleanedSubs = existing.map((s) => String(s || "").trim()).filter(Boolean);
+      const oldSubs = normalizeSedimentTodoSubtasks(raw.subtasks || raw.children || []);
+      const changed = cleanedSubs.length !== oldSubs.length
+        || cleanedSubs.some((s, i) => s !== oldSubs[i]);
+      if (changed) await this.updateSedimentTodoCandidate(file, raw, { subtasks: cleanedSubs });
+      else this.render();
+    };
+    const onAddKey = (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const val = addInput.value.trim();
+        if (val && existing.length < MAX) {
+          existing.push(val);
+          addInput.value = "";
+          renderList();
+          updateCount();
+          addInput.focus();
+        }
+      }
+      else if (e.key === "Escape") { e.preventDefault(); finish(null); }
+      else if (e.key === "Tab") { e.preventDefault(); finish(e.shiftKey ? "due" : null); }
+    };
+    const onOutside = (e) => { if (!panel.contains(e.target) && e.target !== fieldEl) finish(null); };
+    const cleanup = () => {
+      addInput.removeEventListener("keydown", onAddKey);
+      document.removeEventListener("mousedown", onOutside, true);
+    };
+    addInput.addEventListener("keydown", onAddKey);
+    window.setTimeout(() => document.addEventListener("mousedown", onOutside, true), 0);
+    addInput.focus();
+    this.inlineTodoEditor = { _anchor: fieldEl, close: () => finish(null) };
+  }
+  // ===================== /待办行内编辑 =====================
+
+  async updateSedimentTodoCandidate(file, sourceTodo, patch) {
+    if (!(file instanceof obsidian.TFile) || !sourceTodo) return;
+    const bucket = this.getSedimentCandidateBucket(file);
+    const oldId = getSedimentTodoId(sourceTodo);
+    let updated = null;
+    const todos = (bucket.todos || []).map((todo) => {
+      if (getSedimentTodoId(todo) !== oldId) return todo;
+      updated = Object.assign({}, todo, patch || {});
+      updated.subtasks = normalizeSedimentTodoSubtasks(updated.subtasks || updated.children || updated.steps || updated.items);
+      // 保留空字符串，让 UI 端 "加责任人 / 加时间" 占位逻辑能生效
+      if (!updated.owner || /^(未指定|无|待定|TBD|N\/A|null|none)$/i.test(String(updated.owner))) updated.owner = "";
+      if (!updated.due || /^(未指定|无|待定|TBD|N\/A|null|none)$/i.test(String(updated.due))) updated.due = "";
+      updated.id = updated.id || getSedimentTodoId(updated);
+      return updated;
+    });
+    if (!updated) return;
+    const selectedByGroup = Object.assign({}, bucket.selectedByGroup || {});
+    if (Array.isArray(selectedByGroup.todo)) {
+      const nextId = getSedimentTodoId(updated);
+      selectedByGroup.todo = selectedByGroup.todo.map(id => id === oldId ? nextId : id);
+    }
+    this.setSedimentCandidateBucket(file, { todos, selectedByGroup });
+    await this.persistSedimentCandidateBucket(file);
+    this.render();
+  }
+
+  openSedimentTodoEditModal(file, todo, focus = "task") {
+    if (!(file instanceof obsidian.TFile) || !todo) return;
+    const modal = new obsidian.Modal(this.app);
+    modal.onOpen = () => {
+      const { contentEl } = modal;
+      contentEl.empty();
+      contentEl.addClass("lexvoice-sediment-rescan-modal");
+      contentEl.createEl("h3", { text: "编辑待办" });
+      const form = contentEl.createDiv({ cls: "lexvoice-sediment-todo-edit" });
+
+      const makeField = (label, value, multi = false) => {
+        const row = form.createDiv({ cls: "lexvoice-sediment-todo-edit-row" });
+        row.createDiv({ cls: "lexvoice-sediment-todo-edit-label", text: label });
+        const input = multi
+          ? row.createEl("textarea", { cls: "lexvoice-sediment-todo-edit-control", attr: { rows: "4" } })
+          : row.createEl("input", { cls: "lexvoice-sediment-todo-edit-control", attr: { type: "text" } });
+        input.value = value || "";
+        return input;
+      };
+
+      const taskInput = makeField("事项", todo.task || todo.title || "");
+      const ownerInput = makeField("责任人", todo.owner && todo.owner !== "未指定" ? todo.owner : "");
+      const dueInput = makeField("时间", todo.due && todo.due !== "未指定" ? todo.due : "");
+      const subtasksInput = makeField("子任务", normalizeSedimentTodoSubtasks(todo.subtasks || todo.children || todo.steps || todo.items).join("\n"), true);
+
+      const actions = contentEl.createDiv({ cls: "lexvoice-sediment-confirm-actions" });
+      const cancel = actions.createEl("button", { text: "取消", attr: { type: "button" } });
+      const save = actions.createEl("button", { text: "保存", cls: "mod-cta", attr: { type: "button" } });
+      cancel.onclick = () => modal.close();
+      save.onclick = async () => {
+        const task = sanitizeSedimentText(taskInput.value, 160);
+        if (!task) {
+          new obsidian.Notice("待办事项不能为空");
+          return;
+        }
+        save.disabled = true;
+        await this.updateSedimentTodoCandidate(file, todo, {
+          task,
+          // 空值保留空字符串，由 UI "加责任人 / 加时间" 占位渲染
+          owner: sanitizeSedimentText(ownerInput.value, 40) || "",
+          due: sanitizeSedimentText(dueInput.value, 40) || "",
+          subtasks: normalizeSedimentTodoSubtasks(subtasksInput.value),
+        });
+        modal.close();
+      };
+
+      const focusTarget = focus === "owner" ? ownerInput : focus === "due" ? dueInput : focus === "subtasks" ? subtasksInput : taskInput;
+      window.setTimeout(() => focusTarget.focus(), 0);
+    };
+    modal.open();
+  }
+
+  /**
+   * 待办字段 inline popover（替代全屏 modal）
+   * 设计参考：lexvoice-design-baseline-v2.html #assignee-1
+   * - owner: 搜索 + 人员候选 + 自定义
+   * - due:   快捷日期按钮 + 自定义日期 + 清除
+   * - subtasks: inline 列表编辑
+   */
+  openSedimentTodoFieldPopover(file, todo, field, anchorEl) {
+    if (!(file instanceof obsidian.TFile) || !todo || !anchorEl) return;
+    // 关掉已有同类 popover
+    if (this._activeTodoFieldPopover) {
+      try { this._activeTodoFieldPopover.remove(); } catch {}
+      this._activeTodoFieldPopover = null;
+    }
+    const pop = document.body.createDiv({ cls: `lexvoice-todo-popover is-${field}` });
+    this._activeTodoFieldPopover = pop;
+
+    // 定位：贴近 anchor，向下展开，必要时翻转
+    const rect = anchorEl.getBoundingClientRect();
+    pop.style.position = "fixed";
+    pop.style.left = `${Math.max(8, rect.left)}px`;
+    pop.style.top = `${rect.bottom + 6}px`;
+    pop.style.maxWidth = "320px";
+
+    // 渲染对应内容
+    if (field === "owner") this.renderTodoOwnerPopover(pop, file, todo);
+    else if (field === "due") this.renderTodoDuePopover(pop, file, todo);
+    else if (field === "subtasks") this.renderTodoSubtasksPopover(pop, file, todo);
+
+    // 翻转：如果浮层超出视口底部，向上翻
+    window.setTimeout(() => {
+      const pr = pop.getBoundingClientRect();
+      const vh = window.innerHeight;
+      if (pr.bottom > vh - 8) {
+        pop.style.top = `${Math.max(8, rect.top - pr.height - 6)}px`;
+      }
+      if (pr.right > window.innerWidth - 8) {
+        pop.style.left = `${Math.max(8, window.innerWidth - pr.width - 12)}px`;
+      }
+    }, 0);
+
+    // 点外面 / Escape 关闭
+    const close = () => {
+      try { pop.remove(); } catch {}
+      if (this._activeTodoFieldPopover === pop) this._activeTodoFieldPopover = null;
+      document.removeEventListener("mousedown", onDocDown, true);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+    const onDocDown = (e) => {
+      if (!pop.contains(e.target) && e.target !== anchorEl && !anchorEl.contains(e.target)) close();
+    };
+    const onKeyDown = (e) => { if (e.key === "Escape") close(); };
+    window.setTimeout(() => {
+      document.addEventListener("mousedown", onDocDown, true);
+      document.addEventListener("keydown", onKeyDown, true);
+    }, 0);
+    pop._lexvoiceClose = close;
+  }
+
+  async renderTodoOwnerPopover(pop, file, todo) {
+    const search = pop.createEl("input", {
+      cls: "lexvoice-todo-popover-search",
+      attr: { type: "text", placeholder: "搜索或输入新名字…" },
+    });
+    const list = pop.createDiv({ cls: "lexvoice-todo-popover-list" });
+    list.createDiv({ cls: "lexvoice-todo-popover-loading", text: "加载人员…" });
+
+    let people = [];
+    try {
+      people = await loadPeopleDirectory(this) || [];
+    } catch {}
+
+    const renderRows = (filter) => {
+      list.empty();
+      const q = (filter || "").trim().toLowerCase();
+      const filtered = !q ? people : people.filter(p => {
+        const txt = `${p.name || ""} ${p.aliases || ""} ${p.role || ""} ${p.org || ""}`.toLowerCase();
+        return txt.includes(q);
+      });
+      if (!filtered.length && !q) {
+        list.createDiv({ cls: "lexvoice-todo-popover-empty", text: "人员库为空，直接输入新名字 + 回车" });
+        return;
+      }
+      // 当前选中
+      if (todo.owner) {
+        const cur = list.createDiv({ cls: "lexvoice-todo-popover-section", text: "当前" });
+        const row = list.createDiv({ cls: "lexvoice-todo-popover-item is-current" });
+        row.createSpan({ cls: "lexvoice-todo-popover-item-name", text: todo.owner });
+        const clear = row.createSpan({ cls: "lexvoice-todo-popover-item-clear", text: "清除" });
+        clear.onclick = async (e) => {
+          e.stopPropagation();
+          await this.updateSedimentTodoCandidate(file, todo, { owner: "" });
+          if (pop._lexvoiceClose) pop._lexvoiceClose();
+        };
+      }
+      if (filtered.length) {
+        list.createDiv({ cls: "lexvoice-todo-popover-section", text: q ? "匹配" : "人员库" });
+        for (const p of filtered.slice(0, 12)) {
+          const row = list.createDiv({ cls: "lexvoice-todo-popover-item" });
+          row.createSpan({ cls: "lexvoice-todo-popover-item-name", text: p.name || "未命名" });
+          if (p.role || p.org) {
+            row.createSpan({
+              cls: "lexvoice-todo-popover-item-meta",
+              text: [p.role, p.org].filter(Boolean).join(" · "),
+            });
+          }
+          row.onclick = async () => {
+            await this.updateSedimentTodoCandidate(file, todo, { owner: p.name || "" });
+            if (pop._lexvoiceClose) pop._lexvoiceClose();
+          };
+        }
+      }
+      // 当 search 有值且没匹配任何人员 → 显示"新建"项
+      if (q && !filtered.some(p => (p.name || "").toLowerCase() === q)) {
+        list.createDiv({ cls: "lexvoice-todo-popover-section", text: "新名字" });
+        const row = list.createDiv({ cls: "lexvoice-todo-popover-item is-new" });
+        row.createSpan({ cls: "lexvoice-todo-popover-item-name", text: `+ "${filter.trim()}"` });
+        row.onclick = async () => {
+          await this.updateSedimentTodoCandidate(file, todo, { owner: filter.trim() });
+          if (pop._lexvoiceClose) pop._lexvoiceClose();
+        };
+      }
+    };
+    renderRows("");
+
+    search.oninput = () => renderRows(search.value);
+    search.onkeydown = async (e) => {
+      if (e.key === "Enter" && search.value.trim()) {
+        e.preventDefault();
+        await this.updateSedimentTodoCandidate(file, todo, { owner: search.value.trim() });
+        if (pop._lexvoiceClose) pop._lexvoiceClose();
+      }
+    };
+    window.setTimeout(() => search.focus(), 30);
+  }
+
+  renderTodoDuePopover(pop, file, todo) {
+    pop.createDiv({ cls: "lexvoice-todo-popover-section", text: "快捷" });
+    const presetWrap = pop.createDiv({ cls: "lexvoice-todo-popover-presets" });
+    const moment = window.moment;
+    const presets = moment ? [
+      { label: "今天", value: moment().format("YYYY-MM-DD") },
+      { label: "明天", value: moment().add(1, "day").format("YYYY-MM-DD") },
+      { label: "本周末", value: moment().endOf("week").format("YYYY-MM-DD") },
+      { label: "下周", value: moment().add(1, "week").format("YYYY-MM-DD") },
+      { label: "下月", value: moment().add(1, "month").format("YYYY-MM-DD") },
+    ] : [];
+    for (const p of presets) {
+      const btn = presetWrap.createEl("button", {
+        cls: "lexvoice-todo-popover-preset",
+        text: p.label,
+        attr: { type: "button" },
+      });
+      btn.onclick = async () => {
+        await this.updateSedimentTodoCandidate(file, todo, { due: p.value });
+        if (pop._lexvoiceClose) pop._lexvoiceClose();
+      };
+    }
+    pop.createDiv({ cls: "lexvoice-todo-popover-divider" });
+    pop.createDiv({ cls: "lexvoice-todo-popover-section", text: "自定义" });
+    const dateInput = pop.createEl("input", {
+      cls: "lexvoice-todo-popover-date",
+      attr: { type: "date" },
+    });
+    const currentISO = todo.due && /^\d{4}-\d{2}-\d{2}/.test(todo.due) ? todo.due.slice(0, 10) : "";
+    dateInput.value = currentISO;
+    dateInput.onchange = async () => {
+      if (dateInput.value) {
+        await this.updateSedimentTodoCandidate(file, todo, { due: dateInput.value });
+        if (pop._lexvoiceClose) pop._lexvoiceClose();
+      }
+    };
+    if (todo.due) {
+      const clear = pop.createEl("button", {
+        cls: "lexvoice-todo-popover-clear",
+        text: "清除时间",
+        attr: { type: "button" },
+      });
+      clear.onclick = async () => {
+        await this.updateSedimentTodoCandidate(file, todo, { due: "" });
+        if (pop._lexvoiceClose) pop._lexvoiceClose();
+      };
+    }
+  }
+
+  renderTodoSubtasksPopover(pop, file, todo) {
+    pop.createDiv({ cls: "lexvoice-todo-popover-section", text: "子任务" });
+    const existing = normalizeSedimentTodoSubtasks(todo.subtasks || todo.children || []);
+    const list = pop.createDiv({ cls: "lexvoice-todo-popover-subtasks" });
+    const renderList = () => {
+      list.empty();
+      existing.forEach((sub, i) => {
+        const row = list.createDiv({ cls: "lexvoice-todo-popover-subtask-row" });
+        const input = row.createEl("input", {
+          cls: "lexvoice-todo-popover-subtask-input",
+          attr: { type: "text", value: sub },
+        });
+        input.value = sub;
+        input.oninput = () => { existing[i] = input.value; };
+        const del = row.createEl("button", {
+          cls: "lexvoice-todo-popover-subtask-del",
+          attr: { type: "button", "aria-label": "删除子任务" },
+        });
+        try { obsidian.setIcon(del, "x"); } catch { del.setText("×"); }
+        del.onclick = (e) => {
+          e.stopPropagation();
+          existing.splice(i, 1);
+          renderList();
+        };
+      });
+    };
+    renderList();
+    const addRow = pop.createDiv({ cls: "lexvoice-todo-popover-subtask-add" });
+    const addInput = addRow.createEl("input", {
+      cls: "lexvoice-todo-popover-subtask-input",
+      attr: { type: "text", placeholder: "+ 添加子任务，回车确认" },
+    });
+    addInput.onkeydown = (e) => {
+      if (e.key === "Enter" && addInput.value.trim()) {
+        e.preventDefault();
+        existing.push(addInput.value.trim());
+        addInput.value = "";
+        renderList();
+        addInput.focus();
+      }
+    };
+    const actions = pop.createDiv({ cls: "lexvoice-todo-popover-actions" });
+    const save = actions.createEl("button", {
+      cls: "lexvoice-todo-popover-save mod-cta",
+      text: "保存",
+      attr: { type: "button" },
+    });
+    save.onclick = async () => {
+      const cleaned = existing.map(s => sanitizeSedimentText(s, 100)).filter(Boolean);
+      await this.updateSedimentTodoCandidate(file, todo, { subtasks: cleaned });
+      if (pop._lexvoiceClose) pop._lexvoiceClose();
+    };
+    window.setTimeout(() => addInput.focus(), 30);
+  }
+
+  renderSedimentEmptyList(parent, text) {
+    const empty = parent.createDiv({ cls: "lexvoice-sediment-empty-line" });
+    empty.setText(text || "暂无待加入内容");
+  }
+
+  renderSedimentReviewGroup(parent, file, state, groupKey) {
+    const group = (state.groups || []).find(item => item.key === groupKey) || SEDIMENT_GROUP_CONFIG[groupKey];
+    const review = this.getSedimentGroupReview(file, groupKey);
+    const items = review && Array.isArray(review.items) ? review.items : [];
+    const canRollback = !!(review && review.restore);
+    // 顶部说明：只有真有处理记录可看的时候才提"N 条记录可回看"
+    const note = parent.createDiv({ cls: "lexvoice-sediment-review-note" });
+    note.setText(items.length ? `本组已处理完毕 · ${items.length} 条记录可回看` : "本组已处理完毕");
+    // 有记录才画列表；空记录不再硬塞"本组无处理记录"占位（会让用户困惑）
+    if (items.length) {
+      const list = parent.createDiv({ cls: "lexvoice-sediment-list" });
+      for (const item of items.slice(0, 10)) {
+        const row = list.createDiv({ cls: "lexvoice-sediment-list-item lexvoice-sediment-review-item" });
+        const badge = row.createSpan({ cls: `lexvoice-sediment-review-badge is-${item.status || "done"}`, text: item.statusText || "已处理" });
+        badge.setAttr("title", item.statusText || "已处理");
+        const content = row.createDiv({ cls: "lexvoice-sediment-item-content" });
+        const top = content.createDiv({ cls: "lexvoice-sediment-item-top" });
+        top.createDiv({ cls: "lexvoice-sediment-item-title", text: item.title || "" });
+        if (item.sub) content.createDiv({ cls: "lexvoice-sediment-item-sub", text: item.sub });
+        if (item.meta) content.createDiv({ cls: "lexvoice-sediment-item-meta", text: item.meta });
+      }
+      if (items.length > 10) list.createDiv({ cls: "lexvoice-sediment-more", text: `还有 ${items.length - 10} 条处理记录` });
+    }
+    // "重新处理本组"按钮只有当 review 真有 restore 快照可以单组回滚时才出现 —— 这种情况下点击只影响本组。
+    // 没有 restore 时（旧版本 / 无快照）不再画这个按钮，避免和顶部全局"重扫"重复并误导用户。
+    if (canRollback) {
+      const footer = parent.createDiv({ cls: "lexvoice-sediment-footer" });
+      const reset = footer.createEl("button", { text: "重新处理本组", cls: "lexvoice-sediment-text-button", attr: { type: "button" } });
+      reset.onclick = async () => {
+        reset.disabled = true;
+        try {
+          await this.reprocessSedimentGroup(file, groupKey);
+        } finally {
+          reset.disabled = false;
+        }
+      };
+    }
+  }
+
+  renderSedimentFooter(parent, group, count, actions) {
+    const cfg = Object.assign({}, SEDIMENT_GROUP_CONFIG[(group && group.key) || "person"] || SEDIMENT_GROUP_CONFIG.person, group || {});
+    const footer = parent.createDiv({ cls: "lexvoice-sediment-footer" });
+    const secondary = footer.createEl("button", { text: actions.secondaryText || "忽略未选", cls: "lexvoice-sediment-text-button", attr: { type: "button" } });
+    secondary.disabled = actions.secondaryDisabled !== undefined ? !!actions.secondaryDisabled : !count;
+    if (actions.secondaryTitle) secondary.setAttr("title", actions.secondaryTitle);
+    secondary.onclick = () => {
+      if (secondary.disabled || typeof actions.onSecondary !== "function") return;
+      actions.onSecondary();
+    };
+    const primaryText = typeof cfg.primaryButtonText === "function" ? cfg.primaryButtonText(count) : `加入${cfg.dest}（${count}）`;
+    const primary = footer.createEl("button", { text: primaryText, cls: "lexvoice-sediment-button is-primary", attr: { type: "button" } });
+    primary.disabled = !count;
+    if (!count) primary.setAttr("title", "请至少选择一条");
+    primary.onclick = () => {
+      if (!count || typeof actions.onPrimary !== "function") return;
+      actions.onPrimary();
+    };
+  }
+
+  renderSedimentPeopleItem(parent, file, item) {
+    const row = parent.createDiv({ cls: "lexvoice-sediment-list-item is-person-candidate" });
+    const evidence = item.evidence || item.reason || item.note || "";
+    if (evidence) row.setAttr("title", `依据：${evidence}`);
+    const icon = row.createDiv({ cls: "lexvoice-sediment-item-icon" });
+    try { obsidian.setIcon(icon, "user-round"); } catch { icon.setText("人"); }
+    const content = row.createDiv({ cls: "lexvoice-sediment-item-content" });
+    const top = content.createDiv({ cls: "lexvoice-sediment-item-top" });
+    top.createDiv({ cls: "lexvoice-sediment-item-title", text: item.name || "未命名人员" });
+    const actions = top.createDiv({ cls: "lexvoice-sediment-actions" });
+    actions.createEl("button", { text: "留下", cls: "lexvoice-sediment-action is-primary", attr: { type: "button" } }).onclick = () => this.keepPeopleSuggestions(file, [item]);
+    actions.createEl("button", { text: "合并", cls: "lexvoice-sediment-action", attr: { type: "button" } }).onclick = () => {
+      new PeopleDirectorySuggestionModal(this.app, this.plugin, file, [item], { fromCache: true, cachedCount: 1 }).open();
+    };
+    actions.createEl("button", { text: "忽略", cls: "lexvoice-sediment-action is-muted", attr: { type: "button" } }).onclick = () => this.ignorePeopleSuggestions([item], file);
+    const org = item.org || item.organization || "";
+    const aliases = item.aliases && item.aliases.length ? item.aliases.join("、") : "";
+    const meta = [item.role || "", org, aliases].filter(Boolean).join(" · ");
+    content.createDiv({ cls: "lexvoice-sediment-item-meta", text: meta || "身份待补充" });
+  }
+
+  renderSedimentPrompt(parent, opts) {
+    const box = parent.createDiv({ cls: "lexvoice-sediment-prompt" });
+    const icon = box.createDiv({ cls: "lexvoice-sediment-prompt-icon" });
+    try { obsidian.setIcon(icon, opts.icon || "sparkles"); } catch {}
+    if (opts.subtitle) box.createDiv({ cls: "lexvoice-sediment-prompt-subtitle", text: opts.subtitle });
+    if (opts.title) box.createDiv({ cls: "lexvoice-sediment-prompt-title", text: opts.title });
+    if (opts.desc) box.createDiv({ cls: "lexvoice-sediment-prompt-desc", text: opts.desc });
+    const actions = box.createDiv({ cls: "lexvoice-sediment-prompt-actions" });
+    if (opts.secondaryText && opts.onSecondary) {
+      actions.createEl("button", { text: opts.secondaryText, cls: "lexvoice-sediment-button is-secondary", attr: { type: "button" } }).onclick = opts.onSecondary;
+    }
+    if (opts.primaryText && opts.onPrimary) {
+      actions.createEl("button", { text: opts.primaryText, cls: "lexvoice-sediment-button is-primary", attr: { type: "button" } }).onclick = opts.onPrimary;
+    }
+    if (opts.smallText) box.createDiv({ cls: "lexvoice-sediment-prompt-small", text: opts.smallText });
+    if (opts.extraActions && opts.extraActions.length) {
+      const extra = box.createDiv({ cls: "lexvoice-sediment-extra-actions" });
+      for (const item of opts.extraActions) {
+        extra.createEl("button", { text: item.text, cls: "lexvoice-sediment-text-button", attr: { type: "button" } }).onclick = item.action;
+      }
+    }
+  }
+
+  renderDepositGroup(parent, opts) {
+    const group = parent.createDiv({ cls: `lexvoice-deposit-group ${opts.cls || ""}` });
+    const head = group.createDiv({ cls: "lexvoice-deposit-group-head" });
+    const title = head.createDiv({ cls: "lexvoice-deposit-group-title" });
+    title.createSpan({ text: opts.label || "" });
+    title.createSpan({ cls: "lexvoice-deposit-count", text: `${opts.count || 0} ${opts.status || ""}`.trim() });
+    const actions = head.createDiv({ cls: "lexvoice-deposit-group-actions" });
+    if (opts.primaryText && opts.onPrimary) actions.createEl("button", { text: opts.primaryText }).onclick = opts.onPrimary;
+    if (opts.secondaryText && opts.onSecondary) actions.createEl("button", { text: opts.secondaryText }).onclick = opts.onSecondary;
+    if (opts.moreActions && opts.moreActions.length) {
+      actions.createEl("button", { text: "..." }).onclick = (evt) => {
+        const menu = new obsidian.Menu();
+        for (const item of opts.moreActions) menu.addItem(mi => mi.setTitle(item.text).onClick(item.action));
+        menu.showAtMouseEvent(evt);
+      };
+    }
+    if (opts.desc) group.createDiv({ cls: "lexvoice-deposit-group-desc", text: opts.desc });
+    const body = group.createDiv({ cls: "lexvoice-deposit-group-body" });
+    if (opts.renderBody) opts.renderBody(body);
+  }
+
+  renderPeopleSuggestionCard(parent, file, item) {
+    const card = parent.createDiv({ cls: "lexvoice-deposit-candidate-card is-person" });
+    const top = card.createDiv({ cls: "lexvoice-deposit-candidate-top" });
+    top.createDiv({ cls: "lexvoice-deposit-candidate-title", text: item.name || "未命名人员" });
+    if (item.matchPath) top.createDiv({ cls: "lexvoice-deposit-badge", text: "可合并" });
+    const meta = card.createDiv({ cls: "lexvoice-deposit-candidate-meta" });
+    meta.createDiv({ text: `角色：${item.role || "待补充"}` });
+    meta.createDiv({ text: `组织：${item.org || item.organization || "待补充"}` });
+    if (item.aliases && item.aliases.length) meta.createDiv({ text: `常用称呼：${item.aliases.join("、")}` });
+    card.createDiv({ cls: "lexvoice-deposit-candidate-source", text: `来源：${item.sourceBasename || file.basename}` });
+    const evidence = item.evidence || item.reason || item.note || "";
+    if (evidence) card.createDiv({ cls: "lexvoice-deposit-candidate-evidence", text: `依据：${evidence}` });
+    const actions = card.createDiv({ cls: "lexvoice-deposit-candidate-actions" });
+    actions.createEl("button", { text: "留下" }).onclick = () => this.keepPeopleSuggestions(file, [item]);
+    actions.createEl("button", { text: "合并到已有人员" }).onclick = () => {
+      new PeopleDirectorySuggestionModal(this.app, this.plugin, file, [item], { fromCache: true, cachedCount: 1 }).open();
+    };
+    actions.createEl("button", { text: "忽略" }).onclick = () => this.ignorePeopleSuggestions([item], file);
+  }
+
+  requestSedimentExtraction(file, needsConfirm) {
+    if (needsConfirm) {
+      this.confirmSedimentRescan(file);
+      return;
+    }
+    this.extractSedimentForFile(file);
+  }
+
+  getSedimentPendingCandidateCount(file) {
+    const state = this.getSedimentPanelState(file);
+    return (state.groups || []).reduce((sum, group) => sum + Math.max(0, Number(group.pending) || 0), 0);
+  }
+
+  confirmSedimentRescan(file) {
+    const modal = new obsidian.Modal(this.app);
+    modal.onOpen = () => {
+      const { contentEl } = modal;
+      contentEl.addClass("lexvoice-sediment-rescan-modal");
+      const head = contentEl.createDiv({ cls: "lexvoice-sediment-confirm-head" });
+      const icon = head.createDiv({ cls: "lexvoice-sediment-confirm-icon" });
+      try { obsidian.setIcon(icon, "refresh-cw"); } catch {}
+      head.createEl("h3", { text: "重新扫描本篇？" });
+      const pendingCount = this.getSedimentPendingCandidateCount(file);
+      const list = contentEl.createEl("ul", { cls: "lexvoice-sediment-confirm-list" });
+      [
+        ["check", "已入库内容不受影响"],
+        ["check", "已忽略的不会再次出现"],
+        ["alert-triangle", `当前 ${pendingCount} 条未确认候选会被覆盖`],
+      ].forEach(([iconName, text]) => {
+        const li = list.createEl("li");
+        try { obsidian.setIcon(li.createSpan({ cls: "lexvoice-sediment-confirm-list-icon" }), iconName); } catch {}
+        li.createSpan({ text });
+      });
+      const note = contentEl.createDiv({ cls: "lexvoice-sediment-confirm-note" });
+      note.setText("重新扫描会重新生成四组候选，已经加入库里的内容不会自动删除。");
+      const actions = contentEl.createDiv({ cls: "lexvoice-sediment-confirm-actions" });
+      const cancel = actions.createEl("button", { text: "取消", attr: { type: "button" } });
+      const confirm = actions.createEl("button", { text: "重新扫描", cls: "mod-cta", attr: { type: "button" } });
+      cancel.onclick = () => modal.close();
+      confirm.onclick = async () => {
+        confirm.disabled = true;
+        modal.close();
+        await this.extractSedimentForFile(file);
+      };
+    };
+    modal.open();
+  }
+
+  showSedimentToast(message, opts = {}) {
+    const root = this.containerEl && this.containerEl.children && this.containerEl.children[1];
+    if (!root) return;
+    const old = root.querySelector(".lexvoice-sediment-toast");
+    if (old) old.remove();
+    if (this.sedimentToastTimer) {
+      clearTimeout(this.sedimentToastTimer);
+      this.sedimentToastTimer = 0;
+    }
+    const toast = root.createDiv({ cls: "lexvoice-sediment-toast" + (opts.variant ? ` is-${opts.variant}` : "") });
+    const icon = toast.createDiv({ cls: "lexvoice-sediment-toast-icon" });
+    try { obsidian.setIcon(icon, opts.icon || "check"); } catch {}
+    toast.createDiv({ cls: "lexvoice-sediment-toast-message", text: message || "" });
+    const actions = Array.isArray(opts.actions) ? opts.actions : (opts.actionText && typeof opts.onAction === "function" ? [{ text: opts.actionText, action: opts.onAction }] : []);
+    for (const item of actions) {
+      if (!item || !item.text || typeof item.action !== "function") continue;
+      const action = toast.createEl("button", { text: item.text, cls: "lexvoice-sediment-toast-action", attr: { type: "button" } });
+      action.onclick = () => item.action();
+    }
+    this.sedimentToastTimer = window.setTimeout(() => {
+      toast.remove();
+      this.sedimentToastTimer = 0;
+    }, opts.duration || 5000);
+  }
+
+  async extractVocabularyForFile(file) {
+    try {
+      const markdown = await this.app.vault.cachedRead(file);
+      const terms = await this.plugin.extractVocabularyFromMarkdown(file, markdown);
+      this.plugin.markKnowledgeExtractionSource("vocabulary", file);
+      await this.plugin.saveSettings();
+      new obsidian.Notice(`ASR 热词提取完成：${terms.length} 个候选词`);
+      this.render();
+    } catch (e) {
+      console.error("[LexVoice] extract vocabulary from current note failed", e);
+      new obsidian.Notice(`提取失败：${(e && e.message) || e}`, 8000);
+    }
+  }
+
+  async extractPeopleSuggestionsForFile(file) {
+    try {
+      const markdown = await this.app.vault.cachedRead(file);
+      const items = await generatePeopleDirectorySuggestions(this.plugin, file, markdown);
+      const added = this.plugin.cachePeopleDirectorySuggestions(file, items);
+      this.plugin.markKnowledgeExtractionSource("people", file);
+      await this.plugin.saveSettings();
+      new obsidian.Notice(added ? `人员建议已生成：${added} 条待确认` : "没有识别到新的人员建议");
+      this.render();
+    } catch (e) {
+      console.error("[LexVoice] extract people from current note failed", e);
+      new obsidian.Notice(`人员建议提取失败：${(e && e.message) || e}`, 8000);
+    }
+  }
+
+  getSedimentObjectsFromBucket(file) {
+    const bucket = this.getSedimentCandidateBucket(file);
+    return {
+      people: bucket.people || [],
+      todos: bucket.todos || [],
+      learningCards: bucket.cards || [],
+      hotwords: bucket.hotwords || createVocabularyGroups(),
+    };
+  }
+
+  async persistSedimentCandidateBucket(file) {
+    try {
+      await upsertSedimentPreExtractionBlockInFile(this.plugin, file, this.getSedimentObjectsFromBucket(file));
+      this.notePanelCacheKey = "";
+      return true;
+    } catch (e) {
+      console.warn("[LexVoice] persist pre-extracted sediment failed", e);
+      new obsidian.Notice(`沉淀状态写回失败：${(e && e.message) || e}`, 8000);
+      return false;
+    }
+  }
+
+  async extractSedimentForFile(file) {
+    const token = ++this.sedimentScanToken;
+    try {
+      this.setSedimentCandidateBucket(file, { scanning: true, scanStartedAt: new Date().toISOString() });
+      this.render();
+      const markdown = await this.app.vault.cachedRead(file);
+      // 扫描中状态已经由全屏 prompt（带 scan-line 图标 + 进度条 + 实时计数）表达，
+      // 不再额外弹底部 toast，避免与上方主面板视觉重复
+      const objects = await generateSedimentObjects(this.plugin, file, markdown);
+      if (token !== this.sedimentScanToken) return;
+      const path = obsidian.normalizePath(file.path || "");
+      const normalized = withSedimentCandidateIds(objects, path, file.basename);
+      this.setSedimentCandidateBucket(file, {
+        people: normalized.people || [],
+        todos: normalized.todos || [],
+        cards: normalized.learningCards || [],
+        hotwords: normalized.hotwords || createVocabularyGroups(),
+        scannedAt: new Date().toISOString(),
+        initialCounts: this.getSedimentInitialCountsFromObjects(normalized),
+        doneGroups: [],
+        selectedByGroup: {},
+        decisionLogByGroup: {},
+        transitionGroup: "",
+        scanning: false,
+        scanStartedAt: "",
+      });
+      await this.persistSedimentCandidateBucket(file);
+      const nextState = this.getSedimentPanelState(file);
+      const firstPending = this.findSedimentNextPendingGroup(nextState.groups);
+      this.sedimentGroup = firstPending ? firstPending.key : "person";
+      this.sedimentSwitcherOpen = false;
+      this.render();
+      this.showSedimentToast(`扫描完成：人员 ${(objects.people || []).length}，待办 ${(objects.todos || []).length}，学习 ${(objects.learningCards || []).length}，热词 ${countVocabularyGroups(objects.hotwords)}`, {
+        icon: "check",
+      });
+    } catch (e) {
+      this.setSedimentCandidateBucket(file, { scanning: false, scanStartedAt: "" });
+      this.render();
+      console.error("[LexVoice] extract sediment from current note failed", e);
+      new obsidian.Notice(`本篇扫描失败：${(e && e.message) || e}`, 8000);
+    }
+  }
+
+  cancelSedimentExtraction(file) {
+    this.sedimentScanToken++;
+    this.setSedimentCandidateBucket(file, { scanning: false, scanStartedAt: "" });
+    this.render();
+    this.showSedimentToast("已取消本次扫描", { icon: "circle-minus", variant: "muted" });
+  }
+
+  cloneSedimentBucket(file) {
+    try {
+      return JSON.parse(JSON.stringify(this.getSedimentCandidateBucket(file) || {}));
+    } catch {
+      return Object.assign({}, this.getSedimentCandidateBucket(file) || {});
+    }
+  }
+
+  setSedimentDecisionLog(file, groupKey, log) {
+    const bucket = this.getSedimentCandidateBucket(file);
+    const decisionLogByGroup = Object.assign({}, bucket.decisionLogByGroup || {});
+    if (log) decisionLogByGroup[groupKey] = log;
+    else delete decisionLogByGroup[groupKey];
+    this.setSedimentCandidateBucket(file, { decisionLogByGroup });
+  }
+
+  appendSedimentDecisionItems(file, groupKey, rawItems, status, statusText, state) {
+    const bucket = this.getSedimentCandidateBucket(file);
+    const logs = Object.assign({}, bucket.decisionLogByGroup || {});
+    const current = logs[groupKey] || {
+      groupKey,
+      completedAt: "",
+      restore: {},
+      selectedIds: [],
+      items: [],
+    };
+    if (!current.restore || !Object.keys(current.restore).length) {
+      const snapshotState = state || this.getSedimentPanelState(file);
+      if (groupKey === "person") current.restore = { people: JSON.parse(JSON.stringify(snapshotState.currentPeople || [])) };
+      else current.restore = (this.buildSedimentDecisionLog(snapshotState, groupKey, new Set()).restore || {});
+    }
+    const sourcePath = file instanceof obsidian.TFile ? obsidian.normalizePath(file.path || "") : "";
+    for (const raw of rawItems || []) {
+      if (!raw) continue;
+      const id = groupKey === "person" ? getSedimentPersonId(raw.sourcePath || sourcePath, raw) : String(raw.id || "");
+      current.items = (current.items || []).filter(item => item.id !== id);
+      current.items.push({
+        id,
+        title: raw.name || raw.title || raw.task || "",
+        sub: raw.role || raw.type || "",
+        meta: raw.org || raw.organization || raw.note || raw.summary || "",
+        status,
+        statusText,
+      });
+      if (status === "kept" && !current.selectedIds.includes(id)) current.selectedIds.push(id);
+    }
+    current.completedAt = current.completedAt || new Date().toISOString();
+    logs[groupKey] = current;
+    this.setSedimentCandidateBucket(file, { decisionLogByGroup: logs });
+  }
+
+  buildSedimentDecisionLog(state, groupKey, selectedIds, actionLabel) {
+    const selected = new Set(selectedIds || []);
+    const displayItems = this.getSedimentDisplayItems(state, groupKey);
+    const restore = {};
+    if (groupKey === "person") restore.people = JSON.parse(JSON.stringify(state.currentPeople || []));
+    else if (groupKey === "todo") restore.todos = JSON.parse(JSON.stringify((state.bucket && state.bucket.todos) || []));
+    else if (groupKey === "card") restore.cards = JSON.parse(JSON.stringify((state.bucket && state.bucket.cards) || []));
+    else if (groupKey === "hotword") restore.hotwords = JSON.parse(JSON.stringify((state.bucket && state.bucket.hotwords) || createVocabularyGroups()));
+    return {
+      groupKey,
+      completedAt: new Date().toISOString(),
+      restore,
+      selectedIds: Array.from(selected),
+      items: displayItems.map(item => {
+        const kept = selected.has(item.id);
+        return {
+          id: item.id,
+          title: item.title || "",
+          sub: item.sub || "",
+          meta: item.meta || "",
+          status: kept ? "kept" : "ignored",
+          statusText: kept ? (actionLabel || "已加入") : "已忽略",
+        };
+      }),
+    };
+  }
+
+  buildVocabularyGroupsFromHotwordItems(items) {
+    const groups = createVocabularyGroups();
+    for (const item of items || []) {
+      const sectionKey = item && (item.sectionKey || (item.raw && item.raw.sectionKey));
+      const term = item && (item.term || item.title || (item.raw && item.raw.term));
+      if (sectionKey && groups[sectionKey] && term && !groups[sectionKey].includes(term)) groups[sectionKey].push(term);
+    }
+    return groups;
+  }
+
+  async restoreSedimentUndo(undo) {
+    if (!undo) return;
+    try {
+      for (const entry of undo.entries || []) {
+        const file = entry && entry.path ? this.app.vault.getAbstractFileByPath(entry.path) : entry.file;
+        if (!(file instanceof obsidian.TFile)) continue;
+        if (entry.created) await trashLexVoiceFile(this.app, file);
+        else await this.app.vault.modify(file, entry.previousContent || "");
+      }
+      if (undo.vocabulary) {
+        const v = undo.vocabulary;
+        if (v.path) {
+          const file = this.app.vault.getAbstractFileByPath(v.path);
+          if (v.existed && file instanceof obsidian.TFile) await this.app.vault.modify(file, v.previousContent || "");
+          else if (!v.existed && file instanceof obsidian.TFile) await trashLexVoiceFile(this.app, file);
+        } else {
+          this.plugin.settings.customVocabulary = v.previousCustomVocabulary || "";
+          await this.plugin.saveSettings();
+        }
+      }
+      if (undo.sourceSnapshot && undo.sourceSnapshot.path) {
+        const source = this.app.vault.getAbstractFileByPath(undo.sourceSnapshot.path);
+        if (source instanceof obsidian.TFile) await this.app.vault.modify(source, undo.sourceSnapshot.content || "");
+      }
+      if (undo.bucketBefore && undo.filePath) {
+        const file = this.app.vault.getAbstractFileByPath(undo.filePath);
+        if (file instanceof obsidian.TFile) {
+          this.sedimentCandidatesByPath[undo.filePath] = undo.bucketBefore;
+          await this.persistSedimentCandidateBucket(file);
+        }
+      }
+      this.render();
+      this.showSedimentToast("已撤销本次入库", { icon: "rotate-ccw", variant: "muted" });
+    } catch (e) {
+      console.error("[LexVoice] undo sediment commit failed", e);
+      new obsidian.Notice(`撤销失败：${(e && e.message) || e}`, 8000);
+    }
+  }
+
+  async openSedimentCommitTarget(undo) {
+    const entry = undo && (undo.entries || []).find(item => item && item.path);
+    if (entry) {
+      const file = this.app.vault.getAbstractFileByPath(entry.path);
+      if (file instanceof obsidian.TFile) {
+        await this.app.workspace.getLeaf(false).openFile(file);
+        return;
+      }
+    }
+    if (undo && undo.vocabulary && undo.vocabulary.path) {
+      const file = this.app.vault.getAbstractFileByPath(undo.vocabulary.path);
+      if (file instanceof obsidian.TFile) await this.app.workspace.getLeaf(false).openFile(file);
+    }
+  }
+
+  showSedimentCommitToast(message, undo) {
+    this.sedimentLastUndo = undo || null;
+    this.showSedimentToast(message, {
+      icon: "check",
+      actions: [
+        { text: "撤销", action: () => this.restoreSedimentUndo(this.sedimentLastUndo) },
+        { text: "查看", action: () => this.openSedimentCommitTarget(this.sedimentLastUndo) },
+      ],
+      duration: 5000,
+    });
+  }
+
+  confirmIgnoreSedimentUnselected(file, groupKey, count) {
+    if (!(count > 0)) return;
+    const modal = new obsidian.Modal(this.app);
+    modal.onOpen = () => {
+      const { contentEl } = modal;
+      contentEl.addClass("lexvoice-sediment-rescan-modal");
+      const head = contentEl.createDiv({ cls: "lexvoice-sediment-confirm-head" });
+      const icon = head.createDiv({ cls: "lexvoice-sediment-confirm-icon" });
+      try { obsidian.setIcon(icon, "circle-minus"); } catch {}
+      head.createEl("h3", { text: "忽略未选内容？" });
+      const note = contentEl.createDiv({ cls: "lexvoice-sediment-confirm-note" });
+      note.setText(`未选的 ${count} 条会被标为忽略，无法恢复。继续后，已选内容会加入对应库。`);
+      const actions = contentEl.createDiv({ cls: "lexvoice-sediment-confirm-actions" });
+      const cancel = actions.createEl("button", { text: "取消", attr: { type: "button" } });
+      const confirm = actions.createEl("button", { text: "继续", cls: "mod-cta", attr: { type: "button" } });
+      cancel.onclick = () => modal.close();
+      confirm.onclick = async () => {
+        confirm.disabled = true;
+        modal.close();
+        await this.commitSedimentGroup(file, groupKey);
+      };
+    };
+    modal.open();
+  }
+
+  async commitSedimentGroup(file, groupKey) {
+    const bucket = this.getSedimentCandidateBucket(file);
+    try {
+      let successText = "";
+      let completed = false;
+      const state = this.getSedimentPanelState(file);
+      const displayItems = this.getSedimentDisplayItems(state, groupKey);
+      const selected = groupKey === "person"
+        ? new Set(displayItems.map(item => item.id))
+        : this.getSedimentSelectedIds(file, groupKey, displayItems);
+      const selectedItems = displayItems.filter(item => selected.has(item.id));
+      if (SEDIMENT_GROUP_CONFIG[groupKey] && SEDIMENT_GROUP_CONFIG[groupKey].decisionModel === "checkbox" && !selectedItems.length) return;
+      const filePath = obsidian.normalizePath(file.path || "");
+      const undo = {
+        filePath,
+        bucketBefore: this.cloneSedimentBucket(file),
+        entries: [],
+      };
+      if (groupKey === "todo") {
+        const count = selectedItems.length;
+        if (!count) return;
+        const result = await writeSedimentObjectCards(this.plugin, file, { todos: selectedItems.map(item => item.raw), learningCards: [] });
+        undo.entries = result.entries || [];
+        this.setSedimentDecisionLog(file, groupKey, this.buildSedimentDecisionLog(state, groupKey, selected, "已加入"));
+        this.setSedimentCandidateBucket(file, { todos: [] });
+        completed = this.markSedimentGroupDone(file, groupKey, displayItems.length || count);
+        successText = `已加入待办：${count} 条`;
+      } else if (groupKey === "card") {
+        const count = selectedItems.length;
+        if (!count) return;
+        const result = await writeSedimentObjectCards(this.plugin, file, { todos: [], learningCards: selectedItems.map(item => item.raw) });
+        undo.entries = result.entries || [];
+        this.setSedimentDecisionLog(file, groupKey, this.buildSedimentDecisionLog(state, groupKey, selected, "已加入"));
+        this.setSedimentCandidateBucket(file, { cards: [] });
+        completed = this.markSedimentGroupDone(file, groupKey, displayItems.length || count);
+        successText = `已加入卡片库：${count} 张`;
+      } else if (groupKey === "hotword") {
+        const hotwordCount = selectedItems.length;
+        if (!hotwordCount) return;
+        const vocabPath = this.plugin.settings.vocabularyFile;
+        if (vocabPath) {
+          const norm = obsidian.normalizePath(vocabPath);
+          const vocabFile = this.app.vault.getAbstractFileByPath(norm);
+          undo.vocabulary = {
+            path: norm,
+            existed: vocabFile instanceof obsidian.TFile,
+            previousContent: vocabFile instanceof obsidian.TFile ? await this.app.vault.read(vocabFile) : "",
+          };
+        } else {
+          undo.vocabulary = {
+            path: "",
+            existed: false,
+            previousCustomVocabulary: this.plugin.settings.customVocabulary || "",
+          };
+        }
+        const existing = await loadVocabularyGroups(this.plugin);
+        const selectedGroups = this.buildVocabularyGroupsFromHotwordItems(selectedItems);
+        await this.plugin.writeVocabularyFile(mergeVocabularyGroups(existing, selectedGroups));
+        this.plugin.markKnowledgeExtractionSource("vocabulary", file);
+        await this.plugin.saveSettings();
+        this.setSedimentDecisionLog(file, groupKey, this.buildSedimentDecisionLog(state, groupKey, selected, "已加入"));
+        this.setSedimentCandidateBucket(file, { hotwords: createVocabularyGroups() });
+        completed = this.markSedimentGroupDone(file, groupKey, displayItems.length || hotwordCount);
+        successText = `已加入热词库：${hotwordCount} 个`;
+      } else {
+        await this.keepPeopleSuggestions(file, state.currentPeople);
+        return;
+      }
+      const selectedByGroup = Object.assign({}, this.getSedimentCandidateBucket(file).selectedByGroup || {});
+      selectedByGroup[groupKey] = [];
+      this.setSedimentCandidateBucket(file, { selectedByGroup });
+      const persisted = await this.persistSedimentCandidateBucket(file);
+      this.render();
+      if (persisted && successText) this.showSedimentCommitToast(successText, undo);
+      if (completed) this.scheduleSedimentAutoAdvance(file, groupKey);
+    } catch (e) {
+      console.error("[LexVoice] commit sediment group failed", groupKey, e);
+      new obsidian.Notice(`加入失败：${(e && e.message) || e}`, 8000);
+    }
+  }
+
+  async ignoreSedimentGroup(file, groupKey) {
+    const state = this.getSedimentPanelState(file);
+    const displayItems = this.getSedimentDisplayItems(state, groupKey);
+    const count = displayItems.length;
+    this.setSedimentDecisionLog(file, groupKey, this.buildSedimentDecisionLog(state, groupKey, new Set(), "已加入"));
+    if (groupKey === "todo") this.setSedimentCandidateBucket(file, { todos: [] });
+    else if (groupKey === "card") this.setSedimentCandidateBucket(file, { cards: [] });
+    else if (groupKey === "hotword") this.setSedimentCandidateBucket(file, { hotwords: createVocabularyGroups() });
+    else return;
+    const completed = count > 0 && this.markSedimentGroupDone(file, groupKey, count);
+    const persisted = await this.persistSedimentCandidateBucket(file);
+    this.render();
+    if (persisted) this.showSedimentToast("已忽略未选内容", { icon: "circle-minus", variant: "muted" });
+    if (completed) this.scheduleSedimentAutoAdvance(file, groupKey);
+  }
+
+  async reprocessSedimentGroup(file, groupKey) {
+    const review = this.getSedimentGroupReview(file, groupKey);
+    const bucket = this.getSedimentCandidateBucket(file);
+    const patch = {
+      doneGroups: removeSedimentGroupDone(bucket.doneGroups, groupKey),
+      transitionGroup: "",
+    };
+    const selectedByGroup = Object.assign({}, bucket.selectedByGroup || {});
+    delete selectedByGroup[groupKey];
+    patch.selectedByGroup = selectedByGroup;
+    const decisionLogByGroup = Object.assign({}, bucket.decisionLogByGroup || {});
+    delete decisionLogByGroup[groupKey];
+    patch.decisionLogByGroup = decisionLogByGroup;
+    const hasRestore = review && review.restore;
+    if (hasRestore) {
+      // 有完整的 restore 数据：把候选恢复回来
+      if (groupKey === "person") patch.people = review.restore.people || [];
+      else if (groupKey === "todo") patch.todos = review.restore.todos || [];
+      else if (groupKey === "card") patch.cards = review.restore.cards || [];
+      else if (groupKey === "hotword") patch.hotwords = review.restore.hotwords || createVocabularyGroups();
+    } else {
+      // 旧版本的 done 状态没存 restore 快照 —— 兜底：清空本组候选并触发重新扫描
+      if (groupKey === "person") patch.people = [];
+      else if (groupKey === "todo") patch.todos = [];
+      else if (groupKey === "card") patch.cards = [];
+      else if (groupKey === "hotword") patch.hotwords = createVocabularyGroups();
+    }
+    this.setSedimentCandidateBucket(file, patch);
+    await this.persistSedimentCandidateBucket(file);
+    this.setSedimentGroup(groupKey);
+    if (!hasRestore) {
+      // 触发对当前纪要的整体重新扫描，把候选重新跑出来
+      try { new obsidian.Notice("本组无回滚数据，已触发重新扫描"); } catch {}
+      this.requestSedimentExtraction(file, true);
+    }
+  }
+
+  removeSedimentPeopleCandidates(file, suggestions) {
+    const bucket = this.getSedimentCandidateBucket(file);
+    if (!bucket.people || !bucket.people.length) return;
+    const path = obsidian.normalizePath(file && file.path || "");
+    const keys = new Set((suggestions || []).map(item => item && (item.cacheKey || item.key || getPeopleSuggestionCacheKey(item.sourcePath || path, item))).filter(Boolean));
+    if (!keys.size) return;
+    this.setSedimentCandidateBucket(file, {
+      people: bucket.people.filter(item => !keys.has(item && (item.cacheKey || item.key || getPeopleSuggestionCacheKey(item.sourcePath || path, item)))),
+    });
+  }
+
+  async keepPeopleSuggestions(file, suggestions) {
+    const items = (suggestions || []).filter(Boolean);
+    if (!items.length) return;
+    try {
+      const sourceSnapshot = file instanceof obsidian.TFile ? { path: file.path, content: await this.app.vault.read(file) } : null;
+      const undo = file instanceof obsidian.TFile ? {
+        filePath: obsidian.normalizePath(file.path || ""),
+        bucketBefore: this.cloneSedimentBucket(file),
+        entries: [],
+        sourceSnapshot,
+      } : null;
+      const stateBefore = file instanceof obsidian.TFile ? this.getSedimentPanelState(file) : null;
+      const result = await this.plugin.applyPeopleDirectorySuggestions(file, items);
+      if (undo) undo.entries = result.entries || [];
+      this.plugin.removeCachedPeopleSuggestions(items);
+      this.removeSedimentPeopleCandidates(file, items);
+      if (file instanceof obsidian.TFile) this.appendSedimentDecisionItems(file, "person", items, "kept", "已加入", stateBefore);
+      this.plugin.markKnowledgeExtractionSource("people", file);
+      await this.plugin.saveSettings();
+      const completed = this.markSedimentGroupDoneIfEmpty(file, "person", items.length);
+      await this.persistSedimentCandidateBucket(file);
+      this.render();
+      this.showSedimentCommitToast(`已加入人员库：新建 ${result.created || 0}，更新 ${result.updated || 0}`, undo);
+      if (completed) this.scheduleSedimentAutoAdvance(file, "person");
+    } catch (e) {
+      console.error("[LexVoice] keep people suggestions failed", e);
+      new obsidian.Notice(`保存人员建议失败：${(e && e.message) || e}`, 8000);
+    }
+  }
+
+  async ignorePeopleSuggestions(suggestions, file = null) {
+    const items = (suggestions || []).filter(Boolean);
+    if (!items.length) return;
+    try {
+      let count = 0;
+      const stateBefore = file instanceof obsidian.TFile ? this.getSedimentPanelState(file) : null;
+      for (const item of items) if (await this.plugin.ignorePeopleDirectorySuggestion(item)) count++;
+      if (file instanceof obsidian.TFile) this.removeSedimentPeopleCandidates(file, items);
+      if (file instanceof obsidian.TFile) this.appendSedimentDecisionItems(file, "person", items, "ignored", "已忽略", stateBefore);
+      const completed = file instanceof obsidian.TFile ? this.markSedimentGroupDoneIfEmpty(file, "person", items.length) : false;
+      if (file instanceof obsidian.TFile) await this.persistSedimentCandidateBucket(file);
+      this.render();
+      this.showSedimentToast(`已忽略 ${count} 条人员`, { icon: "circle-minus", variant: "muted" });
+      if (completed) this.scheduleSedimentAutoAdvance(file, "person");
+    } catch (e) {
+      console.error("[LexVoice] ignore people suggestions failed", e);
+      new obsidian.Notice(`忽略失败：${(e && e.message) || e}`, 8000);
+    }
+  }
+
+  async openVocabularyFileFromPanel() {
+    const norm = obsidian.normalizePath(this.plugin.settings.vocabularyFile || DEFAULT_SETTINGS.vocabularyFile);
+    let file = this.app.vault.getAbstractFileByPath(norm);
+    if (!(file instanceof obsidian.TFile)) {
+      const folderPath = norm.includes("/") ? norm.slice(0, norm.lastIndexOf("/")) : "";
+      if (folderPath) await this.plugin.ensureFolder(folderPath);
+      file = await this.app.vault.create(norm, formatVocabularyMarkdown([], this.plugin.settings.industryProfile));
+    }
+    if (file instanceof obsidian.TFile) await this.app.workspace.getLeaf(false).openFile(file);
+  }
+
+  renderCompletedNote(root, file) {
+    const data = this.getCompletedNotePanelData(file);
     if (data === undefined) {
       root.createDiv({ cls: "lexvoice-outline-empty", text: "正在读取当前纪要…" });
       return;
@@ -9194,7 +14325,6 @@ class OutlineView extends obsidian.ItemView {
     this.renderCompletedNotePlayer(root, data, file);
 
     const outlineSec = root.createDiv({ cls: "lexvoice-outline-section" });
-    outlineSec.createDiv({ cls: "lexvoice-outline-section-title", text: "大纲" });
     const outlineBody = outlineSec.createDiv({ cls: "lexvoice-outline-ai-body" });
     if (data.outline) {
       const rendered = obsidian.MarkdownRenderer.render(this.app, data.outline, outlineBody, file.path, this);
@@ -9203,6 +14333,8 @@ class OutlineView extends obsidian.ItemView {
           sourcePath: file.path,
           onTimeLink: (payload) => this.seekInlineAudio(payload),
         });
+        this.inlineOutlineBody = outlineBody;
+        this.decoratePlaybackOutlineChapters(outlineBody);
       });
     } else {
       outlineBody.createDiv({ cls: "lexvoice-outline-empty", text: "这篇纪要没有保存实时大纲。" });
@@ -9232,13 +14364,34 @@ class OutlineView extends obsidian.ItemView {
     }
 
     const sec = root.createDiv({ cls: "lexvoice-outline-section lexvoice-outline-player-section" });
-    const titleRow = sec.createDiv({ cls: "lexvoice-outline-player-title-row" });
-    titleRow.createDiv({ cls: "lexvoice-outline-section-title", text: "完整录音" });
-    titleRow.createDiv({ cls: "lexvoice-outline-player-file", text: audioFile.name });
+    const ui = sec.createDiv({ cls: "lexvoice-inline-player" });
+    const playBtn = ui.createEl("button", {
+      cls: "lexvoice-inline-player-play",
+      attr: { type: "button", "aria-label": "播放录音" },
+    });
+
+    const progressWrap = ui.createDiv({ cls: "lexvoice-inline-player-progress-wrap" });
+    const track = progressWrap.createDiv({ cls: "lexvoice-inline-player-track" });
+    const fill = track.createDiv({ cls: "lexvoice-inline-player-fill" });
+    const knob = track.createDiv({ cls: "lexvoice-inline-player-knob" });
+    const times = progressWrap.createDiv({ cls: "lexvoice-inline-player-times" });
+    const currentTime = times.createSpan({ cls: "lexvoice-inline-player-time is-current", text: "0:00" });
+    const totalTime = times.createSpan({ cls: "lexvoice-inline-player-time", text: "0:00" });
+
+    const volumeBtn = ui.createEl("button", {
+      cls: "lexvoice-inline-player-icon-btn",
+      attr: { type: "button", "aria-label": "静音/取消静音", title: "静音/取消静音" },
+    });
+    try { obsidian.setIcon(volumeBtn, "volume"); } catch { volumeBtn.setText("音量"); }
+    const moreBtn = ui.createEl("button", {
+      cls: "lexvoice-inline-player-icon-btn",
+      attr: { type: "button", "aria-label": "打开录音文件", title: "打开录音文件" },
+    });
+    try { obsidian.setIcon(moreBtn, "more-horizontal"); } catch { moreBtn.setText("更多"); }
 
     const player = sec.createEl("audio", {
-      cls: "lexvoice-outline-player",
-      attr: { controls: "true", preload: "metadata" },
+      cls: "lexvoice-outline-player-native",
+      attr: { preload: "metadata" },
     });
     try {
       player.src = this.app.vault.getResourcePath(audioFile);
@@ -9247,6 +14400,190 @@ class OutlineView extends obsidian.ItemView {
     }
     this.inlineAudioEl = player;
     this.inlineAudioFile = audioFile;
+
+    const setPlayIcon = () => {
+      playBtn.classList.toggle("is-playing", !player.paused);
+      playBtn.classList.toggle("is-paused", player.paused);
+      playBtn.setAttribute("aria-label", player.paused ? "播放录音" : "暂停录音");
+    };
+    const update = () => {
+      const duration = Number.isFinite(player.duration) && player.duration > 0 ? player.duration : 0;
+      const current = Math.max(0, Number(player.currentTime) || 0);
+      const pct = duration ? Math.max(0, Math.min(100, current / duration * 100)) : 0;
+      fill.style.width = `${pct}%`;
+      knob.style.left = `${pct}%`;
+      currentTime.setText(formatElapsed(Math.round(current * 1000)));
+      totalTime.setText(duration ? formatElapsed(Math.round(duration * 1000)) : "0:00");
+      setPlayIcon();
+      this.decoratePlaybackOutlineChapters(this.inlineOutlineBody);
+    };
+    playBtn.onclick = () => {
+      if (player.paused) player.play().catch(() => {});
+      else player.pause();
+      update();
+    };
+    track.onclick = (evt) => {
+      const rect = track.getBoundingClientRect();
+      const ratio = rect.width ? Math.max(0, Math.min(1, (evt.clientX - rect.left) / rect.width)) : 0;
+      if (Number.isFinite(player.duration) && player.duration > 0) {
+        player.currentTime = player.duration * ratio;
+        player.play().catch(() => {});
+      }
+      update();
+    };
+    volumeBtn.onclick = () => {
+      player.muted = !player.muted;
+      volumeBtn.empty();
+      try { obsidian.setIcon(volumeBtn, player.muted ? "volume-x" : "volume"); } catch {}
+    };
+    moreBtn.onclick = () => this.app.workspace.getLeaf(false).openFile(audioFile);
+    player.addEventListener("loadedmetadata", update);
+    player.addEventListener("timeupdate", update);
+    player.addEventListener("play", update);
+    player.addEventListener("pause", update);
+    update();
+  }
+
+  getOutlineChapterItems(body) {
+    if (!body) return [];
+    const rail = body.querySelector("ul.lexvoice-outline-time-rail");
+    if (!rail) return [];
+    return Array.from(rail.children || [])
+      .filter((child) => child && child.tagName === "LI" && child.classList && child.classList.contains("lexvoice-outline-has-leading-time"));
+  }
+
+  getOutlineChapterTimeMs(li) {
+    if (!li) return NaN;
+    const link = li.querySelector(".lexvoice-time-link.lexvoice-outline-leading-time");
+    return link ? parseElapsedMsToken((link.textContent || "").trim()) : NaN;
+  }
+
+  appendOutlineTitleAdornment(li, node) {
+    if (!li || !node) return null;
+    const firstParagraph = Array.from(li.children || []).find((child) => child && child.tagName === "P");
+    if (firstParagraph) {
+      firstParagraph.appendChild(document.createTextNode(" "));
+      firstParagraph.appendChild(node);
+      return node;
+    }
+    const firstNestedList = Array.from(li.children || [])
+      .find((child) => child && /^(UL|OL)$/i.test(child.tagName || ""));
+    const spacer = document.createTextNode(" ");
+    if (firstNestedList) {
+      li.insertBefore(spacer, firstNestedList);
+      li.insertBefore(node, firstNestedList);
+    } else {
+      li.appendChild(spacer);
+      li.appendChild(node);
+    }
+    return node;
+  }
+
+  addOutlineMiniWave(parent, cls = "", titleLi = null) {
+    if (!parent && !titleLi) return null;
+    const wave = document.createElement("span");
+    wave.className = `lexvoice-outline-mini-wave ${cls}`.trim();
+    if (titleLi) this.appendOutlineTitleAdornment(titleLi, wave);
+    else parent.appendChild(wave);
+    for (let i = 0; i < 4; i++) {
+      const bar = document.createElement("span");
+      bar.className = "lexvoice-outline-mini-wave-bar";
+      bar.style.animationDelay = `${i * 0.15}s`;
+      wave.appendChild(bar);
+    }
+    return wave;
+  }
+
+  decorateLiveOutlineChapters(body, session, recInfo) {
+    if (!body || !session) return;
+    body.addClass("is-live-outline");
+    const items = this.getOutlineChapterItems(body);
+    if (!items.length) return;
+    const current = items[items.length - 1];
+    const viewingMs = Number.isFinite(this.outlineViewingMs) ? this.outlineViewingMs : null;
+    let viewingItem = null;
+    for (const li of items) {
+      const ms = this.getOutlineChapterTimeMs(li);
+      li.addClass("lexvoice-outline-chapter");
+      li.removeClass("is-generating");
+      li.removeClass("is-viewing");
+      li.onclick = (evt) => {
+        const target = evt.target;
+        if (target && target.closest && target.closest("a,button")) return;
+        if (li === current) {
+          this.outlineViewingMs = null;
+        } else if (Number.isFinite(ms)) {
+          this.outlineViewingMs = ms;
+        }
+        this.render();
+      };
+      if (viewingMs !== null && Number.isFinite(ms) && Math.abs(ms - viewingMs) < 500) viewingItem = li;
+    }
+    const isRecording = recInfo && recInfo.state === "recording";
+    const isPaused = recInfo && recInfo.state === "paused";
+    if ((isRecording || isPaused) && current) {
+      current.addClass("is-generating");
+      if (!current.querySelector(".lexvoice-outline-live-badge")) {
+        const badge = document.createElement("span");
+        badge.className = "lexvoice-outline-live-badge";
+        badge.textContent = isPaused ? "已暂停" : "正在生成";
+        this.appendOutlineTitleAdornment(current, badge);
+      }
+    }
+    if (viewingItem) {
+      viewingItem.addClass("is-viewing");
+      if (!viewingItem.querySelector(".lexvoice-outline-viewing-icon")) {
+        const icon = document.createElement("span");
+        icon.className = "lexvoice-outline-viewing-icon";
+        try { obsidian.setIcon(icon, "eye"); } catch { icon.textContent = "查看"; }
+        this.appendOutlineTitleAdornment(viewingItem, icon);
+      }
+      if (!body.querySelector(".lexvoice-back-to-current")) {
+        const back = body.createEl("button", { cls: "lexvoice-back-to-current", attr: { type: "button" } });
+        try { obsidian.setIcon(back.createSpan({ cls: "lexvoice-back-to-current-icon" }), "arrow-down"); } catch {}
+        back.createSpan({ cls: "lexvoice-back-to-current-label", text: "回到当前" });
+        back.onclick = () => {
+          this.outlineViewingMs = null;
+          this.render();
+        };
+      }
+    }
+  }
+
+  decoratePlaybackOutlineChapters(body) {
+    if (!body || !this.inlineAudioEl) return;
+    const items = this.getOutlineChapterItems(body);
+    if (!items.length) return;
+    const currentMs = Math.max(0, Number(this.inlineAudioEl.currentTime) || 0) * 1000;
+    let activeIndex = -1;
+    const times = items.map((li) => this.getOutlineChapterTimeMs(li));
+    for (let i = 0; i < times.length; i++) {
+      if (Number.isFinite(times[i]) && times[i] <= currentMs + 250) activeIndex = i;
+    }
+    for (let i = 0; i < items.length; i++) {
+      const li = items[i];
+      li.addClass("lexvoice-outline-chapter");
+      li.removeClass("is-played");
+      li.removeClass("is-playing");
+      li.removeClass("is-upcoming");
+      const oldWave = li.querySelector(".lexvoice-outline-mini-wave");
+      if (oldWave) oldWave.remove();
+      if (activeIndex >= 0 && i < activeIndex) li.addClass("is-played");
+      else if (i === activeIndex) {
+        li.addClass("is-playing");
+        const target = li.querySelector(":scope > p") || li;
+        this.addOutlineMiniWave(target, "", li);
+      } else li.addClass("is-upcoming");
+      li.onclick = (evt) => {
+        const target = evt.target;
+        if (target && target.closest && target.closest("a,button")) return;
+        const ms = times[i];
+        if (!Number.isFinite(ms) || !this.inlineAudioEl) return;
+        this.inlineAudioEl.currentTime = ms / 1000;
+        this.inlineAudioEl.play().catch(() => {});
+        this.decoratePlaybackOutlineChapters(body);
+      };
+    }
   }
 
   seekInlineAudio(payload) {
@@ -9273,9 +14610,18 @@ class OutlineView extends obsidian.ItemView {
     return true;
   }
 
-  renderTitleRow(head, title) {
+  renderTitleRow(head, title, options = {}) {
     const row = head.createDiv({ cls: "lexvoice-outline-title-row" });
     row.createDiv({ cls: "lexvoice-outline-title", text: title });
+    const noteFile = options && options.noteFile instanceof obsidian.TFile ? options.noteFile : null;
+    if (noteFile) {
+      const noteBtn = row.createEl("button", {
+        cls: "clickable-icon lexvoice-outline-note-btn",
+        attr: { "aria-label": "打开当前纪要", title: "打开当前纪要" },
+      });
+      try { obsidian.setIcon(noteBtn, "file-text"); } catch { noteBtn.setText("纪要"); }
+      noteBtn.onclick = () => this.app.workspace.getLeaf(false).openFile(noteFile);
+    }
     const btn = row.createEl("button", {
       cls: "clickable-icon lexvoice-outline-settings-btn",
       attr: { "aria-label": "打开 LexVoice 设置", title: "打开 LexVoice 设置" },
@@ -9284,28 +14630,158 @@ class OutlineView extends obsidian.ItemView {
     btn.onclick = () => this.plugin.openSettings("home");
   }
 
-  renderActiveHead(root, session, recInfo) {
+  getRecordingIssue(recInfo) {
+    const issue = this.plugin && typeof this.plugin.getRecordingIssue === "function"
+      ? this.plugin.getRecordingIssue()
+      : (recInfo && recInfo.issue);
+    if (!issue || !issue.kind) return null;
+    if (issue.kind === "microphone") return issue;
+    const state = recInfo && recInfo.state ? recInfo.state : "idle";
+    if (state === "idle" && !(this.plugin && this.plugin.session && this.plugin.session.finalizing)) return null;
+    return issue;
+  }
+
+  renderActiveHead(root, session, recInfo, recordingIssue = null) {
     const head = root.createDiv({ cls: "lexvoice-outline-head" });
-    const meta = getModeMeta(this.plugin.settings, session.mode);
-    let statusText;
-    if (session.finalizing) statusText = "合并润色中…";
-    else if (recInfo.state === "recording") statusText = "录音中";
-    else if (recInfo.state === "paused") statusText = "已暂停";
-    else statusText = "处理中…";
-    this.renderTitleRow(head, `${meta.prefix} · ${statusText}`);
-    const stamp = window.moment(session.startedAt).format("YYYY-MM-DD HH:mm:ss");
-    head.createDiv({ cls: "lexvoice-outline-meta",
-      text: `${stamp} · ${formatElapsed(recInfo.elapsed)} · ${session.segments.length} 段` });
-    this.renderInputMeter(head, recInfo);
-    const actions = head.createDiv({ cls: "lexvoice-outline-actions" });
-    const jumpBtn = actions.createEl("button", { text: "跳到笔记" });
-    jumpBtn.onclick = () => this.plugin.openSessionNote();
-    if (recInfo.state !== "idle") {
-      const stopBtn = actions.createEl("button", { text: recInfo.state === "paused" ? "继续" : "暂停", cls: "mod-cta" });
-      stopBtn.onclick = () => recInfo.state === "paused" ? this.plugin.recorder.resume() : this.plugin.recorder.pause();
-      const endBtn = actions.createEl("button", { text: "停止" });
-      endBtn.onclick = () => this.plugin.stopRecording();
+    head.addClass("is-active-session");
+    this.renderTitleRow(head, "LexVoice", { noteFile: this.getSessionNoteFile(session) });
+    this.renderActiveRecordingBar(head, session, recInfo, recordingIssue);
+    this.renderRecordingIssueAlert(head, recordingIssue, session, recInfo);
+    if (session.finalizing || recInfo.state === "idle") {
+      const banner = head.createDiv({ cls: "lexvoice-finalizing-banner" });
+      try { obsidian.setIcon(banner.createSpan({ cls: "lexvoice-finalizing-banner-icon" }), "loader-2"); } catch {}
+      banner.createSpan({ cls: "lexvoice-finalizing-banner-text", text: "AI 正在整理最终纪要内容" });
     }
+  }
+
+  renderActiveRecordingBar(parent, session, recInfo, recordingIssue = null) {
+    const state = recInfo && recInfo.state ? recInfo.state : "idle";
+    const isRecording = state === "recording";
+    const isPaused = state === "paused";
+    const isFinalizing = !!(session && session.finalizing) || state === "idle";
+    const issueKind = recordingIssue && recordingIssue.kind;
+    const isMicBlocked = issueKind === "microphone";
+    const wrap = parent.createDiv({ cls: "lexvoice-recording-player" + (isRecording || isPaused ? " is-live" : " is-playback") + (isPaused ? " is-paused" : "") + (issueKind ? ` is-${issueKind}` : "") });
+    const main = wrap.createDiv({ cls: "lexvoice-recording-player-main" });
+    const primary = main.createEl("button", {
+      cls: "lexvoice-recording-player-primary",
+      attr: { type: "button", "aria-label": isRecording || isPaused ? "停止录音" : "录音已停止" },
+    });
+    if ((isRecording || isPaused) && !isMicBlocked) {
+      primary.createSpan({ cls: "lexvoice-recording-stop-square" });
+      primary.onclick = () => this.plugin.stopRecording();
+    } else {
+      try { obsidian.setIcon(primary, "player-play"); } catch { primary.setText("▶"); }
+      primary.disabled = true;
+    }
+    const middle = main.createDiv({ cls: "lexvoice-recording-player-middle" });
+    if (isRecording || isPaused) {
+      const wave = middle.createDiv({ cls: "lexvoice-recording-wave" });
+      const heights = [10, 14, 7, 12, 16, 9, 13, 7, 11, 15, 8, 12];
+      heights.forEach((h, i) => {
+        const bar = wave.createSpan({ cls: "lexvoice-recording-wave-bar" });
+        bar.style.height = `${h}px`;
+        bar.style.animationDelay = `${i * 0.1}s`;
+      });
+      middle.createSpan({ cls: "lexvoice-recording-elapsed", text: formatElapsed(recInfo.elapsed || 0) });
+    } else {
+      const track = middle.createDiv({ cls: "lexvoice-recording-finish-track" });
+      track.createDiv({ cls: "lexvoice-recording-finish-fill" });
+      const times = middle.createDiv({ cls: "lexvoice-recording-finish-times" });
+      times.createSpan({ text: "0:00" });
+      times.createSpan({ text: formatElapsed((recInfo && recInfo.elapsed) || getSegmentsDurationMs(session && session.segments)) });
+    }
+    const pause = main.createEl("button", {
+      cls: "lexvoice-recording-player-secondary",
+      attr: { type: "button", "aria-label": isPaused ? "继续录音" : "暂停录音" },
+    });
+    if ((isRecording || isPaused) && !isMicBlocked) {
+      try { obsidian.setIcon(pause, isPaused ? "player-play" : "player-pause"); } catch { pause.setText(isPaused ? "继续" : "暂停"); }
+      pause.onclick = () => isPaused ? this.plugin.recorder.resume() : this.plugin.recorder.pause();
+    } else {
+      try { obsidian.setIcon(pause, "volume"); } catch {}
+      pause.disabled = isFinalizing;
+    }
+    if ((isRecording || isPaused) && !isMicBlocked) {
+      this.renderInputMeter(parent, recInfo);
+    }
+  }
+
+  renderRecordingIssueAlert(parent, issue, session, recInfo) {
+    if (!parent || !issue || !issue.kind || issue.kind === "microphone") return;
+    const isNetwork = issue.kind === "network";
+    const wrap = parent.createDiv({ cls: `lexvoice-recording-alert ${isNetwork ? "is-warning" : "is-neutral"}` });
+    const icon = wrap.createSpan({ cls: "lexvoice-recording-alert-icon" });
+    try { obsidian.setIcon(icon, isNetwork ? "wifi-off" : "cloud-off"); } catch {}
+    const body = wrap.createDiv({ cls: "lexvoice-recording-alert-body" });
+    body.createDiv({
+      cls: "lexvoice-recording-alert-title",
+      text: isNetwork ? "网络中断 · 录音正常继续" : "AI 服务暂时不可用",
+    });
+    body.createDiv({
+      cls: "lexvoice-recording-alert-desc",
+      text: isNetwork
+        ? "大纲实时生成已暂停，恢复网络后会自动补做。"
+        : "本地录音正常进行，结束后可以手动整理大纲。",
+    });
+    const action = wrap.createEl("button", {
+      cls: "lexvoice-recording-alert-action",
+      text: isNetwork ? "重连" : "详情",
+      attr: { type: "button" },
+    });
+    action.onclick = () => {
+      if (isNetwork) {
+        this.refreshAIOutline({ silent: false });
+        return;
+      }
+      new obsidian.Notice(issue.message ? `AI 服务暂时不可用：${issue.message}` : "AI 服务暂时不可用，本地录音仍在继续。", 8000);
+    };
+  }
+
+  renderMicrophoneBlockedOverlay(root, issue, recInfo) {
+    const overlay = root.createDiv({ cls: "lexvoice-recording-blocker-overlay" });
+    const card = overlay.createDiv({ cls: "lexvoice-recording-blocker-card" });
+    const top = card.createDiv({ cls: "lexvoice-recording-blocker-top" });
+    const iconWrap = top.createDiv({ cls: "lexvoice-recording-blocker-icon" });
+    try { obsidian.setIcon(iconWrap, "mic-off"); } catch {}
+    const titleWrap = top.createDiv({ cls: "lexvoice-recording-blocker-title-wrap" });
+    titleWrap.createDiv({ cls: "lexvoice-recording-blocker-title", text: "麦克风访问被拒绝" });
+    const stoppedAt = Number(issue && issue.stoppedAtMs);
+    const fallbackMs = Math.max(0, Number(recInfo && recInfo.elapsed) || 0);
+    titleWrap.createDiv({ cls: "lexvoice-recording-blocker-subtitle", text: `录音已在 ${formatElapsed(Number.isFinite(stoppedAt) ? stoppedAt : fallbackMs)} 停止` });
+    card.createDiv({
+      cls: "lexvoice-recording-blocker-desc",
+      text: "本场已录制的内容已保存到本地。系统在录音过程中收回了麦克风权限，因此无法继续录制新的声音。",
+    });
+    const steps = card.createDiv({ cls: "lexvoice-recording-blocker-steps" });
+    steps.createDiv({ text: "恢复方式：" });
+    steps.createDiv({ text: "1. 打开系统设置，允许 Obsidian 访问麦克风。" });
+    steps.createDiv({ text: "2. 回到 LexVoice 后重新开始一段录音。" });
+    const actions = card.createDiv({ cls: "lexvoice-recording-blocker-actions" });
+    const saveOnly = actions.createEl("button", { cls: "lexvoice-recording-blocker-secondary", text: "仅保存录音", attr: { type: "button" } });
+    saveOnly.onclick = () => this.plugin.stopRecording();
+    const settings = actions.createEl("button", { cls: "lexvoice-recording-blocker-primary", attr: { type: "button" } });
+    try { obsidian.setIcon(settings.createSpan({ cls: "lexvoice-recording-blocker-action-icon" }), "settings"); } catch {}
+    settings.createSpan({ text: "打开系统设置" });
+    settings.onclick = () => this.openMicrophoneSettings();
+  }
+
+  openMicrophoneSettings() {
+    try { window.open("ms-settings:privacy-microphone"); } catch {}
+    new obsidian.Notice("请在系统设置 → 隐私与安全 → 麦克风中允许 Obsidian 访问麦克风。", 9000);
+  }
+
+  renderWorkProgress(parent, state) {
+    if (!parent || !state) return;
+    const pct = clampLexVoiceProgress(state.percent);
+    const wrap = parent.createDiv({ cls: "lexvoice-work-progress" + (pct == null ? " is-indeterminate" : "") });
+    const top = wrap.createDiv({ cls: "lexvoice-work-progress-top" });
+    top.createSpan({ cls: "lexvoice-work-progress-label", text: state.label || "处理中" });
+    top.createSpan({ cls: "lexvoice-work-progress-percent", text: pct == null ? "" : `${pct}%` });
+    const bar = wrap.createDiv({ cls: "lexvoice-work-progress-bar" });
+    const fill = bar.createDiv({ cls: "lexvoice-work-progress-fill" });
+    if (pct != null) fill.style.width = `${pct}%`;
+    if (state.detail || state.title) wrap.createDiv({ cls: "lexvoice-work-progress-detail", text: state.detail || state.title });
   }
 
   renderInputMeter(parent, recInfo) {
@@ -9357,14 +14833,15 @@ class OutlineView extends obsidian.ItemView {
 
   renderIdleHead(root) {
     const head = root.createDiv({ cls: "lexvoice-outline-head is-idle" });
+    this.renderTitleRow(head, "LexVoice");
     const isMobile = isLexVoiceMobileRuntime();
-    this.renderTitleRow(head, isMobile ? "LexVoice 移动录音" : "LexVoice 录音工作台");
 
     const controls = head.createDiv({ cls: "lexvoice-outline-controls" });
-
     const modeRow = controls.createDiv({ cls: "lexvoice-outline-control-row" });
-    modeRow.createEl("span", { cls: "lexvoice-outline-control-label", text: "模式" });
-    const modeSelect = modeRow.createEl("select", { cls: "dropdown" });
+    modeRow.createEl("span", { cls: "lexvoice-outline-control-label", text: "模板" });
+    const modeWrap = modeRow.createDiv({ cls: "lexvoice-outline-select-wrap" });
+    try { obsidian.setIcon(modeWrap.createSpan({ cls: "lexvoice-outline-select-icon" }), "user-check"); } catch {}
+    const modeSelect = modeWrap.createEl("select", { cls: "dropdown lexvoice-outline-select-control" });
     const currentMode = getEffectivePolishMode(this.plugin.settings, this.plugin.settings.polishMode);
     for (const k of getVisiblePolishModeKeys(this.plugin.settings)) {
       const opt = modeSelect.createEl("option", { value: k, text: getModeMeta(this.plugin.settings, k).label });
@@ -9376,14 +14853,11 @@ class OutlineView extends obsidian.ItemView {
       this.scheduleUpdate();
     });
 
-    // 扩展模式解锁后才显示专属上下文卡片
-    if (isRecruitFeatureUnlocked(this.plugin.settings) && currentMode === "recruit") {
-      this.renderRecruitContextCard(controls);
-    }
-
     const capRow = controls.createDiv({ cls: "lexvoice-outline-control-row" });
-    capRow.createEl("span", { cls: "lexvoice-outline-control-label", text: "音频输入" });
-    const capSelect = capRow.createEl("select", { cls: "dropdown" });
+    capRow.createEl("span", { cls: "lexvoice-outline-control-label", text: "音频" });
+    const capWrap = capRow.createDiv({ cls: "lexvoice-outline-select-wrap" });
+    try { obsidian.setIcon(capWrap.createSpan({ cls: "lexvoice-outline-select-icon" }), "mic"); } catch {}
+    const capSelect = capWrap.createEl("select", { cls: "dropdown lexvoice-outline-select-control" });
     const capOpts = isMobile
       ? [["mic", "仅麦克风（手机端）"]]
       : [
@@ -9409,15 +14883,28 @@ class OutlineView extends obsidian.ItemView {
       });
     }
 
+    // 扩展模式解锁后才显示专属上下文卡片
+    if (isRecruitFeatureUnlocked(this.plugin.settings) && currentMode === "recruit") {
+      this.renderRecruitContextCard(controls);
+    }
+
     // 设备状态条：根据当前音频输入方式检测对应硬件，给出可见反馈
     const devStatus = controls.createDiv({ cls: "lexvoice-outline-device-status" });
     this.renderDeviceStatus(devStatus, currentInputMode);
 
-    const actions = head.createDiv({ cls: "lexvoice-outline-actions" });
-    const startBtn = actions.createEl("button", { text: isMobile ? "● 开始麦克风录音" : "● 开始录音", cls: "mod-cta" });
+    const actions = controls.createDiv({ cls: "lexvoice-outline-actions" });
+    const startBtn = actions.createEl("button", { cls: "mod-cta lexvoice-outline-action-button is-record", attr: { type: "button" } });
+    try { obsidian.setIcon(startBtn.createSpan({ cls: "lexvoice-outline-action-icon" }), "mic"); } catch {}
+    startBtn.createSpan({ text: isMobile ? "新建录音" : "新建录音" });
     startBtn.onclick = () => this.plugin.startRecording();
-    const importBtn = actions.createEl("button", { text: "导入音频" });
+    const importBtn = actions.createEl("button", { cls: "lexvoice-outline-action-button", attr: { type: "button" } });
+    try { obsidian.setIcon(importBtn.createSpan({ cls: "lexvoice-outline-action-icon" }), "file-audio"); } catch {}
+    importBtn.createSpan({ text: "音频" });
     importBtn.onclick = () => new ImportAudioModal(this.app, this.plugin).open();
+    const importTextBtn = actions.createEl("button", { cls: "lexvoice-outline-action-button", attr: { type: "button" } });
+    try { obsidian.setIcon(importTextBtn.createSpan({ cls: "lexvoice-outline-action-icon" }), "file-text"); } catch {}
+    importTextBtn.createSpan({ text: "文本" });
+    importTextBtn.onclick = () => new ImportTextModal(this.app, this.plugin).open();
   }
 
   getMeetingMaterialsFolder(session) {
@@ -9437,7 +14924,7 @@ class OutlineView extends obsidian.ItemView {
       cls: "lexvoice-meeting-composer-input",
       attr: { rows: "1", "aria-label": "会中补充" },
     });
-    textarea.placeholder = isMobile ? "补充一句…" : "记一条会中想法…";
+    textarea.placeholder = "记下来 · #概念 ?问题 !重点 @指派 /待办";
     textarea.value = workbench.draft || "";
     textarea.addEventListener("input", () => {
       session.meetingWorkbench.draft = textarea.value;
@@ -9492,10 +14979,52 @@ class OutlineView extends obsidian.ItemView {
     const container = asListItem
       ? parent.createEl("li", { cls: "lexvoice-outline-annotation-li" })
       : parent;
-    const row = container.createDiv({ cls: `lexvoice-outline-annotation is-${source} ${isIntegrated ? "is-integrated" : "is-pending"}` });
+    const metaKind = entry.interaction && entry.interaction.kind;
+    const isMetadata = metaKind && (metaKind === "assignee" || metaKind === "todo");
+    const row = container.createDiv({ cls: `lexvoice-outline-annotation is-${source} ${isIntegrated ? "is-integrated" : "is-pending"}${isMetadata ? ` is-${metaKind}` : ""}` });
     row.createDiv({ cls: `lexvoice-outline-annotation-time is-${source}`, text: formatElapsed(entry.atMs || 0) });
     const body = row.createDiv({ cls: "lexvoice-outline-annotation-body" });
-    if (entry.text) body.createDiv({ cls: "lexvoice-outline-annotation-text", text: entry.text });
+    const sourcePath = session && session.mdPath ? session.mdPath : "";
+    // 元数据 kinds 优先用结构化展示（不渲染原始 entry.text 的符号前缀）
+    if (metaKind === "todo") {
+      const todoLine = body.createDiv({ cls: "lexvoice-outline-annotation-todo" });
+      todoLine.createSpan({ cls: "lexvoice-outline-annotation-todo-check" });
+      todoLine.createSpan({ cls: "lexvoice-outline-annotation-todo-task", text: entry.interaction.task || entry.text || "未命名待办" });
+      if (entry.interaction.assignee) {
+        const chip = todoLine.createSpan({ cls: "lexvoice-outline-annotation-assignee-chip" });
+        try { obsidian.setIcon(chip.createSpan({ cls: "lexvoice-outline-annotation-assignee-icon" }), "user"); } catch {}
+        chip.createSpan({ text: entry.interaction.assignee });
+      }
+    } else if (metaKind === "assignee") {
+      const chip = body.createDiv({ cls: "lexvoice-outline-annotation-assignee-chip is-leading" });
+      try { obsidian.setIcon(chip.createSpan({ cls: "lexvoice-outline-annotation-assignee-icon" }), "user-check"); } catch {}
+      chip.createSpan({ text: entry.interaction.assignee || "未指定" });
+      if (entry.interaction.task) {
+        const txt = body.createDiv({ cls: "lexvoice-outline-annotation-text" });
+        try { obsidian.MarkdownRenderer.render(this.app, entry.interaction.task, txt, sourcePath, this); }
+        catch (e) { txt.setText(entry.interaction.task); }
+      }
+    } else if (entry.text) {
+      const txt = body.createDiv({ cls: "lexvoice-outline-annotation-text" });
+      // 渲染 Markdown，让用户补充的内容里的 **粗体** / *斜体* / 列表等正常显示
+      try { obsidian.MarkdownRenderer.render(this.app, entry.text, txt, sourcePath, this); }
+      catch (e) { console.warn("[LexVoice] annotation text markdown render failed", e); txt.setText(entry.text); }
+    }
+    if (entry.interaction && (entry.interaction.status || entry.interaction.response || entry.interaction.error)) {
+      const status = entry.interaction.status || "";
+      const reply = body.createDiv({ cls: `lexvoice-outline-annotation-ai ${status ? "is-" + status : ""}` });
+      if (status === "running" || status === "pending") {
+        reply.setText(status === "pending" ? "AI 将在转写空档补充..." : "AI 正在补充...");
+      } else if (entry.interaction.response) {
+        reply.empty();
+        reply.createSpan({ cls: "lexvoice-outline-annotation-ai-label", text: "AI" });
+        const replyBody = reply.createDiv({ cls: "lexvoice-outline-annotation-ai-body" });
+        try { obsidian.MarkdownRenderer.render(this.app, entry.interaction.response, replyBody, sourcePath, this); }
+        catch (e) { console.warn("[LexVoice] annotation AI reply markdown render failed", e); replyBody.setText(entry.interaction.response); }
+      } else if (entry.interaction.error) {
+        reply.setText(`AI 补充失败：${entry.interaction.error}`);
+      }
+    }
     if (entry.materials && entry.materials.length) {
       const materials = body.createDiv({ cls: "lexvoice-outline-annotation-materials" });
       for (const item of entry.materials) this.renderMeetingMaterialChip(materials, item);
@@ -9582,7 +15111,6 @@ class OutlineView extends obsidian.ItemView {
         entries: current.entries.concat(entry),
       }));
       new obsidian.Notice(`已添加 ${added.length} 个会中材料`);
-      this.maybeRefreshMeetingWorkbenchOutline(session, entry);
     }
     this.render();
   }
@@ -9592,12 +15120,97 @@ class OutlineView extends obsidian.ItemView {
     return Math.max(0, Number(info.elapsed) || 0);
   }
 
-  maybeRefreshMeetingWorkbenchOutline(session, entry) {
-    if (!session || !this.plugin.settings.enableRealtimeOutline) return;
-    if (!session.segments || !session.segments.length) return;
-    const latestEnd = getSessionLatestSegmentEndMs(session);
-    if (!latestEnd || (Number(entry && entry.atMs) || 0) > latestEnd) return;
-    setTimeout(() => this.refreshAIOutline({ silent: true }), 80);
+  updateMeetingWorkbenchEntry(session, entryId, updater) {
+    if (!session || !entryId || typeof updater !== "function") return false;
+    const current = normalizeMeetingWorkbench(session.meetingWorkbench);
+    let changed = false;
+    const entries = current.entries.map((item) => {
+      if (item.id !== entryId) return item;
+      changed = true;
+      return Object.assign({}, item, updater(Object.assign({}, item)) || {});
+    });
+    if (!changed) return false;
+    session.meetingWorkbench = normalizeMeetingWorkbench(Object.assign({}, current, { entries }));
+    this.render();
+    return true;
+  }
+
+  buildMeetingWorkbenchInteractionContext(session, entry) {
+    const atMs = Number(entry && entry.atMs) || 0;
+    const before = [];
+    const after = [];
+    for (const s of (Array.isArray(session && session.segments) ? session.segments : [])) {
+      if (!s || !s.text) continue;
+      const start = Number(s.startOffsetMs) || 0;
+      const end = Number(s.endOffsetMs ?? s.startOffsetMs) || start;
+      const line = `[${formatElapsed(start)}-${formatElapsed(end)}] ${String(s.text || "").trim()}`;
+      if (end <= atMs) before.push(line);
+      else if (start >= atMs) after.push(line);
+    }
+    return [
+      session && session.realtimeOutline ? `【当前实时大纲】\n${String(session.realtimeOutline).trim().slice(-3000)}` : "",
+      session && session.realtimeOutlineMemory ? `【主题记忆】\n${String(session.realtimeOutlineMemory).trim().slice(-2000)}` : "",
+      before.length ? `【该记录前的转写片段】\n${before.slice(-6).join("\n")}` : "",
+      after.length ? `【该记录后的转写片段】\n${after.slice(0, 3).join("\n")}` : "",
+    ].filter(Boolean).join("\n\n");
+  }
+
+  async processMeetingWorkbenchInteraction(session, entryId) {
+    if (!session || !entryId) return;
+    const workbench = normalizeMeetingWorkbench(session.meetingWorkbench);
+    const entry = workbench.entries.find(item => item.id === entryId);
+    if (!entry || !entry.interaction || !entry.interaction.kind) return;
+    // 元数据 kinds（assignee / todo）不走 AI 助理
+    if (MEETING_METADATA_KINDS.has(entry.interaction.kind)) return;
+    if (entry.interaction.status === "running" || entry.interaction.status === "done") return;
+    this.updateMeetingWorkbenchEntry(session, entryId, (item) => ({
+      interaction: Object.assign({}, item.interaction, { status: "running", error: "", updatedAt: new Date().toISOString() }),
+    }));
+    try {
+      const latest = normalizeMeetingWorkbench(session.meetingWorkbench).entries.find(item => item.id === entryId) || entry;
+      const context = this.buildMeetingWorkbenchInteractionContext(session, latest);
+      const kind = latest.interaction.kind;
+      const label = kind === "concept" ? "概念解释" : (kind === "question" ? "问题回答" : "重点处理");
+      const system = "你是 LexVoice 的会中即时助理。只回答用户这条会中记录，不改写实时大纲，不生成完整纪要。回答要短、具体、可直接挂在这条记录下面。";
+      const user = [
+        `会中记录时间：${formatElapsed(latest.atMs || 0)}`,
+        `触发类型：${label}`,
+        `用户原文：${latest.text || latest.interaction.query}`,
+        "",
+        context || "当前还没有足够转写上下文，请主要根据用户问题本身作答。",
+        "",
+        "回答规则：",
+        "- #概念：给出定义、怎么使用、上下位概念、在当前语境里的意义；最多 5 条短句。",
+        "- ?问题：直接回答问题，并结合当前大纲/转写上下文；最多 5 条短句。",
+        "- !重点：说明这条重点为什么要保留、最终纪要应如何处理；最多 4 条短句。",
+        "- 不要写“未提及”“待确认”这类空字段；信息不足时直接说“现有上下文不足以判断”。",
+        "- 不要声称做了声纹识别，不要编造人物责任。",
+      ].join("\n");
+      const raw = await callLlm(this.plugin, system, user, { timeoutMs: 30000 });
+      const response = String(raw || "").trim();
+      this.updateMeetingWorkbenchEntry(session, entryId, (item) => ({
+        interaction: Object.assign({}, item.interaction, {
+          status: "done",
+          response: response || "现有上下文不足以判断。",
+          error: "",
+          updatedAt: new Date().toISOString(),
+        }),
+      }));
+    } catch (e) {
+      console.error("[LexVoice] meeting workbench interaction failed", e);
+      this.updateMeetingWorkbenchEntry(session, entryId, (item) => ({
+        interaction: Object.assign({}, item.interaction, {
+          status: "error",
+          error: (e && e.message) || String(e),
+          updatedAt: new Date().toISOString(),
+        }),
+      }));
+      await this.plugin.logDiagnostic("warn", "meeting_workbench.interaction_failed", "会中记录 AI 互动失败", {
+        entryId,
+        mode: session.mode,
+        error: diagnosticError(e),
+      });
+    }
   }
 
   addMeetingWorkbenchEntry(session, entry) {
@@ -9610,13 +15223,28 @@ class OutlineView extends obsidian.ItemView {
       source: "manual",
       text: "",
       materials: [],
+      interaction: null,
     }, entry || {});
+    if (!nextEntry.interaction) {
+      const interaction = detectMeetingWorkbenchInteraction(nextEntry.text);
+      if (interaction) {
+        const isMetadata = MEETING_METADATA_KINDS.has(interaction.kind);
+        nextEntry.interaction = Object.assign({}, interaction, {
+          status: isMetadata ? "done" : "pending",
+          response: "",
+          error: "",
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
     session.meetingWorkbench = normalizeMeetingWorkbench(Object.assign({}, current, {
       draft: current.draft,
       entries: current.entries.concat(nextEntry),
     }));
     this.render();
-    this.maybeRefreshMeetingWorkbenchOutline(session, nextEntry);
+    if (nextEntry.interaction && nextEntry.interaction.kind && !MEETING_METADATA_KINDS.has(nextEntry.interaction.kind)) {
+      this.plugin.scheduleMeetingWorkbenchInteraction(session, nextEntry.id);
+    }
   }
 
   addMeetingWorkbenchTextEntry(session, text) {
@@ -9630,13 +15258,28 @@ class OutlineView extends obsidian.ItemView {
       source: "manual",
       text: value,
       materials: [],
+      interaction: null,
     };
+    const interaction = detectMeetingWorkbenchInteraction(value);
+    if (interaction) {
+      const isMetadata = MEETING_METADATA_KINDS.has(interaction.kind);
+      entry.interaction = Object.assign({}, interaction, {
+        // 元数据型（@assignee / /todo）直接落 done，无需 AI 助理处理
+        status: isMetadata ? "done" : "pending",
+        response: "",
+        error: "",
+        updatedAt: new Date().toISOString(),
+      });
+    }
     session.meetingWorkbench = normalizeMeetingWorkbench(Object.assign({}, current, {
       draft: "",
       entries: current.entries.concat(entry),
     }));
     this.render();
-    this.maybeRefreshMeetingWorkbenchOutline(session, entry);
+    // 只为非元数据 kinds 排队 AI 即时助理
+    if (entry.interaction && entry.interaction.kind && !MEETING_METADATA_KINDS.has(entry.interaction.kind)) {
+      this.plugin.scheduleMeetingWorkbenchInteraction(session, entry.id);
+    }
   }
 
   renderSegments(root, session) {
@@ -9658,10 +15301,9 @@ class OutlineView extends obsidian.ItemView {
     });
   }
 
-  renderAIOutline(root, session) {
+  renderAIOutline(root, session, recInfo = null, recordingIssue = null) {
     const aiWrap = root.createDiv({ cls: "lexvoice-outline-section" });
-    const aiHead = aiWrap.createDiv({ cls: "lexvoice-outline-ai-head" });
-    aiHead.createDiv({ cls: "lexvoice-outline-section-title", text: "大纲" });
+    const aiHead = aiWrap.createDiv({ cls: "lexvoice-outline-ai-head is-utility" });
     const refreshBtn = aiHead.createEl("button", { text: this.outlineRunning ? "停止等待" : "刷新" });
     refreshBtn.disabled = !session || session.segments.length === 0;
     refreshBtn.onclick = () => {
@@ -9680,6 +15322,8 @@ class OutlineView extends obsidian.ItemView {
           sourcePath: session && session.mdPath ? session.mdPath : "",
         });
         this.injectOutlineAnnotationsByTime(body, session);
+        this.decorateLiveOutlineChapters(body, session, recInfo);
+        if (recordingIssue && recordingIssue.kind === "network") this.renderNetworkOutlineGap(body, recordingIssue, recInfo);
       });
       // 招聘面试模式：给含 🤖 / ⛏ / ❓ 的列表项打 class，由 CSS 区分视觉样式
       if (isRecruit) {
@@ -9696,6 +15340,8 @@ class OutlineView extends obsidian.ItemView {
         tagListItems();
         Promise.resolve(rendered).then(() => { tagListItems(); });
       }
+    } else if (recordingIssue && recordingIssue.kind === "service") {
+      this.renderServiceOutlineFallback(body);
     } else {
       const tip = session && session.mode === "recruit"
         ? "点「刷新」生成面试大纲——按问题组织，含候选人回答要点 + 🤖 AI 评价 + ⛏ 追问建议。"
@@ -9705,7 +15351,28 @@ class OutlineView extends obsidian.ItemView {
         : "录音开始且产出第一段后可生成大纲。",
         cls: "lexvoice-outline-empty" });
       this.renderOutlineAnnotations(body, session);
+      if (recordingIssue && recordingIssue.kind === "network") this.renderNetworkOutlineGap(body, recordingIssue, recInfo);
     }
+  }
+
+  renderServiceOutlineFallback(parent) {
+    const box = parent.createDiv({ cls: "lexvoice-outline-safe-empty" });
+    const icon = box.createDiv({ cls: "lexvoice-outline-safe-empty-icon" });
+    try { obsidian.setIcon(icon, "mic"); } catch {}
+    box.createDiv({ cls: "lexvoice-outline-safe-empty-title", text: "录音持续中" });
+    box.createDiv({ cls: "lexvoice-outline-safe-empty-desc", text: "本地保存安全，结束后可重新生成大纲。" });
+  }
+
+  renderNetworkOutlineGap(parent, issue, recInfo) {
+    const gap = parent.createDiv({ cls: "lexvoice-outline-network-gap" });
+    const anchor = gap.createDiv({ cls: "lexvoice-outline-network-gap-anchor" });
+    anchor.createDiv({ cls: "lexvoice-outline-network-gap-dot" });
+    anchor.createDiv({ cls: "lexvoice-outline-network-gap-time", text: "--:--" });
+    const body = gap.createDiv({ cls: "lexvoice-outline-network-gap-body" });
+    body.createDiv({ cls: "lexvoice-outline-network-gap-title", text: "大纲生成已暂停" });
+    const started = Number(issue && issue.startedAtMs);
+    const elapsed = Number.isFinite(started) ? started : Math.max(0, Number(recInfo && recInfo.elapsed) || 0);
+    body.createDiv({ cls: "lexvoice-outline-network-gap-desc", text: `录音从 ${formatElapsed(elapsed)} 起持续记录中。` });
   }
 
   renderOutlineAnnotations(parent, session) {
@@ -9825,33 +15492,517 @@ class OutlineView extends obsidian.ItemView {
       chip.setAttribute("aria-label", def.title);
       try { obsidian.setIcon(chip, def.icon); }
       catch { chip.textContent = match[2] === "麦克风" ? "M" : "C"; }
-      if (textNode.parentNode) textNode.parentNode.insertBefore(chip, textNode);
-      else li.insertBefore(chip, li.firstChild);
+      // 把图标挂到 li 的"标题段落"末尾（句尾右对齐由 CSS 控制）
+      // 优先放在第一个 <p> 末尾；没有 <p> 时直接放 li 末尾
+      this.appendOutlineTitleAdornment(li, chip);
       li.addClass("lexvoice-outline-source-tagged");
     }
   }
 
+  getRecentFilters() {
+    const filters = this.recentFilters || {};
+    return {
+      time: filters.time || "week",
+      mode: filters.mode || "all",
+    };
+  }
+
+  getDefaultRecentFilters() {
+    return { time: "week", mode: "all" };
+  }
+
+  isRecentFilterActive(kind, value) {
+    const defaults = this.getDefaultRecentFilters();
+    return (value || "all") !== (defaults[kind] || "all");
+  }
+
+  hasActiveRecentFilters() {
+    const filters = this.getRecentFilters();
+    return Object.keys(filters).some((key) => this.isRecentFilterActive(key, filters[key]));
+  }
+
+  setRecentFilter(key, value) {
+    this.recentFilters = { ...this.getRecentFilters(), [key]: value || "all" };
+    this.showRecentHome = true;
+    this.idlePanelTab = "recent";
+    this.render();
+  }
+
+  resetRecentFilters() {
+    this.recentFilters = this.getDefaultRecentFilters();
+    this.showRecentHome = true;
+    this.idlePanelTab = "recent";
+    this.render();
+  }
+
+  getRecentModeFilterOptions() {
+    const opts = [{ id: "all", label: "全部模板" }];
+    for (const [mode, label] of getVisibleModeEntries(this.plugin.settings, false)) {
+      opts.push({ id: mode, label });
+    }
+    return opts;
+  }
+
+  getRecentTopicFilterOptions(recents) {
+    const seen = new Set();
+    const options = [{ id: "all", label: "全部主题" }];
+    const add = (topic) => {
+      const token = normalizeRecentTopicToken(topic);
+      if (!token || seen.has(token)) return;
+      seen.add(token);
+      options.push({ id: token, label: `${token}主题` });
+    };
+    for (const topic of RECENT_TOPIC_FALLBACKS) add(topic);
+    for (const item of recents || []) {
+      for (const topic of item.topics || []) add(topic);
+    }
+    return options.slice(0, 18);
+  }
+
+  getRecentFilterLabel(kind, value, recents) {
+    const v = value || "all";
+    if (kind === "time") return (RECENT_TIME_FILTER_OPTIONS.find(item => item.id === v) || RECENT_TIME_FILTER_OPTIONS[0]).label;
+    if (kind === "mode") return (this.getRecentModeFilterOptions().find(item => item.id === v) || { label: "全部模板" }).label;
+    return "筛选";
+  }
+
+  matchesRecentTimeFilter(item, timeFilter) {
+    const filter = timeFilter || "week";
+    if (filter === "all") return true;
+    const moment = window.moment;
+    if (moment) {
+      const t = moment(item.timestamp);
+      const now = moment();
+      if (filter === "today") return t.isSame(now, "day");
+      if (filter === "month") return t.isSame(now, "month");
+      return t.isSame(now, "week");
+    }
+    const d = new Date(item.timestamp);
+    const now = new Date();
+    if (filter === "today") return d.toDateString() === now.toDateString();
+    if (filter === "month") return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    const age = now.getTime() - d.getTime();
+    return age >= 0 && age <= 7 * 24 * 60 * 60 * 1000;
+  }
+
+  applyRecentFilters(recents) {
+    const filters = this.getRecentFilters();
+    return (recents || []).filter((item) => {
+      if (!this.matchesRecentTimeFilter(item, filters.time)) return false;
+      if (filters.mode !== "all" && item.mode !== filters.mode) return false;
+      return true;
+    });
+  }
+
+  showRecentFilterMenu(evt, kind, options, currentValue) {
+    evt.preventDefault();
+    evt.stopPropagation();
+    const menu = new obsidian.Menu();
+    let currentGroup = "";
+    for (const opt of options) {
+      if (opt.group && opt.group !== currentGroup) {
+        if (currentGroup) menu.addSeparator();
+        currentGroup = opt.group;
+        menu.addItem((item) => item.setTitle(opt.group).setDisabled(true));
+      }
+      menu.addItem((item) => {
+        item.setTitle(opt.label);
+        if (opt.id === currentValue) item.setIcon("check");
+        item.onClick(() => this.setRecentFilter(kind, opt.id));
+      });
+    }
+    const target = evt.currentTarget instanceof HTMLElement
+      ? evt.currentTarget
+      : evt.target instanceof HTMLElement
+        ? evt.target.closest(".lexvoice-outline-recent-filter-chip")
+        : null;
+    if (target && typeof menu.showAtPosition === "function") {
+      const rect = target.getBoundingClientRect();
+      const menuWidthHint = 240;
+      const x = Math.max(8, Math.min(Math.round(rect.left), Math.max(8, window.innerWidth - menuWidthHint - 8)));
+      const y = Math.max(8, Math.min(Math.round(rect.bottom + 8), Math.max(8, window.innerHeight - 8)));
+      menu.showAtPosition({ x, y });
+      return;
+    }
+    menu.showAtMouseEvent(evt);
+  }
+
+  renderRecentFilterBar(parent, allRecents) {
+    const filters = this.getRecentFilters();
+    const wrap = parent.createDiv({ cls: "lexvoice-outline-recent-filter-wrap" });
+    const bar = wrap.createDiv({ cls: "lexvoice-outline-recent-filters" });
+    const chipDefs = [
+      ["time", RECENT_TIME_FILTER_OPTIONS],
+      ["mode", this.getRecentModeFilterOptions()],
+    ];
+    for (const [kind, options] of chipDefs) {
+      const value = filters[kind] || "all";
+      const label = this.getRecentFilterLabel(kind, value, allRecents);
+      const isActive = kind === "time" || this.isRecentFilterActive(kind, value);
+      const chip = bar.createEl("button", {
+        cls: `lexvoice-outline-recent-filter-chip ${isActive ? "is-active" : ""}`,
+        text: label,
+        attr: { type: "button", title: "筛选纪要列表" },
+      });
+      chip.onclick = (evt) => this.showRecentFilterMenu(evt, kind, options, value);
+    }
+    const clear = wrap.createEl("button", {
+      cls: "lexvoice-outline-recent-filter-clear",
+      text: "清除筛选",
+      attr: { type: "button" },
+    });
+    clear.onclick = () => this.resetRecentFilters();
+  }
+
+  renderRecentFilterEmpty(parent) {
+    const box = parent.createDiv({ cls: "lexvoice-outline-recent-filter-empty" });
+    box.createDiv({ cls: "lexvoice-outline-recent-filter-empty-title", text: "没有符合筛选条件的纪要" });
+    const hint = box.createDiv({ cls: "lexvoice-outline-recent-filter-empty-hint" });
+    hint.createSpan({ text: "试试 " });
+    const filters = this.getRecentFilters();
+    if (filters.time === "today") {
+      const widen = hint.createEl("button", { text: "放宽时间到本周", attr: { type: "button" } });
+      widen.onclick = () => this.setRecentFilter("time", "week");
+      if (this.hasActiveRecentFilters()) hint.createSpan({ text: " 或 " });
+    }
+    if (this.hasActiveRecentFilters()) {
+      const clear = hint.createEl("button", { text: "清除全部筛选", attr: { type: "button" } });
+      clear.onclick = () => this.resetRecentFilters();
+    }
+  }
+
   renderRecent(root) {
-    const recents = getRecentNotes(this.plugin, 5);
+    const allRecents = getRecentNotes(this.plugin, 120);
+    const recents = this.applyRecentFilters(allRecents).slice(0, 48);
     const sec = root.createDiv({ cls: "lexvoice-outline-section" });
-    sec.createDiv({ cls: "lexvoice-outline-section-title", text: "最近" });
-    if (recents.length === 0) {
+    if (allRecents.length === 0) {
       sec.createDiv({ cls: "lexvoice-outline-empty", text: "暂无录音笔记" });
       return;
     }
+    this.renderRecentFilterBar(sec, allRecents);
+    if (recents.length === 0) {
+      this.renderRecentFilterEmpty(sec);
+      return;
+    }
+    const active = this.getActiveLexVoiceNoteFile();
+    const activePath = active && active.path ? obsidian.normalizePath(active.path) : "";
     const list = sec.createDiv({ cls: "lexvoice-outline-recent" });
+    const groupCounts = new Map();
+    for (const item of recents) groupCounts.set(item.dateKey, (groupCounts.get(item.dateKey) || 0) + 1);
+    const moment = window.moment;
+    const todayKey = moment ? moment().format("YYYY-MM-DD") : (() => {
+      const d = new Date();
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      return `${d.getFullYear()}-${mm}-${dd}`;
+    })();
+    let currentGroup = null;
+    let groupEl = null;
+    let itemsEl = null;
     for (const r of recents) {
-      const row = list.createDiv({ cls: "lexvoice-outline-recent-row" });
+      if (r.dateKey !== currentGroup) {
+        currentGroup = r.dateKey;
+        const isToday = r.dateKey === todayKey;
+        groupEl = list.createDiv({ cls: `lexvoice-outline-recent-group ${isToday ? "is-today" : ""}` });
+        const axis = groupEl.createDiv({ cls: "lexvoice-outline-recent-axis" });
+        axis.createDiv({ cls: "lexvoice-outline-recent-axis-primary", text: r.axisPrimary });
+        axis.createDiv({ cls: "lexvoice-outline-recent-axis-secondary", text: r.axisSecondary });
+        itemsEl = groupEl.createDiv({ cls: "lexvoice-outline-recent-items" });
+        const groupTitle = itemsEl.createDiv({ cls: "lexvoice-outline-recent-group-title" });
+        groupTitle.createSpan({ cls: "lexvoice-outline-recent-group-weekday", text: r.groupTitle });
+        if (isToday) groupTitle.createSpan({ cls: "lexvoice-outline-recent-group-today", text: "今日" });
+        groupTitle.createSpan({ cls: "lexvoice-outline-recent-group-count", text: `${groupCounts.get(r.dateKey) || 0} 篇` });
+      }
+      const isActive = activePath && obsidian.normalizePath(r.file.path) === activePath;
+      const row = itemsEl.createDiv({ cls: `lexvoice-outline-recent-row ${isActive ? "is-active" : ""}` });
       row.addEventListener("click", async () => {
         try { await this.app.workspace.getLeaf(false).openFile(r.file); } catch (e) { console.error(e); }
       });
-      const meta = MODE_META[r.mode] || MODE_META.off;
-      const chip = row.createDiv({ cls: "lexvoice-outline-recent-chip" });
-      chip.setText(meta.prefix);
+      row.addEventListener("contextmenu", (evt) => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        this.showRecentNoteContextMenu(evt, r.file);
+      });
+      const meta = getModeMeta(this.plugin.settings, r.mode) || MODE_META.off;
+      const chip = row.createDiv({ cls: "lexvoice-outline-recent-chip", attr: { title: meta.label || meta.prefix || "录音" } });
+      try { obsidian.setIcon(chip, meta.icon || "mic"); } catch { chip.setText((meta.prefix || "录音").slice(0, 1)); }
       const body = row.createDiv({ cls: "lexvoice-outline-recent-body" });
-      body.createDiv({ cls: "lexvoice-outline-recent-name", text: r.file.basename });
-      body.createDiv({ cls: "lexvoice-outline-recent-meta", text: r.displayTime });
+      const titleLine = body.createDiv({ cls: "lexvoice-outline-recent-title-line" });
+      titleLine.createDiv({ cls: "lexvoice-outline-recent-name", text: r.title || r.file.basename });
+      const metaText = [r.displayTime, meta.prefix, r.durationLabel].filter(Boolean).join(" · ");
+      body.createDiv({ cls: "lexvoice-outline-recent-meta", text: metaText });
+      const failedTasks = getQueueTasksForMarkdown(this.plugin, r.file, { types: ["transcribe"], failedOnly: true });
+      const actions = body.createDiv({ cls: "lexvoice-outline-recent-actions" });
+      const queueState = getRecentQueueProcessingState(this.plugin, r.file);
+      if (queueState) this.setRecentProcessingStatus(row, actions, queueState);
+      if (failedTasks.length) {
+        this.createRecentActionButton(actions, {
+          icon: "rotate-ccw",
+          label: `重试转写${failedTasks.length > 1 ? ` ${failedTasks.length}` : ""}`,
+          title: `重试这篇纪要的 ${failedTasks.length} 个转写失败片段`,
+          cls: "is-retry",
+          onClick: () => this.retryRecentTranscription(r.file),
+        });
+      }
+      this.syncRecentNoteProcessingState(r.file, row, actions, failedTasks.length);
     }
+  }
+
+  createRecentActionButton(parent, opt) {
+    const btn = parent.createEl("button", {
+      cls: `lexvoice-outline-recent-action ${opt.cls || ""}`,
+      attr: { type: "button", title: opt.title || opt.label || "" },
+    });
+    if (opt.disabled) btn.disabled = true;
+    if (opt.icon) {
+      const icon = btn.createSpan({ cls: "lexvoice-outline-recent-action-icon" });
+      try { obsidian.setIcon(icon, opt.icon); } catch {}
+    }
+    if (opt.label) btn.createSpan({ cls: "lexvoice-outline-recent-action-label", text: opt.label });
+    btn.addEventListener("click", async (evt) => {
+      evt.preventDefault();
+      evt.stopPropagation();
+      if (btn.disabled || typeof opt.onClick !== "function") return;
+      try {
+        await opt.onClick(evt);
+      } catch (e) {
+        console.error("[LexVoice] recent note action failed", e);
+        new obsidian.Notice(`LexVoice 操作失败：${(e && e.message) || e}`, 8000);
+      }
+    });
+    return btn;
+  }
+
+  setRecentProcessingStatus(row, actions, state) {
+    if (!row || !actions || !state) return;
+    row.toggleClass("has-transcribe-failure", state.kind === "failed");
+    const staleStatus = actions.querySelector(".lexvoice-outline-recent-failure-status");
+    if (staleStatus) staleStatus.remove();
+    const status = actions.createDiv({
+      cls: `lexvoice-outline-recent-failure-status is-${state.kind}`,
+      attr: { title: state.title || state.label || "" },
+    });
+    const iconName = state.kind === "processing" ? "loader-2" : "alert-triangle";
+    try { obsidian.setIcon(status.createSpan({ cls: "lexvoice-outline-recent-failure-icon" }), iconName); } catch {}
+    const pct = clampLexVoiceProgress(state.percent);
+    status.createSpan({ text: (state.label || "") + (pct == null ? "" : ` ${pct}%`) });
+    if (pct != null) {
+      const progress = status.createSpan({ cls: "lexvoice-outline-recent-status-progress" });
+      progress.createSpan({ cls: "lexvoice-outline-recent-status-progress-fill" }).style.width = `${pct}%`;
+    }
+  }
+
+  showRecentModeMenu(evt, file) {
+    const menu = new obsidian.Menu();
+    const modes = getVisibleModeEntries(this.plugin.settings, false);
+    for (const [mode, label] of modes) {
+      menu.addItem((item) => {
+        item.setTitle(label)
+          .setIcon("refresh-cw")
+          .onClick(() => this.plugin.repolishMarkdownFile(file, mode));
+      });
+    }
+    menu.showAtMouseEvent(evt);
+  }
+
+  showRecentNoteContextMenu(evt, file) {
+    const menu = new obsidian.Menu();
+    const detectedMode = this.plugin.detectModeFromMarkdown(file);
+    const retryTasks = getQueueTasksForMarkdown(this.plugin, file, { types: ["transcribe"], failedOnly: true });
+    if (retryTasks.length) {
+      menu.addItem((item) => {
+        item.setTitle(`重试转写失败片段（${retryTasks.length}）`)
+          .setIcon("rotate-ccw")
+          .onClick(() => this.retryRecentTranscription(file));
+      });
+      menu.addSeparator();
+    }
+    menu.addItem((item) => {
+      item.setTitle(detectedMode ? "重新整理为" : "整理为")
+        .setIcon("refresh-cw");
+      const sub = item.setSubmenu();
+      if (detectedMode) {
+        for (const key of ["detailed", "concise", "structured", "natural", "expanded"]) {
+          const preset = getRepolishPreferencePreset(key);
+          if (!preset) continue;
+          sub.addItem((presetItem) => {
+            presetItem.setTitle(preset.label)
+              .onClick(() => this.plugin.repolishMarkdownFile(file, detectedMode, preset));
+          });
+        }
+        sub.addSeparator();
+      }
+      const modes = getVisibleModeEntries(this.plugin.settings, false);
+      for (const [mode, label] of modes) {
+        sub.addItem((subItem) => {
+          subItem.setTitle(label)
+            .onClick(() => this.plugin.repolishMarkdownFile(file, mode));
+        });
+      }
+    });
+    menu.addSeparator();
+    menu.addItem((item) => {
+      item.setTitle("生成")
+        .setIcon("file-output");
+      const sub = item.setSubmenu();
+      sub.addItem((subItem) => subItem
+        .setTitle("邮件草稿")
+        .onClick(() => this.plugin.createEmailDraftForMarkdownFile(file)));
+      sub.addItem((subItem) => subItem
+        .setTitle("HTML 报告")
+        .onClick(() => this.plugin.generateHtmlReportForMarkdownFile(file)));
+      sub.addItem((subItem) => subItem
+        .setTitle("HTML 幻灯片")
+        .onClick(() => this.plugin.generateHtmlDeckForMarkdownFile(file)));
+      sub.addItem((subItem) => subItem
+        .setTitle("可编辑 PPTX")
+        .onClick(() => this.plugin.generateEditablePptxForMarkdownFile(file)));
+    });
+    menu.addSeparator();
+    menu.addItem((item) => {
+      item.setTitle("删除转写记录")
+        .setIcon("trash-2")
+        .onClick(() => this.confirmDeleteRecentNote(file));
+    });
+    menu.showAtMouseEvent(evt);
+  }
+
+  async retryRecentTranscription(file) {
+    await this.plugin.retryTranscribeTasksForMarkdown(file);
+    this.render();
+  }
+
+  confirmDeleteRecentNote(file) {
+    if (!(file instanceof obsidian.TFile)) return;
+    const modal = new obsidian.Modal(this.app);
+    const { contentEl } = modal;
+    contentEl.empty();
+    contentEl.addClass("lexvoice-delete-note-modal");
+    contentEl.createEl("h3", { text: "删除转写记录？" });
+    const taskCount = getQueueTasksForMarkdown(this.plugin, file, { types: ["transcribe", "merge"] }).length;
+    const audioFiles = this.getAudioFilesForRecentNote(file);
+    const desc = contentEl.createDiv({ cls: "setting-item-description" });
+    desc.setText(`将删除纪要「${file.basename}」。${taskCount ? `关联的 ${taskCount} 个队列任务会一并移除。` : "没有关联队列任务。"}`);
+    let deleteAudio = false;
+    if (audioFiles.length) {
+      const option = contentEl.createDiv({ cls: "lexvoice-delete-note-option" });
+      const id = `lexvoice-delete-audio-${Date.now()}`;
+      const cb = option.createEl("input", { type: "checkbox", attr: { id } });
+      const label = option.createEl("label", { attr: { for: id } });
+      label.createSpan({ text: `同时删除对应录音文件（${audioFiles.length} 个）` });
+      const names = audioFiles.map((audio) => audio.path || audio.name).slice(0, 3).join("、");
+      option.createDiv({
+        cls: "lexvoice-delete-note-option-hint",
+        text: audioFiles.length > 3 ? `${names} 等` : names,
+      });
+      cb.onchange = () => { deleteAudio = !!cb.checked; };
+    } else {
+      contentEl.createDiv({ cls: "lexvoice-delete-note-option-hint", text: "未找到可关联的录音文件。" });
+    }
+    const actions = contentEl.createDiv({ cls: "lexvoice-modal-actions" });
+    const cancel = actions.createEl("button", { text: "取消", attr: { type: "button" } });
+    const confirm = actions.createEl("button", { text: "确认删除", cls: "mod-warning", attr: { type: "button" } });
+    cancel.onclick = () => modal.close();
+    confirm.onclick = async () => {
+      confirm.disabled = true;
+      try {
+        await this.deleteRecentNoteRecord(file, { deleteAudio });
+        modal.close();
+      } catch (e) {
+        confirm.disabled = false;
+        console.error("[LexVoice] delete recent note failed", e);
+        new obsidian.Notice(`删除失败：${(e && e.message) || e}`, 8000);
+      }
+    };
+    modal.open();
+  }
+
+  getAudioFilesForRecentNote(file) {
+    if (!(file instanceof obsidian.TFile)) return [];
+    const map = new Map();
+    const addFile = (candidate) => {
+      if (candidate instanceof obsidian.TFile && AUDIO_EXT.has(String(candidate.extension || "").toLowerCase())) {
+        map.set(obsidian.normalizePath(candidate.path), candidate);
+      }
+    };
+    try {
+      const cache = this.app.metadataCache.getFileCache(file);
+      const embeds = cache && Array.isArray(cache.embeds) ? cache.embeds : [];
+      for (const embed of embeds) {
+        const link = embed && embed.link ? String(embed.link) : "";
+        if (!link || !AUDIO_EXT.has((link.split(".").pop() || "").toLowerCase())) continue;
+        const linked = this.app.metadataCache.getFirstLinkpathDest(link, file.path);
+        addFile(linked);
+        if (!linked) addFile(resolveLexVoiceAudioFile(this.app, this.plugin.settings, link));
+      }
+    } catch {}
+    const mdPath = obsidian.normalizePath(file.path);
+    const tasks = getQueueTasksForMarkdown(this.plugin, file, { types: ["transcribe", "merge"] });
+    for (const task of tasks) {
+      for (const path of [task && task.audioPath, task && task.sourceAudioPath, task && task.masterAudioPath]) {
+        if (!path) continue;
+        addFile(this.app.vault.getAbstractFileByPath(obsidian.normalizePath(path)));
+        addFile(resolveLexVoiceAudioFile(this.app, this.plugin.settings, path));
+      }
+    }
+    // 兜底：从当前已读内容缓存中解析 wiki embed，覆盖 metadata 尚未刷新时的场景。
+    const cacheData = this.notePanelCacheData && this.notePanelCacheKey === mdPath ? this.notePanelCacheData : null;
+    if (cacheData && Array.isArray(cacheData.audioRefs)) {
+      for (const ref of cacheData.audioRefs) addFile(resolveLexVoiceAudioFile(this.app, this.plugin.settings, ref));
+    }
+    return Array.from(map.values());
+  }
+
+  async deleteRecentNoteRecord(file, options = {}) {
+    if (!(file instanceof obsidian.TFile)) return;
+    const mdPath = obsidian.normalizePath(file.path);
+    const audioFiles = options.deleteAudio ? this.getAudioFilesForRecentNote(file) : [];
+    let removedTasks = 0;
+    if (this.plugin.queue && Array.isArray(this.plugin.queue.tasks)) {
+      const before = this.plugin.queue.tasks.length;
+      this.plugin.queue.tasks = this.plugin.queue.tasks.filter((task) => !task || !isSameVaultPath(task.mdPath, mdPath));
+      removedTasks = before - this.plugin.queue.tasks.length;
+      if (removedTasks) await this.plugin.saveAll();
+    }
+    let removedAudio = 0;
+    for (const audio of audioFiles) {
+      try {
+        await trashLexVoiceFile(this.app, audio);
+        removedAudio++;
+      } catch (e) {
+        console.warn("[LexVoice] delete linked audio failed", audio && audio.path, e);
+      }
+    }
+    await trashLexVoiceFile(this.app, file);
+    this.notePanelCacheKey = "";
+    this.notePanelCacheData = undefined;
+    this.showRecentHome = true;
+    this.idlePanelTab = "recent";
+    this.render();
+    new obsidian.Notice(`已删除转写记录${removedAudio ? `，并删除 ${removedAudio} 个录音文件` : ""}${removedTasks ? `，清理 ${removedTasks} 个队列任务` : ""}`);
+  }
+
+  syncRecentNoteProcessingState(file, row, actions, failedTaskCount) {
+    this.app.vault.cachedRead(file)
+      .then((content) => {
+        const queueState = getRecentQueueProcessingState(this.plugin, file);
+        if (queueState) {
+          this.setRecentProcessingStatus(row, actions, queueState);
+          return;
+        }
+        const state = getRecentNoteProcessingState(content);
+        if (!state) {
+          row.removeClass("has-transcribe-failure");
+          const retry = actions.querySelector(".lexvoice-outline-recent-action.is-retry");
+          if (retry) retry.remove();
+          const staleStatus = actions.querySelector(".lexvoice-outline-recent-failure-status");
+          if (staleStatus) staleStatus.remove();
+          return;
+        }
+        if (failedTaskCount) return;
+        this.setRecentProcessingStatus(row, actions, state);
+      })
+      .catch((e) => console.warn("[LexVoice] read recent note state failed", e));
   }
 
   async renderDeviceStatus(container, mode) {
@@ -9930,11 +16081,11 @@ class OutlineView extends obsidian.ItemView {
       const positionLabel = ctx.position || "（未命名岗位）";
       const candLabel = ctx.candidateName ? ` · ${ctx.candidateName}` : "";
       const roundLabel = ctx.round ? ` · ${ctx.round}` : "";
-      title.setText(`📋 ${positionLabel}${candLabel}${roundLabel}`);
+      title.setText(`${positionLabel}${candLabel}${roundLabel}`);
     } else {
       title.setText("未注入 JD 或简历");
     }
-    const editBtn = head.createEl("button", { text: hasJd ? "编辑" : "立即设置", cls: "lexvoice-recruit-card-edit" });
+    const editBtn = head.createEl("button", { text: hasJd ? "编辑" : "立即设置", cls: "lexvoice-recruit-card-edit", attr: { type: "button" } });
     editBtn.onclick = () => {
       const modal = new RecruitContextModal(this.app, this.plugin, {
         flow: "settings",
@@ -9945,10 +16096,10 @@ class OutlineView extends obsidian.ItemView {
     if (hasJd) {
       const meta = card.createDiv({ cls: "lexvoice-recruit-card-meta" });
       const flags = [];
-      flags.push(hasResume ? "✓ 简历已填" : "○ 简历未填");
-      if (ctx.seniority) flags.push(`资历：${ctx.seniority}`);
-      if (ctx.interviewer) flags.push(`面试官：${ctx.interviewer}`);
-      meta.setText(flags.join("，"));
+      flags.push(hasResume ? "简历已填" : "简历未填");
+      if (ctx.seniority) flags.push(ctx.seniority);
+      if (ctx.interviewer) flags.push(`面试官 ${ctx.interviewer}`);
+      meta.setText(flags.join(" · "));
     }
   }
 
@@ -9978,7 +16129,7 @@ class OutlineView extends obsidian.ItemView {
     if (!session || session.segments.length === 0) return;
     this.syncSessionOutline(session);
     if (this.outlineRunning) { this.outlineQueued = true; return; }
-    if (silent && session.segments.length === this.lastOutlineSegmentCount) return;
+    if (silent && isRealtimeOutlineCurrent(session)) return;
     const runId = (this.outlineRunSeq || 0) + 1;
     this.outlineRunSeq = runId;
     this.outlineRunning = true;
@@ -9987,16 +16138,25 @@ class OutlineView extends obsidian.ItemView {
       const result = await this.plugin.generateRealtimeOutlineForSession(session, { timeoutMs: 45000 });
       if (this.outlineRunSeq !== runId) return;
       this.aiOutline = result;
-      this.lastOutlineSegmentCount = session.segments.length;
+      this.lastOutlineSegmentCount = session.realtimeOutlineSegmentCount || session.segments.length;
+      this.lastOutlineWorkbenchSignature = session.realtimeOutlineWorkbenchSignature || "";
       this.outlineErrorCount = 0;
+      this.plugin.clearRecordingIssue("network");
+      this.plugin.clearRecordingIssue("service");
     } catch (e) {
       console.error(e);
       this.outlineErrorCount = (this.outlineErrorCount || 0) + 1;
+      this.plugin.setRecordingIssue(classifyRecordingIssue(e), {
+        source: "outline",
+        message: getErrorMessage(e),
+        startedAtMs: getSegmentsDurationMs(session && session.segments),
+      });
       await this.plugin.logDiagnostic("error", "outline.generate_failed", "实时大纲生成失败", {
         silent,
         errorCount: this.outlineErrorCount,
         segmentCount: session.segments.length,
         lastOutlineSegmentCount: this.lastOutlineSegmentCount,
+        memoryChars: String(session.realtimeOutlineMemory || "").length,
         window: session.realtimeOutlineWindow || null,
         mode: session.mode,
         captureMode: session.captureMode,
@@ -10011,7 +16171,7 @@ class OutlineView extends obsidian.ItemView {
       this.render();
       if (this.outlineQueued) {
         this.outlineQueued = false;
-        if (this.plugin.session && this.plugin.session.segments.length > this.lastOutlineSegmentCount) {
+        if (this.plugin.session && !isRealtimeOutlineCurrent(this.plugin.session)) {
           setTimeout(() => this.refreshAIOutline({ silent: true }), 200);
         }
       }
@@ -10078,6 +16238,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     this.queue = new TaskQueue(this);
     this.queue.load(this.persistedQueue);
     this.session = null;
+    this.recordingIssue = null;
 
     this.ribbonEl = this.addRibbonIcon("mic", "LexVoice：点击开始/停止，悬停展开控件", () => this.toggleRecording());
     this.recorder.on(() => this.refreshOutlineView());
@@ -10108,7 +16269,10 @@ class LexVoicePlugin extends obsidian.Plugin {
     this.addCommand({ id: "open-queue", name: "打开待处理队列", callback: () => new QueueModal(this.app, this).open() });
     this.addCommand({ id: "retry-queue-all", name: "重试所有失败任务", callback: () => this.retryQueue() });
     this.addCommand({ id: "copy-diagnostic-report", name: "复制 LexVoice 诊断报告", callback: () => this.copyDiagnosticReport() });
-    this.addCommand({ id: "suggest-people-directory-updates", name: "AI 扫描纪要库补全人员信息表", callback: () => this.suggestPeopleDirectoryFromLibrary() });
+    this.addCommand({ id: "suggest-people-directory-updates", name: "AI 扫描纪要库提取人员建议", callback: () => this.suggestPeopleDirectoryFromLibrary() });
+    this.addCommand({ id: "open-learning-card-wall", name: "打开学习卡片瀑布墙", callback: () => this.openLearningWall("learning") });
+    this.addCommand({ id: "open-concept-wall", name: "打开概念墙", callback: () => this.openLearningWall("concept") });
+    this.addCommand({ id: "open-todo-wall", name: "打开待办墙", callback: () => this.openTodoWall() });
     this.addCommand({ id: "import-audio", name: "导入已有音频文件转写+润色", callback: () => new ImportAudioModal(this.app, this).open() });
     this.addCommand({
       id: "generate-html-report",
@@ -10152,12 +16316,21 @@ class LexVoicePlugin extends obsidian.Plugin {
     this.addCommand({ id: "record-mic-only", name: "开始录音 · 仅麦克风", callback: () => { this._oneShotCaptureMode = "mic"; this.startRecording(); } });
     this.addCommand({ id: "record-mic-virtual", name: "开始录音 · 麦克风 + 电脑音频", callback: () => { this._oneShotCaptureMode = "mix-virtual"; this.startRecording(); } });
     this.addCommand({ id: "record-virtual-only", name: "开始录音 · 仅电脑音频", callback: () => { this._oneShotCaptureMode = "virtualCable"; this.startRecording(); } });
+    this.addCommand({ id: "import-text", name: "导入已有文本 / MD 结构化整理", callback: () => new ImportTextModal(this.app, this).open() });
 
     this.settingTab = new LexVoiceSettingTab(this.app, this);
     this.addSettingTab(this.settingTab);
 
     this.registerEvent(this.app.vault.on("create", (file) => {
       this.handleInboxFile(file).catch(e => console.error("[LexVoice] inbox handler error", e));
+    }));
+
+    // 文件重命名时同步迁移队列里所有指向旧路径的任务，
+    // 防止 merge 任务跑完后文件被改名 → 重试时找不到旧路径报"笔记不存在"
+    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+      if (file instanceof obsidian.TFile) {
+        this.migrateQueueTasksAfterRename(oldPath, file.path);
+      }
     }));
 
     this.addCommand({ id: "scan-inbox", name: "扫描收件箱并处理所有未处理文件", callback: () => this.scanInboxFolder() });
@@ -10196,46 +16369,6 @@ class LexVoicePlugin extends obsidian.Plugin {
           item.setTitle("LexVoice：转写并润色")
             .setIcon("mic")
             .onClick(() => this.importAudioFiles([file.path]));
-        });
-      }
-      if (ext === "md") {
-        menu.addSeparator();
-        // 一键重整：从 frontmatter 的 mode 自动识别
-        const autoMode = this.detectModeFromMarkdown(file);
-        if (autoMode) {
-          menu.addItem((item) => {
-            item.setTitle("LexVoice 重新整理")
-              .setIcon("refresh-cw")
-              .onClick(() => this.repolishMarkdownFile(file, autoMode));
-          });
-        }
-        menu.addItem((item) => {
-          item.setTitle("LexVoice 生成 HTML 报告")
-            .setIcon("file-output")
-            .onClick(() => this.generateHtmlReportForMarkdownFile(file));
-        });
-        menu.addItem((item) => {
-          item.setTitle("LexVoice 生成 HTML PPT")
-            .setIcon("presentation")
-            .onClick(() => this.generateHtmlDeckForMarkdownFile(file));
-        });
-        menu.addItem((item) => {
-          item.setTitle("LexVoice 生成可编辑 PPTX")
-            .setIcon("file-up")
-            .onClick(() => this.generateEditablePptxForMarkdownFile(file));
-        });
-        // 手动选模式（仅在自动识别可用时作为"换模式"备用；否则作为主入口）
-        menu.addItem((item) => {
-          item.setTitle(autoMode ? "LexVoice 换模式重整" : "LexVoice 重新整理")
-            .setIcon("refresh-cw");
-          const sub = item.setSubmenu();
-        const modes = getVisibleModeEntries(this.settings, false);
-        for (const [m, label] of modes) {
-          sub.addItem((subItem) => {
-            subItem.setTitle(label)
-              .onClick(() => this.repolishMarkdownFile(file, m));
-          });
-        }
         });
       }
     }));
@@ -10915,6 +17048,30 @@ class LexVoicePlugin extends obsidian.Plugin {
     new obsidian.Notice("LexVoice 已安装 " + info.version + "：更新 " + changedText + skippedText + "。写入目录：" + basePath + "。请重启 Obsidian 或重新启用插件生效。", 12000);
   }
 
+  setRecordingIssue(kind, patch) {
+    const current = this.recordingIssue || {};
+    this.recordingIssue = makeRecordingIssue(kind || current.kind || "service", Object.assign({}, current, patch || {}, {
+      kind: kind || current.kind || "service",
+      at: patch && patch.at ? patch.at : (current.at || Date.now()),
+    }));
+    try { this.refreshOutlineView(); } catch {}
+    try { if (this.bubble && this.bubble.scheduleUpdate) this.bubble.scheduleUpdate(); } catch {}
+  }
+
+  clearRecordingIssue(kind) {
+    if (!this.recordingIssue) return;
+    if (kind && this.recordingIssue.kind !== kind) return;
+    this.recordingIssue = null;
+    try { this.refreshOutlineView(); } catch {}
+    try { if (this.bubble && this.bubble.scheduleUpdate) this.bubble.scheduleUpdate(); } catch {}
+  }
+
+  getRecordingIssue() {
+    const recorderIssue = this.recorder && this.recorder.getInfo ? (this.recorder.getInfo().issue || null) : null;
+    if (recorderIssue && recorderIssue.kind === "microphone") return recorderIssue;
+    return this.recordingIssue || recorderIssue || null;
+  }
+
   refreshOutlineView() {
     const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_OUTLINE);
     for (const leaf of leaves) {
@@ -10951,7 +17108,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       this._backgroundOutlineQueued = true;
       return;
     }
-    if (opts.silent && session.realtimeOutlineSegmentCount >= session.segments.length) return;
+    if (opts.silent && isRealtimeOutlineCurrent(session)) return;
     this._backgroundOutlineRunning = true;
     try {
       await this.generateRealtimeOutlineForSession(session, { timeoutMs: 45000 });
@@ -10962,6 +17119,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         silent: !!opts.silent,
         segmentCount: session.segments.length,
         lastOutlineSegmentCount: session.realtimeOutlineSegmentCount || 0,
+        memoryChars: String(session.realtimeOutlineMemory || "").length,
         window: session.realtimeOutlineWindow || null,
         mode: session.mode,
         captureMode: session.captureMode,
@@ -10971,34 +17129,229 @@ class LexVoicePlugin extends obsidian.Plugin {
       this._backgroundOutlineRunning = false;
       if (this._backgroundOutlineQueued) {
         this._backgroundOutlineQueued = false;
-        if (this.session && this.session.segments.length > (this.session.realtimeOutlineSegmentCount || 0)) {
+        if (this.session && !isRealtimeOutlineCurrent(this.session)) {
           setTimeout(() => this.refreshRealtimeOutlineInBackground({ silent: true }), 200);
         }
       }
     }
   }
 
+  updateMeetingWorkbenchEntry(session, entryId, updater) {
+    if (!session || !entryId || typeof updater !== "function") return false;
+    const current = normalizeMeetingWorkbench(session.meetingWorkbench);
+    let changed = false;
+    const entries = current.entries.map((item) => {
+      if (item.id !== entryId) return item;
+      changed = true;
+      return Object.assign({}, item, updater(Object.assign({}, item)) || {});
+    });
+    if (!changed) return false;
+    session.meetingWorkbench = normalizeMeetingWorkbench(Object.assign({}, current, { entries }));
+    this.refreshOutlineView();
+    return true;
+  }
+
+  buildMeetingWorkbenchInteractionContext(session, entry) {
+    const atMs = Number(entry && entry.atMs) || 0;
+    const before = [];
+    const after = [];
+    for (const s of (Array.isArray(session && session.segments) ? session.segments : [])) {
+      if (!s || !s.text) continue;
+      const start = Number(s.startOffsetMs) || 0;
+      const end = Number(s.endOffsetMs ?? s.startOffsetMs) || start;
+      const line = `[${formatElapsed(start)}-${formatElapsed(end)}] ${String(s.text || "").trim()}`;
+      if (end <= atMs) before.push(line);
+      else if (start >= atMs) after.push(line);
+    }
+    return [
+      session && session.realtimeOutline ? `【当前实时大纲】\n${String(session.realtimeOutline).trim().slice(-3000)}` : "",
+      session && session.realtimeOutlineMemory ? `【主题记忆】\n${String(session.realtimeOutlineMemory).trim().slice(-2000)}` : "",
+      before.length ? `【该记录前的转写片段】\n${before.slice(-6).join("\n")}` : "",
+      after.length ? `【该记录后的转写片段】\n${after.slice(0, 3).join("\n")}` : "",
+    ].filter(Boolean).join("\n\n");
+  }
+
+  hasActiveRecordingOrTranscription(session) {
+    if (session && Number(session.activeSegmentJobs || 0) > 0) return true;
+    return false;
+  }
+
+  canRunMeetingWorkbenchInteraction(session, opts = {}) {
+    if (!session) return false;
+    if (opts.force) return true;
+    if (this.hasActiveRecordingOrTranscription(session)) return false;
+    if (this._backgroundOutlineRunning) return false;
+    const rec = this.recorder;
+    if (rec && rec.state === "recording") {
+      const info = rec.getInfo ? rec.getInfo() : {};
+      const nextCutAt = Number(rec.nextCutAtElapsed);
+      if (Number.isFinite(nextCutAt)) {
+        const timeToNextCut = nextCutAt - (Number(info.elapsed) || 0);
+        if (timeToNextCut > 0 && timeToNextCut < 8000) return false;
+      }
+    }
+    return true;
+  }
+
+  scheduleMeetingWorkbenchInteraction(session, entryId) {
+    if (!session || !entryId) return;
+    const queue = Array.isArray(session.pendingMeetingWorkbenchInteractions)
+      ? session.pendingMeetingWorkbenchInteractions
+      : [];
+    if (!queue.includes(entryId)) queue.push(entryId);
+    session.pendingMeetingWorkbenchInteractions = queue;
+    if (!this.canRunMeetingWorkbenchInteraction(session)) {
+      this.refreshOutlineView();
+      if (this._meetingWorkbenchInteractionTimer) clearTimeout(this._meetingWorkbenchInteractionTimer);
+      this._meetingWorkbenchInteractionTimer = window.setTimeout(() => {
+        this._meetingWorkbenchInteractionTimer = 0;
+        this.processPendingMeetingWorkbenchInteractions(session).catch(e => console.error("[LexVoice] meeting workbench queue retry failed", e));
+      }, 3000);
+      return;
+    }
+    if (this._meetingWorkbenchInteractionTimer) clearTimeout(this._meetingWorkbenchInteractionTimer);
+    this._meetingWorkbenchInteractionTimer = window.setTimeout(() => {
+      this._meetingWorkbenchInteractionTimer = 0;
+      this.processPendingMeetingWorkbenchInteractions(session).catch(e => console.error("[LexVoice] meeting workbench queue failed", e));
+    }, 1000);
+  }
+
+  async processPendingMeetingWorkbenchInteractions(session, opts = {}) {
+    if (!session) return;
+    if (!this.canRunMeetingWorkbenchInteraction(session, opts)) {
+      if (!opts.force) this.scheduleMeetingWorkbenchInteraction(session, (session.pendingMeetingWorkbenchInteractions || [])[0]);
+      return;
+    }
+    if (this._meetingWorkbenchInteractionRunning) return;
+    this._meetingWorkbenchInteractionRunning = true;
+    try {
+      const workbench = normalizeMeetingWorkbench(session.meetingWorkbench);
+      const queued = Array.isArray(session.pendingMeetingWorkbenchInteractions)
+        ? session.pendingMeetingWorkbenchInteractions.slice()
+        : [];
+      const ids = queued.length
+        ? queued
+        : workbench.entries
+            .filter(entry => entry.interaction && entry.interaction.kind && (!entry.interaction.status || entry.interaction.status === "pending" || entry.interaction.status === "error"))
+            .map(entry => entry.id);
+      session.pendingMeetingWorkbenchInteractions = [];
+      for (const entryId of ids) {
+        if (!opts.force && !this.canRunMeetingWorkbenchInteraction(session)) {
+          const rest = ids.slice(ids.indexOf(entryId));
+          session.pendingMeetingWorkbenchInteractions = Array.from(new Set([...(session.pendingMeetingWorkbenchInteractions || []), ...rest]));
+          this.scheduleMeetingWorkbenchInteraction(session, entryId);
+          break;
+        }
+        await this.processMeetingWorkbenchInteraction(session, entryId);
+      }
+    } finally {
+      this._meetingWorkbenchInteractionRunning = false;
+    }
+  }
+
+  async processMeetingWorkbenchInteraction(session, entryId) {
+    if (!session || !entryId) return;
+    const workbench = normalizeMeetingWorkbench(session.meetingWorkbench);
+    const entry = workbench.entries.find(item => item.id === entryId);
+    if (!entry || !entry.interaction || !entry.interaction.kind) return;
+    // 元数据 kinds（assignee / todo）不走 AI 助理
+    if (MEETING_METADATA_KINDS.has(entry.interaction.kind)) return;
+    if (entry.interaction.status === "running" || entry.interaction.status === "done") return;
+    this.updateMeetingWorkbenchEntry(session, entryId, (item) => ({
+      interaction: Object.assign({}, item.interaction, { status: "running", error: "", updatedAt: new Date().toISOString() }),
+    }));
+    try {
+      const latest = normalizeMeetingWorkbench(session.meetingWorkbench).entries.find(item => item.id === entryId) || entry;
+      const context = this.buildMeetingWorkbenchInteractionContext(session, latest);
+      const kind = latest.interaction.kind;
+      const label = kind === "concept" ? "概念解释" : (kind === "question" ? "问题回答" : "重点处理");
+      const system = "你是 LexVoice 的会中即时助理。只回答用户这条会中记录，不改写实时大纲，不生成完整纪要。回答要短、具体、可直接挂在这条记录下面。";
+      const user = [
+        `会中记录时间：${formatElapsed(latest.atMs || 0)}`,
+        `触发类型：${label}`,
+        `用户原文：${latest.text || latest.interaction.query}`,
+        "",
+        context || "当前还没有足够转写上下文，请主要根据用户问题本身作答。",
+        "",
+        "回答规则：",
+        "- #概念：给出定义、怎么使用、上下位概念、在当前语境里的意义；最多 5 条短句。",
+        "- ?问题：直接回答问题，并结合当前大纲/转写上下文；最多 5 条短句。",
+        "- !重点：说明这条重点为什么要保留、最终纪要应如何处理；最多 4 条短句。",
+        "- 不要写“未提及”“待确认”这类空字段；信息不足时直接说“现有上下文不足以判断”。",
+        "- 不要声称做了声纹识别，不要编造人物责任。",
+      ].join("\n");
+      const raw = await callLlm(this, system, user, {
+        timeoutMs: 15000,
+        payload: { max_tokens: 360 },
+      });
+      const response = String(raw || "").trim();
+      this.updateMeetingWorkbenchEntry(session, entryId, (item) => ({
+        interaction: Object.assign({}, item.interaction, {
+          status: "done",
+          response: response || "现有上下文不足以判断。",
+          error: "",
+          updatedAt: new Date().toISOString(),
+        }),
+      }));
+    } catch (e) {
+      console.error("[LexVoice] meeting workbench interaction failed", e);
+      this.updateMeetingWorkbenchEntry(session, entryId, (item) => ({
+        interaction: Object.assign({}, item.interaction, {
+          status: "error",
+          error: (e && e.message) || String(e),
+          updatedAt: new Date().toISOString(),
+        }),
+      }));
+      await this.logDiagnostic("warn", "meeting_workbench.interaction_failed", "会中记录 AI 互动失败", {
+        entryId,
+        mode: session.mode,
+        error: diagnosticError(e),
+      });
+    }
+  }
+
   async generateRealtimeOutlineForSession(session, opts = {}) {
     if (!session || !session.segments || !session.segments.length) return "";
+    const processedSegmentCount = session.segments.length;
     const windowed = selectRealtimeOutlineSegments(session.segments);
-    const transcript = buildRealtimeOutlineTranscript(windowed.segments, session.meetingWorkbench);
-    if (!transcript.trim()) throw new Error("当前没有可整理的转写内容");
+    const workbenchSignature = "";
+    const transcript = buildRealtimeOutlineTranscript(windowed.segments);
+    if (!transcript.trim()) {
+      session.realtimeOutlineWindow = {
+        usedCount: 0,
+        omittedBeforeCount: windowed.omittedBeforeCount || 0,
+        totalTextCount: windowed.totalTextCount || 0,
+        approxChars: 0,
+        memoryChars: String(session.realtimeOutlineMemory || "").length,
+        processedSegmentCount,
+        workbenchChars: 0,
+      };
+      return session.realtimeOutline || "";
+    }
     const meta = getModeMeta(this.settings, session.mode);
     const sys = "你是结构化思考助手。任务不是复述，而是把零散的发言归并到共同的上一级概念之下。层级深度由材料决定，不预设。克制——不堆砌符号、不强加分析维度、不过度抽象。";
-    const rollingContext = buildRollingOutlineContext(session.realtimeOutline, windowed.omittedBeforeCount);
+    const rollingContext = buildRollingOutlineContext(session.realtimeOutlineMemory, session.realtimeOutline, windowed);
     const user = applyBriefingLanguageInstruction(
       buildOutlinePrompt(meta.prefix, session.mode, rollingContext + transcript, session.captureMode),
       this.settings
     );
-    const result = await callLlm(this, sys, user, { timeoutMs: opts.timeoutMs || 45000 });
+    const timeoutMs = Math.max(Number(opts.timeoutMs) || 0, getRealtimeOutlineTimeoutMs(windowed));
+    const raw = await callLlm(this, sys, user, { timeoutMs });
+    const parsed = parseRealtimeOutlineResponse(raw, session.realtimeOutline, session.realtimeOutlineMemory);
+    const result = parsed.outline;
     session.realtimeOutline = result;
-    session.realtimeOutlineSegmentCount = session.segments.length;
+    session.realtimeOutlineMemory = parsed.memory;
+    session.realtimeOutlineSegmentCount = processedSegmentCount;
+    session.realtimeOutlineWorkbenchSignature = workbenchSignature;
     session.realtimeOutlineUpdatedAt = new Date().toISOString();
     session.realtimeOutlineWindow = {
       usedCount: windowed.usedCount,
       omittedBeforeCount: windowed.omittedBeforeCount,
       totalTextCount: windowed.totalTextCount,
       approxChars: windowed.approxChars,
+      memoryChars: String(session.realtimeOutlineMemory || "").length,
+      processedSegmentCount,
+      workbenchChars: workbenchSignature.length,
     };
     return result;
   }
@@ -11008,7 +17361,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     if (!session || !session.segments || !session.segments.length) return;
     const hasTranscript = session.segments.some(s => s && s.text && String(s.text).trim());
     if (!hasTranscript) return;
-    if (session.realtimeOutline && session.realtimeOutlineSegmentCount >= session.segments.length) return;
+    if (isRealtimeOutlineCurrent(session)) return;
     try {
       await this.generateRealtimeOutlineForSession(session, { timeoutMs: 45000 });
     } catch (e) {
@@ -11104,6 +17457,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       }
     }
     try {
+      this.clearRecordingIssue();
       await this.ensureFolder(this.settings.audioFolder);
       await this.ensureFolder(this.settings.mdFolder);
       const moment = window.moment;
@@ -11124,12 +17478,24 @@ class LexVoicePlugin extends obsidian.Plugin {
         mdPath,
         mode,
         segments: [],
+        realtimeOutline: "",
+        realtimeOutlineMemory: "",
+        realtimeOutlineSegmentCount: 0,
+        realtimeOutlineWorkbenchSignature: "",
         writeQueue: Promise.resolve(),
+        activeSegmentJobs: 0,
+        pendingMeetingWorkbenchInteractions: [],
         finalized: false,
         recruitContext: this._currentRecruitContext || null,
         captureMode,
           meetingWorkbench: { notes: "", draft: "", materials: [], entries: [] },
       };
+      this.setSessionWorkProgress(this.session, {
+        stage: "recording",
+        label: "录音中",
+        percent: null,
+        detail: "正在采集音频，分段后会自动转写",
+      });
       this._currentRecruitContext = null;
 
       const activeProviderId = this.settings.activeTranscribeProvider || "siliconflow";
@@ -11167,11 +17533,17 @@ class LexVoicePlugin extends obsidian.Plugin {
           const sampleRate = activeProfile.streamProtocol && activeProfile.streamProtocol.startsWith("openai-realtime") ? 24000 : 16000;
           const client = createStreamingTranscriptionClient(activeProfile, activeProvider, {
             onPartial: (fullText, isFinal) => {
+              this.clearRecordingIssue("network");
+              this.clearRecordingIssue("service");
               sessionRef.streamingFullText = fullText || "";
               if (sessionRef.scheduleStreamingNoteUpdate) sessionRef.scheduleStreamingNoteUpdate();
             },
             onError: (e) => {
               console.error("[LexVoice] streaming error", e);
+              this.setRecordingIssue(classifyRecordingIssue(e), {
+                source: "streaming-asr",
+                message: getErrorMessage(e),
+              });
               new obsidian.Notice(`流式转写错误：${(e && e.message) || e}`);
             },
             onClosed: (info) => {
@@ -11185,6 +17557,10 @@ class LexVoicePlugin extends obsidian.Plugin {
             await client.connect();
           } catch (e) {
             console.error("[LexVoice] streaming connect failed", e);
+            this.setRecordingIssue(classifyRecordingIssue(e), {
+              source: "streaming-asr",
+              message: getErrorMessage(e),
+            });
             new obsidian.Notice(`流式转写连接失败：${(e && e.message) || e}`);
             sessionRef.streamingClient = null;
             return;
@@ -11236,6 +17612,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     if (this.recorder.state === "idle") return;
     new obsidian.Notice("⏹ 已请求停止，处理最后一段…");
     await this.recorder.stop();
+    this.clearRecordingIssue();
   }
 
   shouldFilterShortRecording(session, seg) {
@@ -11286,9 +17663,33 @@ class LexVoicePlugin extends obsidian.Plugin {
     else if (next !== cur) await this.app.vault.modify(file, next);
   }
 
+  setSessionWorkProgress(session, patch) {
+    if (!session) return;
+    session.workProgress = Object.assign({}, session.workProgress || {}, patch || {}, {
+      updatedAt: new Date().toISOString(),
+    });
+    try { this.refreshOutlineView(); } catch {}
+  }
+
+  clearSessionWorkProgress(session) {
+    if (!session) return;
+    delete session.workProgress;
+    try { this.refreshOutlineView(); } catch {}
+  }
+
   handleSegment(session, seg) {
     if (!session) return;
-    session.writeQueue = session.writeQueue.then(() => this.processSegment(session, seg));
+    session.writeQueue = session.writeQueue.then(async () => {
+      session.activeSegmentJobs = (Number(session.activeSegmentJobs) || 0) + 1;
+      try {
+        await this.processSegment(session, seg);
+      } finally {
+        session.activeSegmentJobs = Math.max(0, (Number(session.activeSegmentJobs) || 1) - 1);
+        if (!seg.isFinal && session.pendingMeetingWorkbenchInteractions && session.pendingMeetingWorkbenchInteractions.length) {
+          this.scheduleMeetingWorkbenchInteraction(session, session.pendingMeetingWorkbenchInteractions[0]);
+        }
+      }
+    });
     if (seg.isFinal) session.writeQueue = session.writeQueue.then(() => this.finalizeSession(session));
     return session.writeQueue;
   }
@@ -11330,15 +17731,33 @@ class LexVoicePlugin extends obsidian.Plugin {
         }
         session.realtimeOutline = outline;
       }
+      if (session.realtimeOutlineMemory && oldNames.size) {
+        let memory = String(session.realtimeOutlineMemory);
+        for (const oldName of oldNames) {
+          if (oldName && oldName !== session.masterAudioName) {
+            memory = memory.replace(new RegExp("\\[\\[" + escapeRegExp(oldName) + "\\|", "g"), "[[" + session.masterAudioName + "|");
+          }
+        }
+        session.realtimeOutlineMemory = memory;
+      }
     } catch (e) {
       console.error("[LexVoice] master audio write failed", e);
       new obsidian.Notice(`完整录音写入失败：${(e && e.message) || e}`, 8000);
     }
   }
 
-  async maybeDeleteSegmentCacheFile(path) {
+  isQueuedTranscribeAudioReferenced(path, excludeTaskId) {
+    const norm = obsidian.normalizePath(String(path || ""));
+    if (!norm || !this.queue || typeof this.queue.snapshot !== "function") return false;
+    return this.queue.snapshot().some(t => t && t.type === "transcribe"
+      && t.id !== excludeTaskId
+      && obsidian.normalizePath(String(t.audioPath || "")) === norm);
+  }
+
+  async maybeDeleteSegmentCacheFile(path, excludeTaskId) {
     if (this.settings.keepSegmentAudioFiles === true) return;
     if (!this.isSegmentCachePath(path)) return;
+    if (this.isQueuedTranscribeAudioReferenced(path, excludeTaskId)) return;
     const file = this.app.vault.getAbstractFileByPath(obsidian.normalizePath(path));
     if (file instanceof obsidian.TFile) {
       try { await this.app.vault.delete(file); }
@@ -11381,6 +17800,12 @@ class LexVoicePlugin extends obsidian.Plugin {
     let text = ""; let err = null;
     const activeProfile = this.getActiveTranscribeProfile();
     const isStreamingProvider = activeProfile && activeProfile.transcribeMode === "streaming";
+    this.setSessionWorkProgress(session, {
+      stage: "transcribing",
+      label: `转写第 ${segNumber} 段`,
+      percent: null,
+      detail: "音频正在发送到转写服务",
+    });
     if (session.streamingClient) {
       // 流式转写：跳过 HTTP 切片转写，等流式客户端 finish 后取累计文本
       try {
@@ -11404,6 +17829,12 @@ class LexVoicePlugin extends obsidian.Plugin {
       } catch (e) { err = e; console.error(e); }
     }
     if (err) {
+      const issueKind = classifyRecordingIssue(err);
+      this.setRecordingIssue(issueKind, {
+        source: "asr",
+        message: getErrorMessage(err),
+        startedAtMs: seg.startOffsetMs,
+      });
       await this.logDiagnostic("error", "asr.segment_failed", "录音分段转写失败", {
         provider: this.settings.activeTranscribeProvider,
         model: this.getActiveTranscribeProfile() && this.getActiveTranscribeProfile().model,
@@ -11416,6 +17847,9 @@ class LexVoicePlugin extends obsidian.Plugin {
         error: diagnosticError(err),
       });
       new obsidian.Notice(`段 ${segNumber} 转写失败，录音仍在本地继续，已加入重试队列。`, 7000);
+    } else {
+      this.clearRecordingIssue("network");
+      this.clearRecordingIssue("service");
     }
 
     const playbackAudioName = session.masterAudioName || segmentAudioName;
@@ -11431,6 +17865,12 @@ class LexVoicePlugin extends obsidian.Plugin {
       text,
       error: err ? (err.message || String(err)) : null,
       isFinal: !!seg.isFinal,
+      // 音源标记（HR 模式 / 角色识别基础）：
+      //   mic           = 麦克风端
+      //   virtualCable  = 电脑音频端（线上面试场景下通常是对面候选人）
+      //   mix-virtual   = 当前是混合录音，分不清；后续提交里会改成双 stream 分别打标
+      // seg.source 优先（来自 RecordSession 未来的双流路径），fallback 到 session.captureMode
+      source: (seg && seg.source) || session.captureMode || "mic",
     });
 
     if (err) {
@@ -11439,6 +17879,10 @@ class LexVoicePlugin extends obsidian.Plugin {
         sessionId: session.id,
         mdPath: session.mdPath,
         audioPath: segmentAudioPath, segmentIndex: seg.index,
+        sourceAudioPath: session.masterAudioPath || "",
+        sourceAudioName: session.masterAudioName || "",
+        masterAudioPath: session.masterAudioPath || "",
+        masterAudioName: session.masterAudioName || "",
         startOffsetMs: seg.startOffsetMs, endOffsetMs: seg.endOffsetMs,
         audioName: segmentAudioName, mode: session.mode, isFinal: !!seg.isFinal,
         lastError: err.message || String(err),
@@ -11456,6 +17900,12 @@ class LexVoicePlugin extends obsidian.Plugin {
     await this.insertBeforeSegmentsEnd(session.mdPath, block, session.id);
 
     this.refreshOutlineView();
+    this.setSessionWorkProgress(session, {
+      stage: seg.isFinal ? "transcribe-finalized" : "transcribed",
+      label: seg.isFinal ? "转写收尾" : `已转写 ${session.segments.length} 段`,
+      percent: null,
+      detail: seg.isFinal ? "正在进入 AI 整理" : "分段转写已写入纪要",
+    });
 
     if (!seg.isFinal) new obsidian.Notice(`段 ${segNumber} 已转写`);
 
@@ -11484,59 +17934,117 @@ class LexVoicePlugin extends obsidian.Plugin {
       return;
     }
 
+    const textImportSession = isTextImportSession(session);
     session.finalizing = true;
+    this.setSessionWorkProgress(session, {
+      stage: "finalize-start",
+      label: textImportSession ? "读取文本完成" : "准备 AI 整理",
+      percent: 12,
+      detail: textImportSession ? "已跳过 ASR，正在准备结构化整理" : "转写已结束，正在整理上下文",
+    });
     this.refreshOutlineView();
-    new obsidian.Notice("🧠 所有段已处理，GPT 合并润色中…");
+    new obsidian.Notice(textImportSession ? "🧠 文本已读取，AI 结构化整理中…" : "🧠 所有段已处理，GPT 合并润色中…");
 
-    let polished = ""; let mergeError = null;
+    let polished = ""; let mergeError = null; let nonRetryableMergeError = false;
     try {
-      await this.ensureRealtimeOutlineForFinalNote(session);
+      this.setSessionWorkProgress(session, {
+        stage: "workbench",
+        label: "整理上下文",
+        percent: 22,
+        detail: "正在合并会中记录、附件和上下文",
+      });
+      await this.processPendingMeetingWorkbenchInteractions(session, { force: true });
+      if (!textImportSession) {
+        this.setSessionWorkProgress(session, {
+          stage: "outline",
+          label: "生成大纲",
+          percent: 36,
+          detail: "正在补齐实时大纲，供最终纪要参考",
+        });
+        await this.ensureRealtimeOutlineForFinalNote(session);
+      }
       const lastSeg = session.segments[session.segments.length - 1];
+      const textImport = textImportSession;
       const sessionMeta = {
         startedAt: session.startedAt,
-        duration: lastSeg ? formatElapsed(lastSeg.endOffsetMs || 0) : "",
+        duration: textImport ? "" : (lastSeg ? formatElapsed(lastSeg.endOffsetMs || 0) : ""),
+        source: session.source || "",
         meetingWorkbench: normalizeMeetingWorkbench(session.meetingWorkbench),
       };
+      this.setSessionWorkProgress(session, {
+        stage: "llm-merge",
+        label: "AI 整理中",
+        percent: 62,
+        detail: textImport ? "正在把导入文本交给大模型结构化整理" : "正在把分段转写合并成最终纪要",
+      });
       polished = await mergeAndPolish(this, session.segments.map(s => ({
         index: s.index, startOffsetMs: s.startOffsetMs, endOffsetMs: s.endOffsetMs, text: s.text,
         audioName: s.audioName,
+        sourceName: s.sourceName,
+        sourcePath: s.sourcePath,
+        rawText: s.rawText,
       })), session.mode, session.recruitContext, sessionMeta);
+      this.setSessionWorkProgress(session, {
+        stage: "write-note",
+        label: "写入纪要",
+        percent: 88,
+        detail: "AI 输出已返回，正在写入 Obsidian 笔记",
+      });
     } catch (e) { mergeError = e; console.error(e); }
     session.finalizing = false;
 
     if (mergeError) {
+      nonRetryableMergeError = isLlmNonRetryableError(mergeError);
       await this.logDiagnostic("error", "llm.merge_failed", "LLM 合并整理失败", {
         mode: session.mode,
         segmentCount: session.segments.length,
-        duration: session.segments.length ? formatElapsed(session.segments[session.segments.length - 1].endOffsetMs || 0) : "",
+        duration: isTextImportSession(session) ? "" : (session.segments.length ? formatElapsed(session.segments[session.segments.length - 1].endOffsetMs || 0) : ""),
         llmEndpoint: this.settings.llmEndpoint,
         llmModel: this.settings.llmModel,
+        nonRetryable: nonRetryableMergeError,
         error: diagnosticError(mergeError),
       });
-      const lastSeg = session.segments[session.segments.length - 1];
-      await this.queue.add({
-        type: "merge",
-        sessionId: session.id,
-        mdPath: session.mdPath,
-        mode: session.mode,
-        segments: session.segments.map(s => ({
-          index: s.index, startOffsetMs: s.startOffsetMs, endOffsetMs: s.endOffsetMs, text: s.text,
-          audioName: s.audioName,
-        })),
-        recruitContext: session.recruitContext || null,
-        sessionMeta: {
-          startedAt: session.startedAt,
-          duration: lastSeg ? formatElapsed(lastSeg.endOffsetMs || 0) : "",
-          meetingWorkbench: normalizeMeetingWorkbench(session.meetingWorkbench),
-        },
-        lastError: mergeError.message || String(mergeError),
-      });
+      if (!nonRetryableMergeError) {
+        const lastSeg = session.segments[session.segments.length - 1];
+        await this.queue.add({
+          type: "merge",
+          sessionId: session.id,
+          mdPath: session.mdPath,
+          mode: session.mode,
+          segments: session.segments.map(s => ({
+            index: s.index, startOffsetMs: s.startOffsetMs, endOffsetMs: s.endOffsetMs, text: s.text,
+            audioName: s.audioName,
+            sourceName: s.sourceName,
+            sourcePath: s.sourcePath,
+            rawText: s.rawText,
+          })),
+          source: session.source || "",
+          textImportSources: session.textImportSources || [],
+          recruitContext: session.recruitContext || null,
+          sessionMeta: {
+            startedAt: session.startedAt,
+            duration: isTextImportSession(session) ? "" : (lastSeg ? formatElapsed(lastSeg.endOffsetMs || 0) : ""),
+            source: session.source || "",
+            meetingWorkbench: normalizeMeetingWorkbench(session.meetingWorkbench),
+          },
+          lastError: mergeError.message || String(mergeError),
+        });
+      }
     }
 
-    if (this.settings.consolidatedLayout && !mergeError) {
+    if ((this.settings.consolidatedLayout || textImportSession) && !mergeError) {
       await this.rewriteConsolidated(session, polished);
     } else {
-      await this.appendPolishBlock(session, polished, mergeError);
+      await this.appendPolishBlock(session, polished, mergeError, nonRetryableMergeError);
+    }
+
+    if (!mergeError) {
+      this.setSessionWorkProgress(session, {
+        stage: "done",
+        label: "处理完成",
+        percent: 100,
+        detail: "纪要已写入，正在收尾",
+      });
     }
 
     if (!mergeError && polished) {
@@ -11545,7 +18053,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       if (renamed instanceof obsidian.TFile) session.mdPath = renamed.path;
       const renamedByPolished = renamed instanceof obsidian.TFile
         && obsidian.normalizePath(renamed.path) !== obsidian.normalizePath(beforeRenamePath);
-      if (session.source === "import" && !renamedByPolished) {
+      if ((session.source === "import" || session.source === "text-import") && !renamedByPolished) {
         const rawTitleSource = buildTitleSourceFromSegments(session.segments);
         if (rawTitleSource) {
           const fallbackRenamed = await this.renameMarkdownWithGeneratedTitle(session.mdPath, rawTitleSource, session.mode);
@@ -11563,7 +18071,11 @@ class LexVoicePlugin extends obsidian.Plugin {
       await this.cleanupSuccessfulSegmentAudio(session);
     }
 
-    new obsidian.Notice(mergeError ? "合并润色失败，已加入重试队列" : "LexVoice 处理完成");
+    new obsidian.Notice(mergeError
+      ? (nonRetryableMergeError
+        ? `AI 整理失败：${formatLlmFailureIssue(mergeError.message || mergeError)}`
+        : "合并润色失败，已加入重试队列")
+      : "LexVoice 处理完成");
 
     if (this.settings.autoOpenNoteAfterFinish) {
       const file = this.app.vault.getAbstractFileByPath(session.mdPath);
@@ -11653,6 +18165,195 @@ class LexVoicePlugin extends obsidian.Plugin {
       console.warn("[LexVoice] open generated report failed", e);
     }
     return false;
+  }
+
+  async resolveEmailRecipientsForMarkdownFile(file) {
+    const frontmatter = await readFileFrontmatter(this, file) || {};
+    const attendeeNames = extractMeetingAttendeeNames(frontmatter);
+    if (!attendeeNames.length) return { recipients: [], attendeeNames };
+    const attendeeKeys = new Set(attendeeNames.map(normalizePersonLookupText).filter(Boolean));
+    const people = await loadPeopleDirectory(this);
+    const recipients = [];
+    const seen = new Set();
+    for (const person of people || []) {
+      const terms = [person.name, ...(person.aliases || [])]
+        .map(normalizePersonLookupText)
+        .filter(Boolean);
+      if (!terms.some(term => attendeeKeys.has(term))) continue;
+      for (const email of normalizeEmailAddressList(person.email)) {
+        if (seen.has(email)) continue;
+        seen.add(email);
+        recipients.push(email);
+      }
+    }
+    return { recipients, attendeeNames };
+  }
+
+  getGeneratedEmailAttachmentFiles(file) {
+    const stem = sanitizeReportFileStem(file && file.basename || "").toLowerCase();
+    if (!stem) return [];
+    const folders = [
+      this.settings.htmlReportFolder || DEFAULT_SETTINGS.htmlReportFolder,
+      this.settings.htmlSlideFolder || DEFAULT_SETTINGS.htmlSlideFolder,
+      this.settings.pptxSlideFolder || DEFAULT_SETTINGS.pptxSlideFolder,
+    ].map(p => obsidian.normalizePath(p || "")).filter(Boolean);
+    const allowed = new Set(["html", "htm", "pptx", "ppt", "pdf"]);
+    const out = [];
+    const seen = new Set();
+    for (const candidate of this.app.vault.getFiles()) {
+      const path = obsidian.normalizePath(candidate.path || "");
+      const ext = String(candidate.extension || "").toLowerCase();
+      if (!allowed.has(ext)) continue;
+      if (!folders.some(folder => path.startsWith(folder + "/"))) continue;
+      const base = String(candidate.basename || "").toLowerCase();
+      if (!base.startsWith(stem)) continue;
+      if (file && obsidian.normalizePath(candidate.path) === obsidian.normalizePath(file.path)) continue;
+      if (seen.has(path)) continue;
+      seen.add(path);
+      out.push(candidate);
+    }
+    return out.sort((a, b) => String(a.path).localeCompare(String(b.path)));
+  }
+
+  async renderMarkdownToEmailHtml(file, markdown) {
+    let contentHtml = "";
+    try {
+      const el = document.createElement("article");
+      if (obsidian.MarkdownRenderer && typeof obsidian.MarkdownRenderer.render === "function") {
+        await obsidian.MarkdownRenderer.render(this.app, markdown, el, file.path, this);
+      } else if (obsidian.MarkdownRenderer && typeof obsidian.MarkdownRenderer.renderMarkdown === "function") {
+        await obsidian.MarkdownRenderer.renderMarkdown(markdown, el, file.path, this);
+      }
+      contentHtml = el.innerHTML;
+    } catch (e) {
+      console.warn("[LexVoice] markdown render for email pdf failed, fallback to plain markdown", e);
+    }
+    if (!contentHtml) contentHtml = `<pre>${escapeHtmlText(markdown)}</pre>`;
+    const title = escapeHtmlText(file && file.basename || "LexVoice 会议纪要");
+    return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>${title}</title>
+<style>
+body { margin: 0; padding: 32px; color: #222; background: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; line-height: 1.65; }
+article { max-width: 820px; margin: 0 auto; }
+h1, h2, h3 { line-height: 1.25; }
+pre { white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+blockquote { margin: 12px 0; padding-left: 14px; border-left: 3px solid #ddd; color: #555; }
+table { border-collapse: collapse; width: 100%; }
+td, th { border: 1px solid #ddd; padding: 6px 8px; }
+</style>
+</head>
+<body>
+<article>${contentHtml}</article>
+</body>
+</html>`;
+  }
+
+  async printHtmlToPdfBuffer(html) {
+    let BrowserWindow = null;
+    try {
+      const electron = require("electron");
+      BrowserWindow = electron && (electron.BrowserWindow || (electron.remote && electron.remote.BrowserWindow));
+    } catch {}
+    if (!BrowserWindow) {
+      try {
+        const remote = require("@electron/remote");
+        BrowserWindow = remote && remote.BrowserWindow;
+      } catch {}
+    }
+    if (!BrowserWindow) throw new Error("当前 Obsidian 环境不支持自动生成 PDF");
+    const win = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+      },
+    });
+    try {
+      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      const pdf = await win.webContents.printToPDF({
+        printBackground: true,
+        pageSize: "A4",
+        margins: { marginType: "default" },
+      });
+      return pdf;
+    } finally {
+      try { win.destroy(); } catch {}
+    }
+  }
+
+  async ensureMarkdownPdfForEmail(file, markdown) {
+    const folder = obsidian.normalizePath(EMAIL_DRAFT_ATTACHMENT_FOLDER);
+    await this.ensureFolder(folder);
+    const target = this.getAvailableVaultPath(`${folder}/${sanitizeReportFileStem(file.basename)}-纪要PDF.pdf`);
+    if (!target) throw new Error("无法生成可用的 PDF 路径");
+    const html = await this.renderMarkdownToEmailHtml(file, markdown);
+    const pdfBuffer = await this.printHtmlToPdfBuffer(html);
+    const bytes = pdfBuffer instanceof Uint8Array ? pdfBuffer : new Uint8Array(pdfBuffer || []);
+    const arrayBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    return await this.app.vault.createBinary(target, arrayBuffer);
+  }
+
+  async makeEmailAttachment(file) {
+    const data = await this.app.vault.readBinary(file);
+    return {
+      name: file.name,
+      mime: guessEmailAttachmentMime(file),
+      base64: arrayBufferToBase64(data),
+      path: file.path,
+    };
+  }
+
+  async createEmailDraftForMarkdownFile(file) {
+    if (!(file instanceof obsidian.TFile) || file.extension !== "md") return;
+    try {
+      new obsidian.Notice("LexVoice：正在生成邮件草稿…");
+      const markdown = await this.app.vault.read(file);
+      const { recipients, attendeeNames } = await this.resolveEmailRecipientsForMarkdownFile(file);
+      const attachmentFiles = [file];
+      let pdfFile = null;
+      try {
+        pdfFile = await this.ensureMarkdownPdfForEmail(file, markdown);
+      } catch (e) {
+        console.warn("[LexVoice] create email pdf failed", e);
+        new obsidian.Notice(`PDF 自动生成失败：${(e && e.message) || e}；邮件草稿仍会包含 MD 和已有导出文件。`, 9000);
+      }
+      if (pdfFile instanceof obsidian.TFile) attachmentFiles.push(pdfFile);
+      for (const generated of this.getGeneratedEmailAttachmentFiles(file)) {
+        const path = obsidian.normalizePath(generated.path || "");
+        if (!attachmentFiles.some(f => obsidian.normalizePath(f.path || "") === path)) attachmentFiles.push(generated);
+      }
+      const attachments = [];
+      for (const attachmentFile of attachmentFiles) {
+        try {
+          attachments.push(await this.makeEmailAttachment(attachmentFile));
+        } catch (e) {
+          console.warn("[LexVoice] attach file failed", attachmentFile && attachmentFile.path, e);
+        }
+      }
+      const subject = `会议纪要：${file.basename}`;
+      const body = buildMeetingEmailBody({
+        file,
+        markdown,
+        attendeeNames,
+        attachmentsCount: attachments.length,
+      });
+      const eml = buildEmailDraftContent({ to: recipients, subject, body, attachments });
+      const folder = obsidian.normalizePath(EMAIL_DRAFT_FOLDER);
+      await this.ensureFolder(folder);
+      const target = this.getAvailableVaultPath(`${folder}/${sanitizeReportFileStem(file.basename)}-邮件草稿.eml`);
+      if (!target) throw new Error("无法生成可用的邮件草稿路径");
+      const draft = await this.app.vault.create(target, eml);
+      const opened = this.openVaultFileInSystem(draft.path);
+      const recipientHint = recipients.length ? `，已填入 ${recipients.length} 个收件人` : "，未匹配到邮箱";
+      new obsidian.Notice(`LexVoice：已生成邮件草稿${recipientHint}，附件 ${attachments.length} 个。${opened ? "" : "可在邮件草稿文件夹中打开。"}`, 10000);
+    } catch (e) {
+      console.error("[LexVoice] create email draft failed", e);
+      new obsidian.Notice(`邮件草稿生成失败：${(e && e.message) || e}`, 9000);
+    }
   }
 
   async generateHtmlReportForMarkdownFile(file) {
@@ -11788,20 +18489,22 @@ class LexVoicePlugin extends obsidian.Plugin {
     const moment = window.moment;
     const startedAt = moment(session.startedAt);
     const totalMs = session.segments.length ? session.segments[session.segments.length - 1].endOffsetMs : 0;
+    const textImport = isTextImportSession(session);
     const masterAudioBlock = buildMasterAudioDetails(session, totalMs);
     const audioRow = masterAudioBlock || session.segments.map((s, i) => getAudioSegmentListItem(s, i)).filter(Boolean).join("\n");
     const realtimeOutlineBlock = buildRealtimeOutlineDetails(session);
     const playbackTimelineBlock = buildPlaybackTimelineDetails(session);
     const meetingWorkbenchBlock = buildMeetingWorkbenchDetails(session);
-    const recordingInfoBlock = buildRecordingInfoDetails({
+    const recordingInfoBlock = textImport ? buildTextImportInfoDetails(session, meta.prefix, this.settings.llmModel) : buildRecordingInfoDetails({
       startedAt: session.startedAt,
       totalMs,
       modeLabel: meta.prefix,
       segmentCount: session.segments.length,
       model: this.settings.llmModel,
     });
+    const textImportSourceBlock = textImport ? buildTextImportSourceDetails(session) : "";
 
-    const rawBlocks = session.segments.map(s => {
+    const rawBlocks = textImport ? "" : session.segments.map(s => {
       const n = s.index + 1;
       const head = `### 段落 ${n} (${formatElapsed(s.startOffsetMs)}–${formatElapsed(s.endOffsetMs)}) ${getAudioTimeLink(s.audioName, s.startOffsetMs)}${s.isFinal ? " · 结束" : ""}`;
       const body = s.error ? `_[转写失败：${s.error}]_` : (s.text || "_[此段无内容]_");
@@ -11829,21 +18532,21 @@ class LexVoicePlugin extends obsidian.Plugin {
       meetingWorkbenchBlock ? "" : null,
       realtimeOutlineBlock || null,
       realtimeOutlineBlock ? "" : null,
-      playbackTimelineBlock || null,
-      playbackTimelineBlock ? "" : null,
-      masterAudioBlock ? null : "<details>",
-      masterAudioBlock ? null : `<summary>🎧 原始音频（${session.segments.length} 段，${formatElapsed(totalMs)}）</summary>`,
-      "",
-      audioRow,
-      "",
-      masterAudioBlock ? null : "</details>",
-      "",
-      "<details>",
-      `<summary>📝 分段原始转写（${session.segments.length} 段）</summary>`,
-      "",
-      rawBlocks,
-      "</details>",
-      "",
+      textImport ? textImportSourceBlock || null : playbackTimelineBlock || null,
+      textImport ? (textImportSourceBlock ? "" : null) : (playbackTimelineBlock ? "" : null),
+      textImport ? null : (masterAudioBlock ? null : "<details>"),
+      textImport ? null : (masterAudioBlock ? null : `<summary>🎧 原始音频（${session.segments.length} 段，${formatElapsed(totalMs)}）</summary>`),
+      textImport ? null : "",
+      textImport ? null : audioRow,
+      textImport ? null : "",
+      textImport ? null : (masterAudioBlock ? null : "</details>"),
+      textImport ? null : "",
+      textImport ? null : "<details>",
+      textImport ? null : `<summary>📝 分段原始转写（${session.segments.length} 段）</summary>`,
+      textImport ? null : "",
+      textImport ? null : rawBlocks,
+      textImport ? null : "</details>",
+      textImport ? null : "",
       `<!-- lexvoice-session:${session.id} -->`,
       "",
     ].filter(v => v !== null).join("\n");
@@ -11851,7 +18554,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     await this.app.vault.modify(file, content);
   }
 
-  async appendPolishBlock(session, polished, mergeError) {
+  async appendPolishBlock(session, polished, mergeError, nonRetryableMergeError = false) {
     const file = this.app.vault.getAbstractFileByPath(session.mdPath);
     if (!(file instanceof obsidian.TFile)) return;
     const totalMs = session.segments.length ? session.segments[session.segments.length - 1].endOffsetMs : 0;
@@ -11859,33 +18562,40 @@ class LexVoicePlugin extends obsidian.Plugin {
     const polishedParts = splitLeadingFrontmatter(polished || "_[无输出]_");
     const polishedFrontmatter = polishedParts.frontmatter ? polishedParts.frontmatter.trimEnd() : "";
     const polishedBody = polishedParts.body.trim() || "_[无输出]_";
+    const textImport = isTextImportSession(session);
     const realtimeOutlineBlock = buildRealtimeOutlineDetails(session);
     const playbackTimelineBlock = buildPlaybackTimelineDetails(session);
-    const recordingInfoBlock = buildRecordingInfoDetails({
+    const recordingInfoBlock = textImport ? buildTextImportInfoDetails(session, meta.prefix, this.settings.llmModel) : buildRecordingInfoDetails({
       startedAt: session.startedAt,
       totalMs,
       modeLabel: meta.prefix,
       segmentCount: session.segments.length,
       model: this.settings.llmModel,
     });
+    const textImportSourceBlock = textImport ? buildTextImportSourceDetails(session) : "";
     const masterAudioBlock = buildMasterAudioDetails(session, totalMs);
     const meetingWorkbenchBlock = buildMeetingWorkbenchDetails(session);
+    const failureText = mergeError
+      ? (nonRetryableMergeError
+        ? `_[AI 整理失败：${formatLlmFailureIssue(mergeError.message || mergeError)}]_`
+        : `_[合并润色失败（已加入重试队列）：${mergeError.message || mergeError}]_`)
+      : "";
     const block = [
       "",
       `## ✨ 整合版（${this.settings.llmModel} · ${meta.prefix}）`,
       "",
-      mergeError ? `_[合并润色失败（已加入重试队列）：${mergeError.message || mergeError}]_` : polishedBody,
+      mergeError ? failureText : polishedBody,
       "",
       recordingInfoBlock || null,
       recordingInfoBlock ? "" : null,
-      masterAudioBlock || null,
-      masterAudioBlock ? "" : null,
+      textImport ? textImportSourceBlock || null : masterAudioBlock || null,
+      textImport ? (textImportSourceBlock ? "" : null) : (masterAudioBlock ? "" : null),
       meetingWorkbenchBlock || null,
       meetingWorkbenchBlock ? "" : null,
       realtimeOutlineBlock || null,
       realtimeOutlineBlock ? "" : null,
-      playbackTimelineBlock || null,
-      playbackTimelineBlock ? "" : null,
+      textImport ? null : playbackTimelineBlock || null,
+      textImport ? null : (playbackTimelineBlock ? "" : null),
       "---",
       "",
     ].filter(v => v !== null).join("\n");
@@ -11896,7 +18606,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     }
     const sep = cur.endsWith("\n") ? "" : "\n";
     let next = cur + sep + block;
-    next = next.replace(/录音中…\)?/g, `${formatElapsed(totalMs)}）`);
+    if (!textImport) next = next.replace(/录音中…\)?/g, `${formatElapsed(totalMs)}）`);
     await this.app.vault.modify(file, next);
   }
 
@@ -12142,6 +18852,54 @@ class LexVoicePlugin extends obsidian.Plugin {
     return { created, updated, skipped };
   }
 
+  async upsertGeneratedMarkdownFile(path, content, opts = {}) {
+    const norm = obsidian.normalizePath(path);
+    const folder = norm.includes("/") ? norm.slice(0, norm.lastIndexOf("/")) : "";
+    if (folder) await this.ensureFolder(folder);
+    let file = this.app.vault.getAbstractFileByPath(norm);
+    if (file instanceof obsidian.TFile) {
+      const current = await this.app.vault.cachedRead(file);
+      const shouldUpdate = opts.overwrite || current.includes("<!-- lexvoice-generated-wall -->") || current.trim() === "";
+      if (shouldUpdate && current !== content) await this.app.vault.modify(file, content);
+      return file;
+    }
+    file = await this.app.vault.create(norm, content);
+    return file;
+  }
+
+  async openGeneratedMarkdown(path, content, opts = {}) {
+    const withMarker = content.includes("<!-- lexvoice-generated-wall -->") ? content : "<!-- lexvoice-generated-wall -->\n" + content;
+    const file = await this.upsertGeneratedMarkdownFile(path, withMarker, opts);
+    if (file instanceof obsidian.TFile) await this.app.workspace.getLeaf(false).openFile(file);
+    return file;
+  }
+
+  async openLearningWall(scope = "learning") {
+    const isConcept = scope === "concept";
+    const fileName = isConcept ? CONCEPT_WALL_FILE : LEARNING_WALL_FILE;
+    const content = isConcept ? formatConceptWallMarkdown(this.settings) : formatLearningWallMarkdown(this.settings);
+    return await this.openGeneratedMarkdown(getLexVoiceWallPath(this.settings, fileName), content, { overwrite: true });
+  }
+
+  async openTodoWall() {
+    return await this.openGeneratedMarkdown(getLexVoiceWallPath(this.settings, TODO_WALL_FILE), formatTodoWallMarkdown(this.settings), { overwrite: true });
+  }
+
+  async openPeopleBase() {
+    const file = await this.ensurePeopleDirectoryFiles({ overwrite: false });
+    if (file instanceof obsidian.TFile) await this.app.workspace.getLeaf(false).openFile(file);
+    return file;
+  }
+
+  async openLexVoiceDetailBase() {
+    await this.createLexVoiceBases({ overwrite: false });
+    const path = obsidian.normalizePath(getLexVoiceBasesFolder(this.settings) + "/场景/全部纪要总览.base");
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (file instanceof obsidian.TFile) await this.app.workspace.getLeaf(false).openFile(file);
+    else new obsidian.Notice("未找到明细 Base，请先创建视图文件。", 8000);
+    return file;
+  }
+
   async ensureFolder(folderPath) {
     const norm = obsidian.normalizePath(folderPath);
     if (!norm || norm === "/") return;
@@ -12250,7 +19008,7 @@ ${currentMeta.prefix || currentMeta.label || currentMode}
 ${customPromptBrief}
 
 【任务】
-列出 30–80 个可能高频出现、且值得加入 ASR 词汇表的专有词。若能推断出常见误写，也可以列出少量「易错写法 => 标准写法」。若用户背景为空，请根据当前默认提示词与自定义提示词推断；不要编造真实人名、真实公司或隐私信息，可以使用类别化占位词。
+列出 30–80 个可能高频出现、且值得加入 ASR 热词表的专有词。若能推断出常见误写，也可以列出少量「易错写法 => 标准写法」。若用户背景为空，请根据当前默认提示词与自定义提示词推断；不要编造真实人名、真实公司或隐私信息，可以使用类别化占位词。
 - 人名：客户、同事、专家、讲师、候选人、常用称呼
 - 品牌/机构：公司、学校、客户、供应商、社区、品牌名
 - 项目/产品：项目代号、产品名、模型名、系统名、服务名、插件名
@@ -12308,7 +19066,7 @@ ${customPromptBrief}
       .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/m, "")
       .slice(0, 18000);
     const sys = "你是 ASR 领域词汇提取助手。请只根据用户当前笔记提取可能提升语音转写准确率的词汇，不要编造，不要输出非指定格式。";
-    const user = `请从下面这篇 LexVoice 笔记中提取适合加入领域词汇表的词汇。
+    const user = `请从下面这篇 LexVoice 笔记中提取适合加入 ASR 热词表的词汇。
 
 文件名：${file && file.basename ? file.basename : "当前笔记"}
 
@@ -12316,7 +19074,7 @@ ${customPromptBrief}
 - 只提取笔记中真实出现、后续录音里可能反复出现、且 ASR 容易识别错的词。
 - 专有名词优先：人名/称呼、品牌/机构、项目/产品、行业术语、英文缩写、中英混合词。
 - 人名只提取姓名或常用称呼，不提取身份号码、手机号、住址、邮箱等隐私字段。
-- 人员角色、组织关系和长期备注不要塞进词汇表；这些应进入人员信息表。
+- 人员角色、组织关系和长期备注不要塞进 ASR 热词表；这些应进入人员资料。
 - 「易错写法」只写非常确定的映射，例如 open router => OpenRouter。
 - 不确定就不要提取。
 
@@ -12682,6 +19440,7 @@ ${source}`;
     let created = 0;
     let updated = 0;
     const linkedPeopleFiles = [];
+    const entries = [];
     for (const raw of suggestions || []) {
       const suggestion = normalizePeopleSuggestion(raw);
       if (!suggestion) continue;
@@ -12694,6 +19453,7 @@ ${source}`;
         const body = ensurePeopleNoteRelatedBaseSection(content, this.settings.mdFolder);
         await this.app.vault.modify(file, upsertFrontmatterInMarkdown(body, mergePersonFrontmatter(fm, suggestion, sourceFile)));
         linkedPeopleFiles.push(file);
+        entries.push({ file, path: file.path, created: false, previousContent: content, kind: "person" });
         updated++;
       } else {
         const folder = obsidian.normalizePath(this.settings.peopleDirectoryFolder || DEFAULT_SETTINGS.peopleDirectoryFolder);
@@ -12705,6 +19465,7 @@ ${source}`;
         const body = formatPeopleNoteMarkdown(suggestion.name, this.settings.mdFolder);
         file = await this.app.vault.create(path, upsertFrontmatterInMarkdown(body, fm));
         linkedPeopleFiles.push(file);
+        entries.push({ file, path: file.path, created: true, previousContent: "", kind: "person" });
         created++;
       }
     }
@@ -12712,7 +19473,7 @@ ${source}`;
       await this.updateSourceNoteRelatedPeopleLinks(sourceFile, linkedPeopleFiles);
       this.invalidatePeopleDirectoryCache();
     }
-    return { created, updated };
+    return { created, updated, entries };
   }
 
   // 旧入口保留：把历史批量生成结果转成新的自定义提示词，避免覆盖内置提示词
@@ -12753,7 +19514,10 @@ ${source}`;
   detectModeFromMarkdown(file) {
     if (!(file instanceof obsidian.TFile)) return null;
     const cache = (this.app.metadataCache.getFileCache(file) || {}).frontmatter;
-    if (!cache) return null;
+    if (!cache) {
+      const fallbackMode = detectRecentModeFromFilename(this.settings, file.basename);
+      return fallbackMode && fallbackMode !== "off" ? fallbackMode : null;
+    }
     const m = cache.mode;
     if (typeof m === "string" && isKnownPolishMode(this.settings, m)) return m;
     const typeStr = String(cache["类型"] || cache.type || "").trim();
@@ -12786,10 +19550,11 @@ ${source}`;
       if (mode === "recruit" && !isRecruitFeatureUnlocked(this.settings)) return null;
       return mode;
     }
-    return null;
+    const fallbackMode = detectRecentModeFromFilename(this.settings, file.basename);
+    return fallbackMode && fallbackMode !== "off" ? fallbackMode : null;
   }
 
-  async repolishMarkdownFile(file, mode) {
+  async repolishMarkdownFile(file, mode, repolishOptions = null) {
     if (!(file instanceof obsidian.TFile) || file.extension !== "md") return;
     if (mode === "recruit" && !isRecruitFeatureUnlocked(this.settings)) {
       new obsidian.Notice("该扩展模式尚未启用");
@@ -12848,9 +19613,10 @@ ${source}`;
         recruitContext = result.action === "skip" ? null : result.ctx;
       }
 
+      const preferenceLabel = repolishOptions && repolishOptions.label ? ` · ${repolishOptions.label}` : "";
       const mapNotice = roleMapping.length
-        ? `LexVoice：应用 ${roleMapping.length} 条角色映射后按${meta.prefix}模式重新整理…`
-        : `LexVoice：正在按${meta.prefix}模式重新整理…`;
+        ? `LexVoice：应用 ${roleMapping.length} 条角色映射后按${meta.prefix}模式重新整理${preferenceLabel}…`
+        : `LexVoice：正在按${meta.prefix}模式重新整理${preferenceLabel}…`;
       new obsidian.Notice(mapNotice);
       // 把笔记原 frontmatter 传给 mergeAndPolish，post-process 阶段会作为 base 保留用户改动
       // （包括用户已应用的角色映射变更，仅 system 字段被覆盖、tags 被 merge）
@@ -12870,7 +19636,7 @@ ${source}`;
           }
         }
       }
-      const polished = await mergeAndPolish(this, segments, mode, recruitContext, sessionMeta, originalFmForRegen);
+      const polished = await mergeAndPolish(this, segments, mode, recruitContext, sessionMeta, originalFmForRegen, repolishOptions);
 
       // 重整完成后，把 frontmatter 里的"代号 → 真名"项压平为"真名"，让 yaml 干净
       let finalContent = await this.app.vault.read(file);
@@ -12895,7 +19661,7 @@ ${source}`;
       } catch (e) {
         console.error("[LexVoice] daily overview after repolish failed", e);
       }
-      new obsidian.Notice(`LexVoice：已生成${meta.prefix}模式纪要${roleMapping.length ? `（角色映射 ${roleMapping.length} 条已应用）` : ""}`);
+      new obsidian.Notice(`LexVoice：已生成${meta.prefix}模式纪要${preferenceLabel}${roleMapping.length ? `（角色映射 ${roleMapping.length} 条已应用）` : ""}`);
     } catch (e) {
       console.error("[LexVoice] repolish markdown failed", e);
       new obsidian.Notice(`重新整理失败：${(e && e.message) || e}`, 8000);
@@ -12907,11 +19673,12 @@ ${source}`;
     const stamp = window.moment ? window.moment().format("YYYY-MM-DD HH:mm:ss") : new Date().toISOString();
     const cur = await this.app.vault.read(file);
 
-    const rawMatch = /\n##\s+📁\s+原始材料/.exec(cur);
-    const rawIdx = rawMatch ? rawMatch.index + 1 : -1;
-    const beforeRaw = rawIdx >= 0 ? cur.slice(0, rawIdx) : cur;
-    const rawTail = rawIdx >= 0 ? cur.slice(rawIdx).replace(/^\n+/, "") : "";
-    const beforeParts = splitLeadingFrontmatter(beforeRaw);
+    // 关键：从全文里把所有原始 / 元数据块（任意深度）抽出来，避免再次嵌套。
+    // 旧实现只识别 "## 📁 原始材料"，对 appendPolishBlock 产出的
+    // "## ✨ 整合版 + ‹details›录音信息/原始音频/录音中实时大纲/回听时间轴" 结构识别不到，
+    // 导致每次重新整理都把整个旧文件包进新的 ‹details›上一版纪要›，重复存放段落和元数据。
+    const { tail: rawTail, withoutRaw } = extractAllRawBlocksFromText(cur);
+    const beforeParts = splitLeadingFrontmatter(withoutRaw);
     const beforeBody = beforeParts.body.replace(/^\n+/, "");
     const polishedParts = splitLeadingFrontmatter(stripModeSuggestionBlocks(polished || "_[无输出]_").trim());
     const polishedFrontmatter = polishedParts.frontmatter ? polishedParts.frontmatter.trimEnd() : "";
@@ -13139,6 +19906,10 @@ ${source}`;
       mode: mode,
       source: "import",
       segments: [],
+      realtimeOutline: "",
+      realtimeOutlineMemory: "",
+      realtimeOutlineSegmentCount: 0,
+      realtimeOutlineWorkbenchSignature: "",
       finalized: false,
       recruitContext,
     };
@@ -13237,6 +20008,8 @@ ${source}`;
           text: result.text,
           error: result.err ? (result.err.message || String(result.err)) : null,
           isFinal: result.isFinal,
+          // 导入音频不来自双流录音，统一标 "import"
+          source: "import",
         });
 
         if (result.err) {
@@ -13244,6 +20017,10 @@ ${source}`;
             type: "transcribe",
             sessionId: session.id, mdPath: session.mdPath,
             audioPath: chunk.retryAudioPath || audioPath, segmentIndex: segIndex,
+            sourceAudioPath: audioPath,
+            sourceAudioName: file.name,
+            masterAudioPath: audioPath,
+            masterAudioName: file.name,
             startOffsetMs: result.startOffset, endOffsetMs: result.endOffset,
             audioName: chunk.retryAudioName || file.name, mode: session.mode, isFinal: result.isFinal,
             lastError: result.err.message || String(result.err),
@@ -13265,6 +20042,133 @@ ${source}`;
       cumOffsetMs += fileDurationMs;
     }
 
+    await this.finalizeSession(session);
+  }
+
+  async importTextFiles(paths, modeOverride) {
+    if (!paths || !paths.length) return;
+    const uniquePaths = Array.from(new Set(paths.map(p => obsidian.normalizePath(String(p || ""))).filter(Boolean))).sort();
+    const sources = [];
+    for (const textPath of uniquePaths) {
+      const file = this.app.vault.getAbstractFileByPath(textPath);
+      if (!(file instanceof obsidian.TFile) || !TEXT_IMPORT_EXT.has(String(file.extension || "").toLowerCase())) {
+        new obsidian.Notice(`跳过：${textPath} 不是可导入文本`);
+        continue;
+      }
+      try {
+        const raw = await this.app.vault.read(file);
+        const text = stripImportedTextSource(raw);
+        if (!text) {
+          new obsidian.Notice(`跳过空文本：${file.name}`);
+          continue;
+        }
+        sources.push({ file, path: file.path, name: file.name, text });
+      } catch (e) {
+        console.error("[LexVoice] import text read failed", e);
+        new obsidian.Notice(`读取失败：${file.name}`);
+      }
+    }
+    if (!sources.length) {
+      new obsidian.Notice("没有可处理的文本内容");
+      return;
+    }
+
+    const moment = window.moment;
+    const startedAt = moment();
+    const sessionStamp = startedAt.format("YYYYMMDD-HHmmss");
+    const requestedMode = modeOverride && isKnownPolishMode(this.settings, modeOverride)
+      ? modeOverride
+      : (this.settings.polishMode || "meeting");
+    const mode = getEffectivePolishMode(this.settings, requestedMode);
+    const meta = getModeMeta(this.settings, mode);
+    const llmIssue = getLlmConfigIssue(this.settings);
+    if (llmIssue) {
+      await this.logDiagnostic("warn", "text_import.llm_config_missing", "导入文本前大模型配置不完整", {
+        mode,
+        llmRoute: "composer.chat-completions",
+        llmEndpoint: this.settings.llmEndpoint || "",
+        llmModel: this.settings.llmModel ? "<set>" : "",
+        issue: llmIssue,
+      });
+      new obsidian.Notice(`导入文本需要先完成大模型配置：${formatLlmConfigIssue(llmIssue)}`, 9000);
+      return;
+    }
+
+    let recruitContext = null;
+    if (mode === "recruit") {
+      const result = await new Promise((resolve) => {
+        const modal = new RecruitContextModal(this.app, this, {
+          flow: "text-import",
+          onConfirm: (action, ctx) => resolve({ action, ctx }),
+        });
+        modal.open();
+      });
+      if (result.action === "cancel") {
+        new obsidian.Notice("已取消导入文本");
+        return;
+      }
+      if (result.action !== "skip") recruitContext = result.ctx;
+    }
+
+    await this.ensureFolder(this.settings.mdFolder);
+    const mdName = `${startedAt.format(this.settings.noteFileNameFormatNew)} · 文本导入`;
+    const mdPath = this.getAvailableMarkdownPath(obsidian.normalizePath(`${this.settings.mdFolder}/${mdName}.md`));
+    if (!mdPath) throw new Error("无法生成文本导入笔记路径");
+
+    const session = {
+      id: genId(),
+      sessionStamp,
+      startedAt: startedAt.toDate().toISOString(),
+      mdPath,
+      mode,
+      source: "text-import",
+      segments: [],
+      realtimeOutline: "",
+      realtimeOutlineMemory: "",
+      realtimeOutlineSegmentCount: 0,
+      realtimeOutlineWorkbenchSignature: "",
+      finalized: false,
+      recruitContext,
+      textImportSources: sources.map(s => ({ path: s.path, name: s.name, chars: s.text.length })),
+    };
+
+    const header = [
+      `# ${meta.emoji} ${startedAt.format("YYYY-MM-DD HH:mm")} · ${meta.prefix}（文本导入处理中…）`,
+      "",
+      `> [!info] 文本导入信息`,
+      `> 来源文件：${sources.length} · 模式：${meta.prefix} · 模型：${this.settings.llmModel}`,
+      "",
+      `<!-- lexvoice-session:${session.id} -->`,
+      `<!-- lexvoice-segments-start:${session.id} -->`,
+      `<!-- lexvoice-segments-end:${session.id} -->`,
+      "",
+    ].join("\n");
+    await this.appendToNote(mdPath, header);
+    this.session = session;
+    this.setSessionWorkProgress(session, {
+      stage: "text-import",
+      label: "读取文本",
+      percent: 8,
+      detail: `已读取 ${sources.length} 个文本来源，准备进入 AI 整理`,
+    });
+    this.refreshOutlineView();
+    try { await this.openOutlineView(); } catch (e) { console.warn("[LexVoice] open outline for text import failed", e); }
+
+    session.segments = splitImportedTextIntoNormalSegments(sources);
+
+    for (const seg of session.segments) {
+      const block = [
+        "",
+        `### 文本来源 ${seg.index + 1}：[[${seg.sourcePath}|${seg.sourceName}]]`,
+        "",
+        seg.rawText || "_[此文本来源为空]_",
+        "",
+      ].join("\n");
+      await this.insertBeforeSegmentsEnd(session.mdPath, block, session.id);
+    }
+
+    this.refreshOutlineView();
+    new obsidian.Notice(`开始整理 ${sources.length} 份文本：使用 AI 整理服务，不调用语音转写服务。`);
     await this.finalizeSession(session);
   }
 
@@ -13298,7 +20202,7 @@ ${source}`;
   async openRecentNote() {
     const folder = this.app.vault.getAbstractFileByPath(obsidian.normalizePath(this.settings.mdFolder));
     if (!(folder instanceof obsidian.TFolder)) { new obsidian.Notice("Markdown 文件夹不存在"); return; }
-    const files = folder.children.filter((f) => f instanceof obsidian.TFile && f.extension === "md");
+    const files = getMarkdownFilesUnderFolder(this.app, this.settings.mdFolder);
     if (!files.length) { new obsidian.Notice("最近没有录音笔记"); return; }
     files.sort((a, b) => b.stat.mtime - a.stat.mtime);
     await this.app.workspace.getLeaf(false).openFile(files[0]);
@@ -13306,27 +20210,200 @@ ${source}`;
 
   async retryQueue() {
     if (!this.queue.tasks.length) { new obsidian.Notice("队列为空"); return; }
-    new obsidian.Notice(`重试 ${this.queue.tasks.length} 个任务…`);
+    const blockedMergeTasks = this.queue.tasks.filter((task) => task && task.type === "merge" && task.status === "blocked");
+    if (blockedMergeTasks.length) {
+      const llmIssue = getLlmConfigIssue(this.settings);
+      if (llmIssue) {
+        new obsidian.Notice(`有 ${blockedMergeTasks.length} 个整理任务待配置：${formatLlmConfigIssue(llmIssue)}`, 9000);
+      } else {
+        const serviceBlocked = blockedMergeTasks.find((task) => isLlmServiceBlockedError(task.lastError || ""));
+        for (const task of blockedMergeTasks) {
+          task.status = "pending";
+          task.lastError = "";
+          task.updatedAt = new Date().toISOString();
+        }
+        await this.saveAll();
+        new obsidian.Notice(serviceBlocked
+          ? `已恢复 ${blockedMergeTasks.length} 个暂停整理任务，正在重新尝试大模型服务`
+          : `已恢复 ${blockedMergeTasks.length} 个待配置整理任务`);
+      }
+    }
+    const runnable = this.queue.tasks.filter((task) => task && task.status !== "blocked");
+    if (!runnable.length) return;
+    new obsidian.Notice(`重试 ${runnable.length} 个任务…`);
     await this.queue.processAll();
     new obsidian.Notice(`剩余 ${this.queue.tasks.length} 个任务`);
   }
 
-  async retryTranscribeTask(task) {
-    const file = this.app.vault.getAbstractFileByPath(task.audioPath);
-    if (!(file instanceof obsidian.TFile)) throw new Error(`音频不存在：${task.audioPath}`);
+  async retryTranscribeTasksForMarkdown(file) {
+    if (!(file instanceof obsidian.TFile) || file.extension !== "md") return;
+    const tasks = getQueueTasksForMarkdown(this, file, { types: ["transcribe"], failedOnly: true });
+    if (!tasks.length) {
+      new obsidian.Notice("这篇纪要当前没有可重试的转写任务。", 5000);
+      return;
+    }
+    new obsidian.Notice(`LexVoice：正在重试 ${tasks.length} 个转写片段…`);
+    let ok = 0;
+    let failed = 0;
+    for (const task of tasks.slice()) {
+      try {
+        await this.queue.processOne(task);
+        ok++;
+      } catch (e) {
+        failed++;
+        console.error("[LexVoice] retry transcribe task from note list failed", e);
+      }
+    }
+    await this.saveAll();
+    this.renderStatusBar();
+    this.refreshOutlineView();
+    new obsidian.Notice(`转写重试完成：成功 ${ok} 个${failed ? `，失败 ${failed} 个` : ""}`, 8000);
+  }
+
+  async readTranscribeTaskAudioBlob(task) {
+    const direct = await this.readVaultAudioBlob(task.audioPath, task.audioName);
+    if (direct) return direct;
+
+    const recovered = await this.recoverTranscribeTaskAudioBlob(task);
+    if (recovered) {
+      await this.logDiagnostic("warn", "queue.transcribe_audio_recovered", "转写重试已从完整录音恢复临时切片", {
+        audioName: task.audioName || "",
+        sourceAudioName: recovered.sourceName || "",
+        startOffsetMs: task.startOffsetMs,
+        endOffsetMs: task.endOffsetMs,
+      });
+      return recovered;
+    }
+
+    throw new Error(`音频不存在：${task.audioPath || task.audioName || "未知音频"}`);
+  }
+
+  async readVaultAudioBlob(path, fallbackName) {
+    const norm = obsidian.normalizePath(String(path || ""));
+    if (!norm) return null;
+    const file = this.app.vault.getAbstractFileByPath(norm);
+    if (!(file instanceof obsidian.TFile)) return null;
     const ab = await this.app.vault.readBinary(file);
-    const ext = (file.extension || (task.audioName || "").split(".").pop() || "").toLowerCase();
-    const blob = new Blob([ab], { type: mimeFromExt(ext) });
-    const text = await transcribeAudio(this, blob, blob.type);
-    if (!text) throw new Error("转写返回为空");
+    const ext = (file.extension || String(fallbackName || "").split(".").pop() || "").toLowerCase();
+    return {
+      blob: new Blob([ab], { type: mimeFromExt(ext) }),
+      sourcePath: file.path,
+      sourceName: file.name,
+      recovered: false,
+    };
+  }
+
+  resolveTranscribeRetrySourceFile(task) {
+    const candidates = [];
+    const push = (path) => {
+      const norm = obsidian.normalizePath(String(path || "").trim());
+      if (norm && !candidates.includes(norm)) candidates.push(norm);
+    };
+
+    push(task.sourceAudioPath);
+    push(task.masterAudioPath);
+
+    const audioName = String(task.audioName || (task.audioPath || "").split("/").pop() || "");
+    const match = audioName.match(/^(lex-\d{8}-\d{6})-seg\d+\.(\w+)$/i);
+    if (match) {
+      const folder = obsidian.normalizePath(this.settings.audioFolder || DEFAULT_SETTINGS.audioFolder || "");
+      const stem = match[1];
+      const ext = match[2] || "m4a";
+      for (const candidateExt of Array.from(new Set([ext, "m4a", "mp4", "webm", "wav"]))) {
+        push(folder ? `${folder}/${stem}.${candidateExt}` : `${stem}.${candidateExt}`);
+      }
+    }
+
+    for (const path of candidates) {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (file instanceof obsidian.TFile && AUDIO_EXT.has(String(file.extension || "").toLowerCase())) return file;
+    }
+
+    if (match) {
+      const stem = match[1];
+      const folder = obsidian.normalizePath(this.settings.audioFolder || DEFAULT_SETTINGS.audioFolder || "");
+      const files = this.app.vault.getFiles ? this.app.vault.getFiles() : [];
+      return files.find(file => file instanceof obsidian.TFile
+        && AUDIO_EXT.has(String(file.extension || "").toLowerCase())
+        && file.basename === stem
+        && (!folder || obsidian.normalizePath(file.path).startsWith(folder + "/"))) || null;
+    }
+
+    return null;
+  }
+
+  async recoverTranscribeTaskAudioBlob(task) {
+    const start = Number(task.startOffsetMs);
+    const end = Number(task.endOffsetMs);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+
+    const sourceFile = this.resolveTranscribeRetrySourceFile(task);
+    if (!(sourceFile instanceof obsidian.TFile)) return null;
+
+    const source = await this.readVaultAudioBlob(sourceFile.path, sourceFile.name);
+    if (!source || !source.blob) return null;
+    try {
+      const audioBuffer = await decodeAudioBlob(source.blob);
+      const sliceBlob = await renderAudioBufferSliceToWav(audioBuffer, start, end);
+      return {
+        blob: sliceBlob,
+        sourcePath: sourceFile.path,
+        sourceName: sourceFile.name,
+        recovered: true,
+      };
+    } catch (e) {
+      throw new Error(`临时切片不存在，已找到完整录音但无法重新切片：${(e && e.message) || e}`);
+    }
+  }
+
+  async retryTranscribeTask(task) {
+    const audio = await this.readTranscribeTaskAudioBlob(task);
+    const text = await transcribeAudio(this, audio.blob, audio.blob.type || "audio/wav");
+    const replacementText = text || "_[此段暂无有效转写]_";
+    if (!text) {
+      await this.logDiagnostic("warn", "queue.transcribe_empty_result", "转写重试返回空文本，已按空片段处理", {
+        mdPath: task.mdPath || "",
+        audioName: task.audioName || "",
+        startOffsetMs: task.startOffsetMs,
+        endOffsetMs: task.endOffsetMs,
+      });
+    }
     const mdFile = this.app.vault.getAbstractFileByPath(task.mdPath);
     if (mdFile instanceof obsidian.TFile) {
       const cur = await this.app.vault.read(mdFile);
       const failMark = /_\[转写失败(?:（已进入重试队列）)?：[^\]]*\]_/;
-      const next = cur.replace(failMark, text);
+      const next = cur.replace(failMark, replacementText);
       if (next !== cur) await this.app.vault.modify(mdFile, next);
     }
-    await this.maybeDeleteSegmentCacheFile(task.audioPath);
+    if (!audio.recovered) await this.maybeDeleteSegmentCacheFile(task.audioPath, task.id);
+  }
+
+  // 把队列里所有指向 oldPath 的任务迁移到 newPath，并持久化。
+  // 触发场景：用户/插件给纪要重命名（包括 renameMarkdownWithGeneratedTitle 自动生成的标题改名）后，
+  // transcribe / merge 等待重试的任务还指向旧路径会失败报"笔记不存在"。
+  migrateQueueTasksAfterRename(oldPath, newPath) {
+    if (!this.queue || !Array.isArray(this.queue.tasks)) return;
+    const oldNorm = obsidian.normalizePath(String(oldPath || ""));
+    const newNorm = obsidian.normalizePath(String(newPath || ""));
+    if (!oldNorm || !newNorm || oldNorm === newNorm) return;
+    let migrated = 0;
+    for (const task of this.queue.tasks) {
+      if (!task) continue;
+      if (task.mdPath && obsidian.normalizePath(task.mdPath) === oldNorm) {
+        task.mdPath = newNorm;
+        migrated++;
+      }
+      // 顺便把 task 里其他指向同一 md 的引用字段也迁移
+      if (task.sourceMdPath && obsidian.normalizePath(task.sourceMdPath) === oldNorm) {
+        task.sourceMdPath = newNorm;
+      }
+    }
+    if (migrated > 0) {
+      console.log(`[LexVoice] queue rename migrate: ${migrated} task(s) ${oldNorm} -> ${newNorm}`);
+      try { (this.saveAll || this.saveSettings).call(this); } catch (e) {
+        console.warn("[LexVoice] queue migrate save failed", e);
+      }
+    }
   }
 
   async retryMergeTask(task) {
@@ -13408,7 +20485,7 @@ const LV_SETTINGS_TABS = [
   { id: "general",  label: "常规" },
   { id: "api",      label: "API" },
   { id: "ai",       label: "AI 整理" },
-  { id: "knowledge", label: "词汇与人员" },
+  { id: "knowledge", label: "信息对象" },
   { id: "advanced", label: "进阶" },
   { id: "updates",  label: "更新" },
 ];
@@ -13563,7 +20640,7 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       this.plugin.settings.selectedVirtualDevice = virtual.deviceId;
       this.plugin.settings.captureMode = hasMic ? "mix-virtual" : "virtualCable";
       await this.plugin.saveSettings();
-      new obsidian.Notice(`已选择：${audioInputModeLabel(this.plugin.settings.captureMode)}（${virtual.label || "虚拟声卡"}）`, 6000);
+      new obsidian.Notice(`已选择：${audioInputModeLabel(this.plugin.settings.captureMode)}（电脑音频：${virtual.label || "虚拟声卡"}）。请在「真实麦克风选择」里确认麦克风。`, 8000);
       return;
     }
     this.plugin.settings.selectedVirtualDevice = "";
@@ -13573,6 +20650,29 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       ? "未获得音频权限或未检测到电脑音频输入，已保持「仅麦克风」。如需录 B 站客户端、浏览器视频或系统声音，请先授权并配置虚拟声卡。"
       : "未检测到电脑音频输入，已保持「仅麦克风」。如需录 B 站客户端、浏览器视频或系统声音，请先配置虚拟声卡。";
     new obsidian.Notice(msg, 7000);
+  }
+
+  async chooseRealMicrophone() {
+    if (isLexVoiceMobileRuntime()) {
+      this.plugin.settings.selectedMicrophoneDevice = "";
+      await this.plugin.saveSettings();
+      new obsidian.Notice("移动端使用系统麦克风输入。", 5000);
+      return;
+    }
+    const info = await enumerateAudioDevices();
+    const realMic = (info.mics || []).find((d) => d.deviceId && d.deviceId !== "default" && !/^default\b/i.test(d.label || ""));
+    if (!realMic) {
+      this.plugin.settings.selectedMicrophoneDevice = "";
+      await this.plugin.saveSettings();
+      const msg = info.permissionRequired
+        ? "未获得麦克风权限，无法读取真实麦克风。请先授权，再重新选择。"
+        : "未检测到真实麦克风。请确认 Windows 默认输入不是 CABLE Output，并检查麦克风权限。";
+      new obsidian.Notice(msg, 8000);
+      return;
+    }
+    this.plugin.settings.selectedMicrophoneDevice = realMic.deviceId;
+    await this.plugin.saveSettings();
+    new obsidian.Notice(`已优先使用真实麦克风：${realMic.label || "真实麦克风"}`, 7000);
   }
 
   renderHome(c) {
@@ -13696,7 +20796,7 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     const betterRows = [
       ["转写提示词", "在 AI 整理中管理内置提示词和自定义提示词；自定义提示词会出现在录音、导入和重新整理的选择列表里。", hasLlm ? "去管理" : "先配大模型", hasLlm ? "ai" : "api"],
       ["多语种会议整理", "在 AI 整理中启用纪要翻译，可由大模型在整理阶段统一输出至目标语言，或保留关键原文形成双语纪要。", "去设置", "ai"],
-      ["词汇与人员库", "维护领域词汇表、人员资料与人员库 Base。词汇表可用于 ASR 术语提示；人员资料默认只在本地管理。", "打开词汇与人员", "knowledge"],
+      ["纪要信息对象", "从纪要中沉淀 ASR 热词、人员资料、学习卡片和待办卡片。纪要负责追溯，对象负责复用和检索。", "打开信息对象", "knowledge"],
       ["自动更新", "从 LexVoice 官方 GitHub 仓库检查新版本并增量更新；本地设置、保存路径与自定义提示词不会被覆盖。", "去更新", "updates"],
     ];
     for (const [name, desc, btnText, target] of betterRows) {
@@ -13712,7 +20812,7 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
 
   renderGeneral(c) {
     new obsidian.Setting(c).setName("默认音频输入")
-      .setDesc("仅录本人声音时选择「仅麦克风」。录制 B 站客户端、浏览器视频或课程时选择「仅电脑音频」；线上会议或边听边讲解时选择「麦克风加电脑音频」。")
+      .setDesc("仅录本人声音时选择「仅麦克风」。录制 B 站客户端、浏览器视频或课程时选择「仅电脑音频」；线上会议或边听边讲解时选择「麦克风加电脑音频」。录音中电平条不动时，先点「设备检测」确认麦克风/电脑音频输入。")
       .addDropdown(d => d.addOption("mic", "仅麦克风")
         .addOption("mix-virtual", "麦克风加电脑音频")
         .addOption("virtualCable", "仅电脑音频")
@@ -13722,7 +20822,38 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         await this.autoConfigureAudioInput();
         this.display();
       }))
+      .addButton(b => b.setButtonText("设备检测").onClick(async () => {
+        await this.runAudioDiagnostic();
+      }))
       .addButton(b => b.setButtonText("电脑音频指引").onClick(() => new VirtualCableSetupModal(this.app, this.plugin).open()));
+
+    new obsidian.Setting(c).setName("真实麦克风保护")
+      .setDesc("LexVoice 不会把 CABLE Output、BlackHole、VoiceMeeter、Stereo Mix 等虚拟声卡输入当作「麦克风」。请在下方明确选择本机真实麦克风；不确定时先点设备检测。")
+      .addButton(b => b.setButtonText("设备检测").onClick(async () => {
+        await this.runAudioDiagnostic();
+      }));
+
+    const micSetting = new obsidian.Setting(c).setName("真实麦克风选择")
+      .setDesc("混合录制时：电脑音频走虚拟声卡；本人说话走这里选择的真实麦克风。不要选择 CABLE Output、BlackHole、VoiceMeeter 或 Stereo Mix。");
+    micSetting.addDropdown(async (d) => {
+      d.addOption("", "（未指定：自动避开虚拟声卡输入）");
+      try {
+        const info = await enumerateAudioDevices();
+        for (const mic of info.mics || []) {
+          const label = mic.label || "未授权读取设备名";
+          d.addOption(mic.deviceId, label);
+        }
+      } catch {
+        d.addOption("__error", "设备读取失败，请先授权");
+      }
+      d.setValue(this.plugin.settings.selectedMicrophoneDevice || "");
+      d.onChange(async (value) => {
+        if (value === "__error") return;
+        this.plugin.settings.selectedMicrophoneDevice = value;
+        await this.plugin.saveSettings();
+        new obsidian.Notice(value ? "真实麦克风选择已保存" : "已改为自动避开虚拟声卡输入");
+      });
+    });
 
     new obsidian.Setting(c).setName("LexVoice 录音文件夹")
       .setDesc("vault 内相对路径。录音文件默认保存到 LexVoice/录音，可按需要改成其他位置。")
@@ -14077,6 +21208,32 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
           await this.plugin.saveSettings();
         }));
 
+    new obsidian.Setting(c).setName("重新整理偏好提示词")
+      .setDesc("只影响右键菜单「重新整理为」里的偏好项。偏好会调整详略、结构、语气和是否允许 AI 适度补充观点。这里填写的是追加规则，不会覆盖内置提示词。");
+    const repolishPromptTa = c.createEl("textarea", { cls: "lexvoice-textarea" });
+    repolishPromptTa.value = this.plugin.settings.repolishPreferencePromptAddendum || "";
+    repolishPromptTa.placeholder = "例如：适度拓展时，如果原文出现概念、疑问或明显分歧，请用 AI 补充 callout 给出简短视角；关键概念用 ==高亮==，核心判断可用 <u>下划线</u>。不要编造事实、数据或责任人。";
+    repolishPromptTa.rows = 4;
+    repolishPromptTa.addEventListener("change", async () => {
+      this.plugin.settings.repolishPreferencePromptAddendum = repolishPromptTa.value.trim();
+      await this.plugin.saveSettings();
+    });
+    const repolishPresetHint = c.createEl("details", { cls: "lexvoice-setting-details" });
+    repolishPresetHint.createEl("summary", { text: "查看内置偏好对应的提示词方向" });
+    const presetText = [
+      "风格偏好：",
+      "- 更详细：扩展上下文、讨论过程、例子、反对意见、风险和待办依据。",
+      "- 更精炼：压缩重复口语和低信息量细节，保留结论、证据、待办和风险。",
+      "- 更结构化：强化标题层级，按「结论 → 依据 → 影响/待办」组织。",
+      "- 更自然：减少模板感，用连贯段落承接讨论。",
+      "- MD 强化：适度使用 ==高亮==、<u>下划线</u> 和少量 AI 补充 callout。",
+      "",
+      "处理方式：",
+      "- 忠于原文：不主动外推，只整理录音中明确出现的信息。",
+      "- 适度拓展：可用 AI 补充 callout 处理疑问、概念背景、激烈分歧，但必须标明是 AI 补充，且不能编造事实。",
+    ].join("\n");
+    repolishPresetHint.createEl("pre", { text: presetText });
+
     new obsidian.Setting(c).setName("纪要翻译与语言").setHeading();
     const langHint = c.createDiv({ cls: "setting-item-description lexvoice-section-hint" });
     langHint.setText("用于多语种会议。原始转写保持原文；翻译和统一语言只发生在 AI 整理后的纪要里。");
@@ -14226,25 +21383,191 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
   renderKnowledge(c) {
     if (!this.plugin.settings.industryProfile) this.plugin.settings.industryProfile = {};
 
-    new obsidian.Setting(c).setName("词汇与人员").setHeading();
-    const knowledgeHint = c.createDiv({ cls: "setting-item-description lexvoice-section-hint" });
-    knowledgeHint.setText("本页管理长期可复用的识别辅助资料：领域词汇表用于 ASR 术语提示；人员库用于本地维护姓名、称呼、角色和组织关系。两者的发送边界不同，应按敏感度分开维护。");
+    const countMarkdownInFolder = (folderPath) => {
+      const folder = obsidian.normalizePath(folderPath || "");
+      if (!folder) return 0;
+      const prefix = folder.endsWith("/") ? folder : folder + "/";
+      return this.plugin.app.vault.getMarkdownFiles()
+        .filter(f => obsidian.normalizePath(f.path).startsWith(prefix))
+        .length;
+    };
 
+    const createPathSetting = (name, desc, value, placeholder, onSave, refreshDesc) => {
+      const setting = new obsidian.Setting(c).setName(name).setDesc(desc);
+      setting.addText(t => t.setValue(value || "")
+        .setPlaceholder(placeholder)
+        .onChange(async v => {
+          await onSave(obsidian.normalizePath(v || placeholder));
+          await this.plugin.saveSettings();
+          if (refreshDesc) await refreshDesc(setting);
+        }));
+      if (refreshDesc) refreshDesc(setting);
+      return setting;
+    };
+
+    new obsidian.Setting(c).setName("纪要信息对象").setHeading();
+    const intro = c.createDiv({ cls: "setting-item-description lexvoice-section-hint" });
+    intro.setText("LexVoice 现在把每篇纪要视为统一入口：纪要保存完整上下文和可回听证据，信息对象负责复用、检索和后续管理。ASR 热词、人员资料、学习卡片、待办卡片属于不同用途的对象，不再混在一个“词汇/人员”入口里。");
+
+    const objectList = c.createEl("ul", { cls: "lexvoice-object-model-list" });
+    [
+      ["ASR 热词", "服务转写准确率，只保存术语、名称和易错写法。"],
+      ["人员资料", "服务本地关系沉淀，一人一页，默认不随请求发送。"],
+      ["学习卡片", "服务长期学习复用，包括概念、机制、案例、QA、追问和观点。"],
+      ["待办卡片", "服务行动跟踪，只承接明确可执行事项。"],
+    ].forEach(([name, desc]) => {
+      const li = objectList.createEl("li");
+      li.createSpan({ cls: "lexvoice-object-model-name", text: name });
+      li.createSpan({ text: "：" + desc });
+    });
+
+    new obsidian.Setting(c).setName("对象提取").setHeading();
+    c.createDiv({ cls: "setting-item-description lexvoice-section-hint" })
+      .setText("提取遵循“候选 → 确认 → 入库”。当前可直接扫描纪要库生成 ASR 热词和人员建议；学习卡片和待办卡片通过已确认的卡片文件进入对应墙面。");
+
+    const pendingPeopleSuggestions = normalizePeopleSuggestionCache(this.plugin.settings.peopleSuggestionCache).pending;
+    const ignoredPeopleSuggestions = normalizePeopleSuggestionIgnores(this.plugin.settings.peopleSuggestionIgnores);
+    new obsidian.Setting(c).setName("扫描纪要库")
+      .setDesc("从转写纪要文件夹读取笔记。ASR 热词会写入热词表；人员建议会先进入确认面板，用户确认后才写入人员资料。")
+      .addButton(b => b.setButtonText("提取 ASR 热词").onClick(async () => this._extractVocabFromLibrary(refreshVocabStatus)))
+      .addButton(b => b.setButtonText("提取人员建议").onClick(async () => this.plugin.suggestPeopleDirectoryFromLibrary()));
+
+    new obsidian.Setting(c).setName("人员建议")
+      .setDesc(`待确认 ${pendingPeopleSuggestions.length} 条；已忽略 ${ignoredPeopleSuggestions.length} 条。已有人员资料只在本地用于匹配和去重，不随扫描请求发送。`)
+      .addButton(b => b.setButtonText("查看待确认").setDisabled(!pendingPeopleSuggestions.length).onClick(async () => { await this.plugin.openCachedPeopleDirectorySuggestions(); this.display(); }))
+      .addButton(b => b.setButtonText("查看已忽略").setDisabled(!ignoredPeopleSuggestions.length).onClick(async () => { await this.plugin.openIgnoredPeopleDirectorySuggestions(); this.display(); }));
+
+    new obsidian.Setting(c).setName("对象保存位置").setHeading();
+    c.createDiv({ cls: "setting-item-description lexvoice-section-hint" })
+      .setText("这些路径都是当前 Obsidian 库内的相对路径。建议让纪要、对象和视图分层保存：纪要用于追溯，对象用于复用，视图用于浏览。");
+
+    const refreshVocabStatus = async (setting) => {
+      const path = this.plugin.settings.vocabularyFile;
+      if (!path) { setting.setDesc("当前未指定路径。"); return; }
+      const norm = obsidian.normalizePath(path);
+      const file = this.plugin.app.vault.getAbstractFileByPath(norm);
+      if (!(file instanceof obsidian.TFile)) {
+        setting.setDesc("文件不存在，打开或扫描时会自动创建。");
+        return;
+      }
+      try {
+        const content = await this.plugin.app.vault.cachedRead(file);
+        const groups = parseVocabularyGroups(content);
+        setting.setDesc(`当前 ${countVocabularyGroups(groups)} 个 ASR 热词（${summarizeVocabularyGroups(groups)}）。`);
+      } catch (e) {
+        setting.setDesc(`读取失败：${e.message || e}`);
+      }
+    };
+
+    const vocabPathSetting = createPathSetting("ASR 热词表", "用于保存转写热词、专有名词和易错写法。", this.plugin.settings.vocabularyFile || DEFAULT_SETTINGS.vocabularyFile, "LexVoice/词汇表.md",
+      async v => { this.plugin.settings.vocabularyFile = v || DEFAULT_SETTINGS.vocabularyFile; },
+      refreshVocabStatus);
+
+    createPathSetting("人员资料文件夹", "一人一篇 Markdown，用于长期维护姓名、常用称呼、角色、组织和相关纪要。", this.plugin.settings.peopleDirectoryFolder || DEFAULT_SETTINGS.peopleDirectoryFolder, "LexVoice/人员",
+      async v => { this.plugin.settings.peopleDirectoryFolder = v || DEFAULT_SETTINGS.peopleDirectoryFolder; },
+      async setting => {
+        try {
+          const people = await loadPeopleDirectory(this.plugin);
+          setting.setDesc(`当前 ${people.length} 位人员。人员资料默认只在本地读取。`);
+        } catch (e) {
+          setting.setDesc(`读取失败：${e.message || e}`);
+        }
+      });
+
+    createPathSetting("学习卡片文件夹", "用于保存概念、机制、案例、QA、追问和观点卡片。", this.plugin.settings.learningCardsFolder || DEFAULT_SETTINGS.learningCardsFolder, "LexVoice/学习卡片",
+      async v => { this.plugin.settings.learningCardsFolder = v || DEFAULT_SETTINGS.learningCardsFolder; },
+      async setting => {
+        const count = countMarkdownInFolder(this.plugin.settings.learningCardsFolder || DEFAULT_SETTINGS.learningCardsFolder);
+        setting.setDesc(`当前 ${count} 张学习卡片。卡片负责复用，原始依据仍回链到纪要。`);
+      });
+
+    createPathSetting("待办卡片文件夹", "用于保存从纪要中确认后的行动项卡片。", this.plugin.settings.todoCardsFolder || DEFAULT_SETTINGS.todoCardsFolder, "LexVoice/待办卡片",
+      async v => { this.plugin.settings.todoCardsFolder = v || DEFAULT_SETTINGS.todoCardsFolder; },
+      async setting => {
+        const count = countMarkdownInFolder(this.plugin.settings.todoCardsFolder || DEFAULT_SETTINGS.todoCardsFolder);
+        setting.setDesc(`当前 ${count} 张待办卡片。待办卡片适合跟踪跨会议、跨项目的行动项。`);
+      });
+
+    createPathSetting("视图文件夹", "保存 LexVoice 生成的知识墙和辅助 Base。", this.plugin.settings.lexVoiceBasesFolder || DEFAULT_SETTINGS.lexVoiceBasesFolder, "LexVoice/视图",
+      async v => { this.plugin.settings.lexVoiceBasesFolder = v || DEFAULT_SETTINGS.lexVoiceBasesFolder; });
+
+    new obsidian.Setting(c).setName("浏览与检索").setHeading();
+    c.createDiv({ cls: "setting-item-description lexvoice-section-hint" })
+      .setText("学习卡片墙、概念墙和待办墙是主要浏览入口；Base 保留为明细筛选和人员资料表格，不作为主功能呈现。");
+
+    new obsidian.Setting(c).setName("对象墙")
+      .setDesc("打开或创建对应的 Markdown 墙面视图。墙面样式由 LexVoice 插件内置 CSS 提供。")
+      .addButton(b => b.setButtonText("学习卡片墙").setCta().onClick(() => this.plugin.openLearningWall("learning")))
+      .addButton(b => b.setButtonText("概念墙").onClick(() => this.plugin.openLearningWall("concept")))
+      .addButton(b => b.setButtonText("待办墙").onClick(() => this.plugin.openTodoWall()));
+
+    new obsidian.Setting(c).setName("明细视图")
+      .setDesc("用于筛选、核对和批量浏览；保持接近 Obsidian Base 原生样式，降低主题冲突。")
+      .addButton(b => b.setButtonText("人员资料 Base").onClick(() => this.plugin.openPeopleBase()))
+      .addButton(b => b.setButtonText("纪要明细 Base").onClick(() => this.plugin.openLexVoiceDetailBase()))
+      .addButton(b => b.setButtonText("补齐 Base").onClick(async () => {
+        try {
+          const r = await this.plugin.createLexVoiceBases({ overwrite: false });
+          new obsidian.Notice(`视图创建完成：新建 ${r.created} 个，跳过 ${r.skipped} 个`);
+        } catch (e) {
+          console.error(e);
+          new obsidian.Notice(`创建失败：${e.message || e}`);
+        }
+      }));
+
+    new obsidian.Setting(c).setName("对象维护").setHeading();
+    new obsidian.Setting(c).setName("ASR 热词表")
+      .setDesc("打开热词表进行人工维护。热词只用于提高转写时的专有名词识别，不承载人员关系。")
+      .addButton(b => b.setButtonText("打开/创建").onClick(async () => {
+        const path = this.plugin.settings.vocabularyFile;
+        if (!path) { new obsidian.Notice("请先填写文件路径"); return; }
+        const norm = obsidian.normalizePath(path);
+        let file = this.plugin.app.vault.getAbstractFileByPath(norm);
+        if (!(file instanceof obsidian.TFile)) {
+          const folderPath = norm.includes("/") ? norm.slice(0, norm.lastIndexOf("/")) : "";
+          if (folderPath) await this.plugin.ensureFolder(folderPath);
+          file = await this.plugin.app.vault.create(norm, formatVocabularyMarkdown([], this.plugin.settings.industryProfile));
+          new obsidian.Notice(`已创建：${norm}`);
+        }
+        if (file instanceof obsidian.TFile) {
+          const content = await this.plugin.app.vault.cachedRead(file);
+          if (!isStructuredVocabularyMarkdown(content)) {
+            await this.plugin.app.vault.modify(file, formatVocabularyMarkdown(parseVocabularyGroups(content), this.plugin.settings.industryProfile));
+            new obsidian.Notice("已整理为分区热词表");
+          }
+          await refreshVocabStatus(vocabPathSetting);
+          await this.plugin.app.workspace.getLeaf(false).openFile(file);
+        }
+      }));
+
+    const vocabScanCount = countKnowledgeExtractionHistory(this.plugin.settings, "vocabulary");
+    const peopleScanCount = countKnowledgeExtractionHistory(this.plugin.settings, "people");
+    new obsidian.Setting(c).setName("纪要扫描记录")
+      .setDesc(`ASR 热词已扫描 ${vocabScanCount} 篇；人员建议已扫描 ${peopleScanCount} 篇。清空记录后，修改过或已存在的纪要可重新进入扫描。`)
+      .addButton(b => b.setButtonText("清空热词记录").setDisabled(!vocabScanCount).onClick(async () => {
+        this.plugin.clearKnowledgeExtractionHistory("vocabulary");
+        await this.plugin.saveSettings();
+        new obsidian.Notice("已清空 ASR 热词扫描记录");
+        this.display();
+      }))
+      .addButton(b => b.setButtonText("清空人员记录").setDisabled(!peopleScanCount).onClick(async () => {
+        this.plugin.clearKnowledgeExtractionHistory("people");
+        await this.plugin.saveSettings();
+        new obsidian.Notice("已清空人员建议扫描记录");
+        this.display();
+      }));
+
+    new obsidian.Setting(c).setName("隐私与上下文").setHeading();
     const transcribeProvider = resolveTranscribeProvider(this.plugin);
     const asrScope = isLocalServiceEndpoint(transcribeProvider.endpoint) ? "当前转写服务识别为本地或局域网" : "当前转写服务识别为云端";
     const llmScope = isLocalLlmEndpoint(this.plugin.settings.llmEndpoint) ? "当前大模型服务识别为本地或局域网" : "当前大模型服务识别为云端";
-    const modeLabel = {
-      privacy: "隐私优先",
-      hotwords: "人名热词",
-      localFull: "本地增强",
-    }[normalizePeopleContextMode(this.plugin.settings.peopleContextMode)] || "隐私优先";
-    const consentText = hasPeopleHotwordsConsent(this.plugin.settings)
-      ? `已于 ${this.plugin.settings.peopleHotwordsConsentAt} 授权人名热词。`
-      : "尚未授权人名热词。";
-    new obsidian.Setting(c).setName("人员信息使用策略")
+    const modeLabel = { privacy: "隐私优先", hotwords: "人名热词", localFull: "本地增强" }[normalizePeopleContextMode(this.plugin.settings.peopleContextMode)] || "隐私优先";
+    const consentText = hasPeopleHotwordsConsent(this.plugin.settings) ? `已于 ${this.plugin.settings.peopleHotwordsConsentAt} 授权人名热词。` : "尚未授权人名热词。";
+
+    new obsidian.Setting(c).setName("人员资料使用策略")
       .setDesc(`${modeLabel}。${asrScope}；${llmScope}。${consentText}`)
       .addDropdown(d => d
-        .addOption("privacy", "隐私优先：不发送人员库")
+        .addOption("privacy", "隐私优先：不发送人员资料")
         .addOption("hotwords", "人名热词：仅姓名/称呼，需授权")
         .addOption("localFull", "本地增强：仅本地服务使用完整人员上下文")
         .setValue(normalizePeopleContextMode(this.plugin.settings.peopleContextMode))
@@ -14254,10 +21577,7 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
             const ok = await new Promise(resolve => {
               new PeopleHotwordsConsentModal(this.app, (confirmed) => resolve(confirmed)).open();
             });
-            if (!ok) {
-              this.display();
-              return;
-            }
+            if (!ok) { this.display(); return; }
             this.plugin.settings.peopleHotwordsConsentAt = new Date().toISOString();
           }
           this.plugin.settings.peopleContextMode = next;
@@ -14268,173 +21588,11 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         .setDisabled(!hasPeopleHotwordsConsent(this.plugin.settings))
         .onClick(async () => {
           this.plugin.settings.peopleHotwordsConsentAt = "";
-          if (normalizePeopleContextMode(this.plugin.settings.peopleContextMode) === "hotwords") {
-            this.plugin.settings.peopleContextMode = "privacy";
-          }
+          if (normalizePeopleContextMode(this.plugin.settings.peopleContextMode) === "hotwords") this.plugin.settings.peopleContextMode = "privacy";
           await this.plugin.saveSettings();
           new obsidian.Notice("已撤销人名热词授权");
           this.display();
         }));
-
-    new obsidian.Setting(c).setName("领域词汇表").setHeading();
-    const vocabHint = c.createDiv({ cls: "setting-item-description lexvoice-section-hint" });
-    vocabHint.setText("默认保存为 LexVoice/词汇表.md。词汇表会作为 ASR 术语提示发送给当前转写服务；敏感人名、人员关系和长期组织信息应维护到人员信息表，默认仅本地读取。");
-
-    const vocabPathSetting = new obsidian.Setting(c).setName("词汇表文件路径")
-      .addText(t => t.setValue(this.plugin.settings.vocabularyFile || "")
-        .setPlaceholder("LexVoice/词汇表.md")
-        .onChange(async v => { this.plugin.settings.vocabularyFile = obsidian.normalizePath(v || DEFAULT_SETTINGS.vocabularyFile); await this.plugin.saveSettings(); await refreshStatus(); }));
-
-    const refreshStatus = async () => {
-      const path = this.plugin.settings.vocabularyFile;
-      if (!path) { vocabPathSetting.setDesc("当前未指定路径。"); return; }
-      const norm = obsidian.normalizePath(path);
-      const file = this.plugin.app.vault.getAbstractFileByPath(norm);
-      if (!(file instanceof obsidian.TFile)) {
-        vocabPathSetting.setDesc(`文件不存在，提取或打开时会自动创建。`);
-        return;
-      }
-      try {
-        const content = await this.plugin.app.vault.cachedRead(file);
-        const groups = parseVocabularyGroups(content);
-        vocabPathSetting.setDesc(`当前 ${countVocabularyGroups(groups)} 个词汇（${summarizeVocabularyGroups(groups)}），文件大小 ${(file.stat.size / 1024).toFixed(1)} KB。`);
-      } catch (e) {
-        vocabPathSetting.setDesc(`读取失败：${e.message || e}`);
-      }
-    };
-    refreshStatus();
-
-    new obsidian.Setting(c).setName("词汇表")
-      .addButton(b => b.setButtonText("打开/创建").onClick(async () => {
-        const path = this.plugin.settings.vocabularyFile;
-        if (!path) { new obsidian.Notice("请先填写文件路径"); return; }
-        const norm = obsidian.normalizePath(path);
-        let file = this.plugin.app.vault.getAbstractFileByPath(norm);
-        if (!(file instanceof obsidian.TFile)) {
-          const folderPath = norm.includes("/") ? norm.slice(0, norm.lastIndexOf("/")) : "";
-          if (folderPath) await this.plugin.ensureFolder(folderPath);
-          const stub = formatVocabularyMarkdown([], this.plugin.settings.industryProfile);
-          file = await this.plugin.app.vault.create(norm, stub);
-          new obsidian.Notice(`已创建：${norm}`);
-        }
-        if (file instanceof obsidian.TFile) {
-          const content = await this.plugin.app.vault.cachedRead(file);
-          if (!isStructuredVocabularyMarkdown(content)) {
-            await this.plugin.app.vault.modify(file, formatVocabularyMarkdown(parseVocabularyGroups(content), this.plugin.settings.industryProfile));
-            new obsidian.Notice("已整理为分区词汇表");
-          }
-        }
-        await this.plugin.app.workspace.getLeaf(false).openFile(file);
-      }))
-      .addButton(b => b.setButtonText("AI 扫描纪要库").setCta().onClick(async () => {
-        await this._extractVocabFromLibrary(refreshStatus);
-      }));
-
-    new obsidian.Setting(c).setName("人员信息表").setHeading();
-    const peopleHint = c.createDiv({ cls: "setting-item-description lexvoice-section-hint" });
-    peopleHint.setText("用于长期维护姓名、角色、常用称呼、组织关系和相关纪要。每个人员是一篇可编辑 Markdown，Base 只负责浏览和筛选；人员信息默认只在本地读取，不会自动发送给 ASR 或大模型。");
-
-    const peopleFolderSetting = new obsidian.Setting(c).setName("人员资料文件夹")
-      .addText(t => t.setValue(this.plugin.settings.peopleDirectoryFolder || DEFAULT_SETTINGS.peopleDirectoryFolder)
-        .setPlaceholder("LexVoice/人员")
-        .onChange(async v => { this.plugin.settings.peopleDirectoryFolder = obsidian.normalizePath(v || DEFAULT_SETTINGS.peopleDirectoryFolder); await this.plugin.saveSettings(); await refreshPeopleStatus(); }));
-
-    const refreshPeopleStatus = async () => {
-      try {
-        const people = await loadPeopleDirectory(this.plugin);
-        peopleFolderSetting.setDesc(`当前 ${people.length} 位人员。每个人员是一篇带 lexvoice/person 标签的 Markdown，可用 Base 统一管理。`);
-      } catch (e) {
-        peopleFolderSetting.setDesc(`读取失败：${e.message || e}`);
-      }
-    };
-    refreshPeopleStatus();
-
-    new obsidian.Setting(c).setName("人员库 Base 文件")
-      .addText(t => t.setValue(this.plugin.settings.peopleBaseFile || DEFAULT_SETTINGS.peopleBaseFile)
-        .setPlaceholder("LexVoice/人员库.base")
-        .onChange(async v => { this.plugin.settings.peopleBaseFile = obsidian.normalizePath(v || DEFAULT_SETTINGS.peopleBaseFile); await this.plugin.saveSettings(); }))
-      .addButton(b => b.setButtonText("打开/创建").onClick(async () => {
-        try {
-          const file = await this.plugin.ensurePeopleDirectoryFiles({ overwrite: false });
-          if (file instanceof obsidian.TFile) await this.plugin.app.workspace.getLeaf(false).openFile(file);
-          await refreshPeopleStatus();
-        } catch (e) {
-          console.error(e);
-          new obsidian.Notice(`创建人员库失败：${e.message || e}`);
-        }
-      }))
-      .addButton(b => b.setButtonText("AI 扫描纪要库").onClick(async () => {
-        await this.plugin.suggestPeopleDirectoryFromLibrary();
-      }));
-
-    const pendingPeopleSuggestions = normalizePeopleSuggestionCache(this.plugin.settings.peopleSuggestionCache).pending;
-    new obsidian.Setting(c).setName("待确认人员建议")
-      .setDesc(`当前 ${pendingPeopleSuggestions.length} 条。AI 扫描得到的建议会先暂存在这里，保存、忽略或清空后才会移除。`)
-      .addButton(b => b.setButtonText("查看建议")
-        .setDisabled(!pendingPeopleSuggestions.length)
-        .onClick(async () => {
-          await this.plugin.openCachedPeopleDirectorySuggestions();
-          this.display();
-        }))
-      .addButton(b => b.setButtonText("清空建议")
-        .setDisabled(!pendingPeopleSuggestions.length)
-        .onClick(async () => {
-          if (!confirm("清空待确认人员建议？这不会删除人员资料，也不会修改纪要。")) return;
-          this.plugin.clearPeopleSuggestionCache();
-          await this.plugin.saveSettings();
-          new obsidian.Notice("已清空待确认人员建议");
-          this.display();
-        }));
-
-    const ignoredPeopleSuggestions = normalizePeopleSuggestionIgnores(this.plugin.settings.peopleSuggestionIgnores);
-    new obsidian.Setting(c).setName("已忽略的人员建议")
-      .setDesc(`当前 ${ignoredPeopleSuggestions.length} 条。可查看、恢复到待确认，或直接编辑后保存进人员库。`)
-      .addButton(b => b.setButtonText("查看已忽略")
-        .setDisabled(!ignoredPeopleSuggestions.length)
-        .onClick(async () => {
-          await this.plugin.openIgnoredPeopleDirectorySuggestions();
-          this.display();
-        }))
-      .addButton(b => b.setButtonText("清空忽略")
-        .setDisabled(!ignoredPeopleSuggestions.length)
-        .onClick(async () => {
-          this.plugin.settings.peopleSuggestionIgnores = [];
-          await this.plugin.saveSettings();
-          new obsidian.Notice("已清空人员建议忽略列表");
-          this.display();
-        }));
-
-    const vocabScanCount = countKnowledgeExtractionHistory(this.plugin.settings, "vocabulary");
-    const peopleScanCount = countKnowledgeExtractionHistory(this.plugin.settings, "people");
-    new obsidian.Setting(c).setName("纪要库扫描记录")
-      .setDesc(`词汇表已扫描 ${vocabScanCount} 篇；人员信息表已扫描 ${peopleScanCount} 篇。记录用于跳过未修改过的纪要，不影响原始笔记。`)
-      .addButton(b => b.setButtonText("清空词汇扫描").setDisabled(!vocabScanCount).onClick(async () => {
-        this.plugin.clearKnowledgeExtractionHistory("vocabulary");
-        await this.plugin.saveSettings();
-        new obsidian.Notice("已清空词汇表扫描记录");
-        this.display();
-      }))
-      .addButton(b => b.setButtonText("清空人员扫描").setDisabled(!peopleScanCount).onClick(async () => {
-        this.plugin.clearKnowledgeExtractionHistory("people");
-        await this.plugin.saveSettings();
-        new obsidian.Notice("已清空人员信息扫描记录");
-        this.display();
-      }));
-  }
-
-  async _extractVocab(merge, refreshStatus) {
-    if (!this.plugin.settings.llmApiKey && !isLocalLlmEndpoint(this.plugin.settings.llmEndpoint)) {
-      new obsidian.Notice("请先配置大模型服务");
-      return;
-    }
-    try {
-      const list = await this.plugin.extractVocabulary(merge);
-      await refreshStatus();
-      new obsidian.Notice(`${merge ? "追加" : "替换"} ${list.length} 个词汇`);
-    } catch (e) {
-      console.error(e);
-      new obsidian.Notice(`提取失败：${e.message || e}`);
-    }
   }
 
   async _extractVocabFromLibrary(refreshStatus) {
@@ -14448,7 +21606,7 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       if (result.processed) {
         const rest = result.remaining ? `，还有 ${result.remaining} 篇待下次扫描` : "";
         const failed = result.failed ? `，失败 ${result.failed}` : "";
-        new obsidian.Notice(`词汇表扫描完成：处理 ${result.processed} 篇，提取 ${result.added} 个候选词${failed}${rest}`);
+        new obsidian.Notice(`ASR 热词扫描完成：处理 ${result.processed} 篇，提取 ${result.added} 个候选词${failed}${rest}`);
       }
     } catch (e) {
       console.error(e);
@@ -14568,7 +21726,7 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     new obsidian.Setting(c).setName("设备与诊断").setHeading();
 
     new obsidian.Setting(c).setName("音频设备检测")
-      .setDesc("检测麦克风、电脑音频输入是否就位。录制 B 站客户端、浏览器视频、课程或会议对方声音前建议先检查。")
+      .setDesc("检测麦克风、电脑音频输入是否就位。录制 B 站客户端、浏览器视频、课程或会议对方声音前建议先检查；如果录音中电平条不动，优先检查这里。")
       .addButton(b => b.setButtonText("检测").onClick(async () => {
         await this.runAudioDiagnostic();
       }))
@@ -14627,60 +21785,6 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     new obsidian.Setting(c).setName("清理空白短录音")
       .setDesc("扫描转写纪要文件夹，将时长不超过 10 秒且没有有效转写文本的 LexVoice 条目移入系统废纸篓，并同步处理其引用的录音文件。")
       .addButton(b => b.setButtonText("扫描并清理").setWarning().onClick(() => this.plugin.cleanupEmptyShortRecordings()));
-
-    // ---- 视图（Bases）----
-    new obsidian.Setting(c).setName("筛选视图").setHeading();
-    const viewsHint = c.createDiv({ cls: "setting-item-description lexvoice-section-hint" });
-    viewsHint.setText("LexVoice 可自动创建 .base 文件，用于按模式和使用场景筛选纪要。视图基于 frontmatter 的 mode 和 tags 字段生成，保存目录可自行修改。");
-
-    new obsidian.Setting(c).setName("视图 Base 文件夹")
-      .setDesc("用于保存 LexVoice 自动生成的筛选视图，例如按模式、按场景查看纪要。")
-      .addText(t => t.setValue(this.plugin.settings.lexVoiceBasesFolder || DEFAULT_SETTINGS.lexVoiceBasesFolder)
-        .setPlaceholder("LexVoice/视图")
-        .onChange(async v => {
-          this.plugin.settings.lexVoiceBasesFolder = obsidian.normalizePath(v || DEFAULT_SETTINGS.lexVoiceBasesFolder);
-          await this.plugin.saveSettings();
-        }));
-
-    new obsidian.Setting(c).setName("创建视图文件")
-      .setDesc("已存在的 .base 文件不会被覆盖。可在 Obsidian 任意位置打开查看。")
-      .addButton(b => b.setButtonText("创建").setCta().onClick(async () => {
-        try {
-          const r = await this.plugin.createLexVoiceBases({ overwrite: false });
-          new obsidian.Notice(`视图创建完成：新建 ${r.created} 个，跳过 ${r.skipped} 个`);
-        } catch (e) {
-          console.error(e);
-          new obsidian.Notice(`创建失败：${e.message || e}`);
-        }
-      }))
-      .addButton(b => b.setButtonText("强制重写").setWarning().onClick(async () => {
-        if (!confirm("将覆盖所有 LexVoice 视图文件，包括已有自定义视图。继续吗？")) return;
-        try {
-          const r = await this.plugin.createLexVoiceBases({ overwrite: true });
-          new obsidian.Notice(`视图重写完成：${r.created + r.updated} 个`);
-        } catch (e) {
-          console.error(e);
-          new obsidian.Notice(`重写失败：${e.message || e}`);
-        }
-      }));
-
-    new obsidian.Setting(c).setName("迁移历史笔记")
-      .setDesc("扫描笔记文件夹，为没有 frontmatter 的老纪要补全 mode/日期/主题/tags 等字段。已有 mode 字段的笔记跳过。这样它们才会出现在 .base 视图里。")
-      .addButton(b => b.setButtonText("扫描并迁移").setCta().onClick(async () => {
-        const folder = this.plugin.settings.mdFolder || "LexVoice/转写纪要";
-        if (!confirm(`将扫描「${folder}」下所有 .md 文件，为缺失 frontmatter 的老纪要补全字段。\n\n建议提前备份 vault。继续吗？`)) return;
-        try {
-          const r = await this.plugin.migrateLegacyNotes();
-          const msg = `迁移完成：补全 ${r.migrated} / 跳过 ${r.skipped}（已有 mode）/ 无法识别模式 ${r.noMode} / 失败 ${r.failed}`;
-          new obsidian.Notice(msg, 10000);
-          if (r.noMode > 0) {
-            new obsidian.Notice(`提示：${r.noMode} 个文件无法识别模式，可手动加 frontmatter 后再迁移。`, 8000);
-          }
-        } catch (e) {
-          console.error(e);
-          new obsidian.Notice(`迁移失败：${e.message || e}`, 8000);
-        }
-      }));
 
     // ---- 失败重试 ----
     new obsidian.Setting(c).setName("失败重试").setHeading();
@@ -14805,12 +21909,12 @@ class PeopleHotwordsConsentModal extends obsidian.Modal {
     contentEl.createEl("h2", { text: "启用人名热词前请确认" });
     contentEl.createDiv({
       cls: "setting-item-description",
-      text: "启用后，LexVoice 会从人员信息表读取姓名和常用称呼，并把这些人名热词随转写或 AI 整理请求发送到当前配置的 ASR / LLM 服务，用于提升人名识别和称呼对齐准确率。",
+      text: "启用后，LexVoice 会从人员资料读取姓名和常用称呼，并把这些人名热词随转写或 AI 整理请求发送到当前配置的 ASR / LLM 服务，用于提升人名识别和称呼对齐准确率。",
     });
     const list = contentEl.createEl("ul", { cls: "lexvoice-consent-list" });
     list.createEl("li", { text: "只发送姓名与常用称呼，不发送角色、组织、备注、来源或人员关系。" });
     list.createEl("li", { text: "如果 ASR 或 LLM 是云端服务，这些姓名与称呼会离开本地设备，受对应服务商的数据政策约束。" });
-    list.createEl("li", { text: "录音内容本身若包含人名，使用云端 ASR 时仍会被云端服务处理；本开关控制的是额外发送的人员库热词。" });
+    list.createEl("li", { text: "录音内容本身若包含人名，使用云端 ASR 时仍会被云端服务处理；本开关控制的是额外发送的人员资料热词。" });
     list.createEl("li", { text: "此授权会保存在本地设置中，直到用户撤销授权或切回隐私优先。" });
     list.createEl("li", { text: "涉密、隐私、客户资料、医疗、法务、人事等内容，建议使用「隐私优先」或「本地增强」。" });
     const actions = contentEl.createDiv({ cls: "modal-button-container" });
@@ -14841,20 +21945,50 @@ class PeopleDirectorySuggestionModal extends obsidian.Modal {
     }));
     this.rows = [];
   }
-  onOpen() {
+  async onOpen() {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: "AI 辅助补全人员信息表" });
+    contentEl.createEl("h2", { text: "AI 辅助补全人员资料" });
     contentEl.createDiv({
       cls: "setting-item-description",
       text: this.sourceFile
-        ? "LexVoice 只会发送当前笔记内容到已配置的大模型，用于生成候选人员建议；已有人员库仅在本地用于匹配和去重，不随请求发送。保存前需要确认姓名、称呼、角色和组织关系是否准确。"
+        ? "LexVoice 只会发送当前笔记内容到已配置的大模型，用于生成候选人员建议；已有人员资料仅在本地用于匹配和去重，不随请求发送。保存前需要确认姓名、称呼、角色和组织关系是否准确。"
         : this.options.fromIgnored
-          ? `这里是已忽略的 ${this.options.ignoredCount || this.suggestions.length} 条人员建议。误操作的建议可以先恢复到待确认，也可以直接修改后保存进人员库；保存后会自动移出忽略列表。`
+          ? `这里是已忽略的 ${this.options.ignoredCount || this.suggestions.length} 条人员建议。误操作的建议可以先恢复到待确认，也可以直接修改后保存进人员资料；保存后会自动移出忽略列表。`
         : this.options.fromCache
           ? `这里是上次扫描后尚未处理的 ${this.options.cachedCount || this.suggestions.length} 条人员建议。保存、忽略或清空前，它们会保留在本地设置中，方便稍后继续处理。`
-        : `LexVoice 已扫描转写纪要库中的 ${this.options.scannedCount || 0} 篇笔记，只显示需要确认的人员建议。已有人员库仅在本地用于匹配和去重，不随请求发送。${this.options.remainingCount ? `本轮后仍有 ${this.options.remainingCount} 篇待扫描。` : ""}`,
+        : `LexVoice 已扫描转写纪要库中的 ${this.options.scannedCount || 0} 篇笔记，只显示需要确认的人员建议。已有人员资料仅在本地用于匹配和去重，不随请求发送。${this.options.remainingCount ? `本轮后仍有 ${this.options.remainingCount} 篇待扫描。` : ""}`,
     });
+    contentEl.createDiv({
+      cls: "setting-item-description lexvoice-people-suggestion-guide",
+      text: "如果这位人员已经在人员库里，请先在每条建议的“保存到人员资料”里选择对应人员笔记；下方字段只是本次要补充进去的信息，不需要手动改名来合并。",
+    });
+    let peopleEntries = [];
+    try {
+      peopleEntries = await loadPeopleDirectory(this.plugin);
+    } catch (e) {
+      console.warn("[LexVoice] load people directory for suggestion modal failed", e);
+    }
+    const peopleByPath = new Map((peopleEntries || []).map(person => [obsidian.normalizePath(person.path || ""), person]));
+    const getPathBasename = (path) => String(path || "").split("/").pop().replace(/\.md$/i, "");
+    const getPersonOptionLabel = (person) => {
+      const main = String((person && person.name) || getPathBasename(person && person.path) || "未命名人员").trim();
+      const parts = [
+        main,
+        person && person.role,
+        person && person.organization,
+      ].map(value => String(value || "").trim()).filter(Boolean);
+      return parts.join(" · ");
+    };
+    const getPersonHint = (person) => {
+      if (!person) return "";
+      const aliases = (person.aliases || []).filter(Boolean).slice(0, 4).join("、");
+      return [
+        person.role ? `角色：${person.role}` : "",
+        person.organization ? `组织：${person.organization}` : "",
+        aliases ? `常用称呼：${aliases}` : "",
+      ].filter(Boolean).join(" · ");
+    };
 
     const list = contentEl.createDiv({ cls: "lexvoice-people-suggestion-list" });
     this.rows = [];
@@ -14863,9 +21997,9 @@ class PeopleDirectorySuggestionModal extends obsidian.Modal {
       const top = box.createDiv({ cls: "lexvoice-people-suggestion-top" });
       const checkbox = top.createEl("input", { type: "checkbox" });
       checkbox.checked = item.selected !== false;
-      top.createSpan({ text: this.options.fromIgnored ? "已忽略" : (item.matchPath ? "更新已有人员" : "新建人员"), cls: "lexvoice-people-suggestion-badge" });
+      const badge = top.createSpan({ text: this.options.fromIgnored ? "已忽略" : (item.matchPath ? "更新已有人员" : "新建人员"), cls: "lexvoice-people-suggestion-badge" });
       top.createSpan({ text: `置信度：${item.confidence || "中"}`, cls: "setting-item-description" });
-      if (item.matchPath) top.createSpan({ text: ` · ${item.matchPath}`, cls: "setting-item-description" });
+      const matchMeta = top.createSpan({ text: item.matchPath ? ` · ${item.matchPath}` : "", cls: "setting-item-description" });
       if (!this.sourceFile && item.sourceBasename) top.createSpan({ text: ` · 来源：${item.sourceBasename}`, cls: "setting-item-description" });
       let rowRef = null;
       const ignoreBtn = top.createEl("button", { text: this.options.fromIgnored ? "恢复待确认" : "忽略" });
@@ -14904,6 +22038,40 @@ class PeopleDirectorySuggestionModal extends obsidian.Modal {
         };
       }
 
+      const targetBox = box.createDiv({ cls: "lexvoice-people-suggestion-target" });
+      const targetLabel = targetBox.createDiv({ cls: "lexvoice-people-suggestion-target-label", text: "保存到人员资料" });
+      const targetSelect = targetBox.createEl("select", { cls: "dropdown lexvoice-people-suggestion-target-select" });
+      targetSelect.createEl("option", { value: "", text: "新建人员资料" });
+      const currentPath = obsidian.normalizePath(item.matchPath || "");
+      if (currentPath && !peopleByPath.has(currentPath)) {
+        targetSelect.createEl("option", { value: currentPath, text: `${getPathBasename(currentPath)}（当前匹配）` });
+      }
+      for (const person of peopleEntries || []) {
+        const path = obsidian.normalizePath(person.path || "");
+        if (!path) continue;
+        targetSelect.createEl("option", { value: path, text: getPersonOptionLabel(person) });
+      }
+      targetSelect.value = currentPath || "";
+      const targetHint = targetBox.createDiv({ cls: "lexvoice-people-suggestion-target-hint" });
+      const updateTargetUi = () => {
+        const path = obsidian.normalizePath(targetSelect.value || "");
+        item.matchPath = path;
+        if (rowRef) rowRef.item.matchPath = path;
+        const person = path ? peopleByPath.get(path) : null;
+        if (this.options.fromIgnored) badge.setText(path ? "已忽略 · 保存到已有人员" : "已忽略 · 新建");
+        else badge.setText(path ? "保存到已有人员" : "新建人员");
+        matchMeta.setText(path ? ` · ${path}` : "");
+        if (path && person) {
+          targetHint.setText(getPersonHint(person) || "将把本条建议补充到选中的人员笔记。");
+        } else if (path) {
+          targetHint.setText("将把本条建议补充到当前匹配的人员笔记。");
+        } else {
+          targetHint.setText("将使用候选姓名新建一份人员资料。");
+        }
+      };
+      targetSelect.addEventListener("change", updateTargetUi);
+      updateTargetUi();
+
       let nameInput;
       let aliasInput;
       let roleInput;
@@ -14935,13 +22103,13 @@ class PeopleDirectorySuggestionModal extends obsidian.Modal {
     const actions = contentEl.createDiv({ cls: "modal-button-container" });
     const cancelBtn = actions.createEl("button", { text: "取消" });
     cancelBtn.onclick = () => this.close();
-    const openBtn = actions.createEl("button", { text: "打开人员库" });
+    const openBtn = actions.createEl("button", { text: "打开人员资料" });
     openBtn.onclick = async () => {
       try {
         const file = await this.plugin.ensurePeopleDirectoryFiles({ overwrite: false });
         if (file instanceof obsidian.TFile) await this.plugin.app.workspace.getLeaf(false).openFile(file);
       } catch (e) {
-        new obsidian.Notice(`打开人员库失败：${(e && e.message) || e}`);
+        new obsidian.Notice(`打开人员资料失败：${(e && e.message) || e}`);
       }
     };
     const saveBtn = actions.createEl("button", { text: "保存选中" });
@@ -14994,7 +22162,7 @@ class PeopleDirectorySuggestionModal extends obsidian.Modal {
         if (this.options.fromIgnored) this.plugin.removePeopleDirectorySuggestionIgnores(selected);
         else this.plugin.removeCachedPeopleSuggestions(selected);
         await this.plugin.saveSettings();
-        new obsidian.Notice(`人员信息表已更新：新建 ${created}，更新 ${updated}`);
+        new obsidian.Notice(`人员资料已更新：新建 ${created}，更新 ${updated}`);
         this.close();
       } catch (e) {
         console.error("[LexVoice] apply people suggestions failed", e);
@@ -15228,6 +22396,13 @@ const RECRUIT_CONTEXT_FLOW_COPY = {
   import: {
     title: "导入音频前注入 JD / 简历",
     desc: "这批音频将按招聘评估整理。开始处理前可注入 JD、简历和候选人信息，让 AI 按岗位要求评估，而不是按通用 HR 框架泛评。",
+    skipText: "跳过注入，继续导入",
+    primaryText: "保存并开始处理",
+    draftText: "保存草稿",
+  },
+  "text-import": {
+    title: "导入文本前注入 JD / 简历",
+    desc: "这份速录稿或已有纪要将按招聘评估重新整理。开始处理前可注入 JD、简历和候选人信息，让 AI 把文本证据和岗位要求对齐，而不是只做普通纪要。",
     skipText: "跳过注入，继续导入",
     primaryText: "保存并开始处理",
     draftText: "保存草稿",
@@ -15757,6 +22932,200 @@ class PromptTemplateModal extends obsidian.Modal {
   }
 }
 
+class ImportTextModal extends obsidian.Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+    this.selected = new Set();
+    this.files = [];
+    this.fileCheckboxes = new Map();
+    this.processBtn = null;
+    this.selectionText = null;
+    this.modeSelect = null;
+    this.modeHint = null;
+    this.searchInput = null;
+    this.listEl = null;
+    this.selectedMode = getEffectivePolishMode(plugin.settings, plugin.settings.polishMode, "meeting");
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("lexvoice-import-modal");
+    this.selected.clear();
+    this.fileCheckboxes = new Map();
+    contentEl.createEl("h2", { text: "导入文本" });
+    contentEl.createEl("p", { cls: "lexvoice-import-desc" })
+      .setText("选择已有 Markdown、速录稿或文本纪要。LexVoice 不会调用语音转写服务，会直接走 API 页的「AI 整理服务」LLM 链路并按当前模板结构化整理。选择招聘评估时，会先弹出 JD / 简历 / 候选人信息窗口。");
+
+    this.renderModeControl(contentEl);
+
+    this.files = this.collectTextFiles();
+    const toolbar = contentEl.createDiv({ cls: "lexvoice-import-toolbar" });
+    this.searchInput = toolbar.createEl("input", {
+      type: "text",
+      cls: "lexvoice-import-search",
+      attr: { placeholder: "搜索文件名或路径" },
+    });
+    this.searchInput.addEventListener("input", () => this.renderFileList());
+    const activeFile = this.app.workspace.getActiveFile();
+    const currentBtn = toolbar.createEl("button", { text: "选择当前文档" });
+    currentBtn.disabled = !(activeFile instanceof obsidian.TFile && TEXT_IMPORT_EXT.has(String(activeFile.extension || "").toLowerCase()));
+    currentBtn.onclick = () => {
+      if (!(activeFile instanceof obsidian.TFile)) return;
+      this.selected.add(activeFile.path);
+      this.renderFileList();
+      this.updateButton();
+    };
+    const clearBtn = toolbar.createEl("button", { text: "清空选择" });
+    clearBtn.onclick = () => {
+      this.selected.clear();
+      this.syncCheckboxes();
+      this.updateButton();
+    };
+
+    this.listEl = contentEl.createDiv({ cls: "lexvoice-import-list" });
+    this.renderFileList();
+
+    const actions = contentEl.createDiv({ cls: "lexvoice-import-actions" });
+    this.processBtn = actions.createEl("button", { text: "开始处理（0 个文件）", cls: "mod-cta" });
+    this.processBtn.disabled = true;
+    this.processBtn.onclick = () => this.process();
+    this.selectionText = actions.createSpan({ cls: "lexvoice-import-selection", text: "未选择文本" });
+    const cancelBtn = actions.createEl("button", { text: "取消" });
+    cancelBtn.onclick = () => this.close();
+    this.updateButton();
+  }
+
+  collectTextFiles() {
+    return this.app.vault.getFiles()
+      .filter((file) => file instanceof obsidian.TFile && TEXT_IMPORT_EXT.has(String(file.extension || "").toLowerCase()))
+      .filter((file) => !obsidian.normalizePath(file.path).startsWith(".obsidian/"))
+      .sort((a, b) => b.stat.mtime - a.stat.mtime || a.path.localeCompare(b.path));
+  }
+
+  renderModeControl(parent) {
+    this.selectedMode = getEffectivePolishMode(this.plugin.settings, this.selectedMode || this.plugin.settings.polishMode, "meeting");
+    const box = parent.createDiv({ cls: "lexvoice-import-mode" });
+    const label = box.createDiv({ cls: "lexvoice-import-mode-label" });
+    label.createDiv({ cls: "lexvoice-import-mode-title", text: "整理方式" });
+    this.modeHint = label.createDiv({ cls: "lexvoice-import-mode-hint" });
+    this.modeSelect = box.createEl("select", { cls: "dropdown lexvoice-import-mode-select" });
+    for (const [key, name] of getVisibleModeEntries(this.plugin.settings, false)) {
+      this.modeSelect.createEl("option", { value: key, text: name });
+    }
+    this.modeSelect.value = this.selectedMode;
+    this.modeSelect.onchange = () => {
+      this.selectedMode = getEffectivePolishMode(this.plugin.settings, this.modeSelect.value, "meeting");
+      this.updateModeHint();
+    };
+    this.updateModeHint();
+  }
+
+  updateModeHint() {
+    if (!this.modeHint) return;
+    const meta = getModeMeta(this.plugin.settings, this.selectedMode);
+    if (this.selectedMode === "recruit") {
+      this.modeHint.setText("招聘评估会在开始整理前弹出 JD / 简历 / 候选人信息窗口，文本内容会和岗位上下文一起进入整理链路。");
+      this.modeHint.addClass("is-recruit");
+    } else {
+      this.modeHint.removeClass("is-recruit");
+      this.modeHint.setText((meta.goal || "用于生成结构化纪要。") + " 本次只处理文本，不调用语音转写服务。");
+    }
+  }
+
+  renderFileList() {
+    if (!this.listEl) return;
+    this.listEl.empty();
+    this.fileCheckboxes = new Map();
+    const q = String(this.searchInput && this.searchInput.value || "").trim().toLowerCase();
+    const matched = this.files.filter((file) => {
+      if (!q) return true;
+      return String(file.path || "").toLowerCase().includes(q) || String(file.basename || "").toLowerCase().includes(q);
+    });
+    if (!matched.length) {
+      this.listEl.createDiv({ cls: "lexvoice-import-empty", text: q ? "没有匹配的文本文件" : "库中没有可导入的 Markdown / 文本文件" });
+      return;
+    }
+    const shown = matched.slice(0, 240);
+    this.listEl.createDiv({ cls: "lexvoice-import-section-title", text: `文本文件${matched.length > shown.length ? `（显示最近 ${shown.length} / ${matched.length} 个）` : ""}` });
+    shown.forEach((file, index) => this.renderSingleFile(this.listEl, file, index));
+    if (matched.length > shown.length) {
+      this.listEl.createDiv({ cls: "lexvoice-import-warn", text: "文件较多，可输入文件名或路径继续筛选。" });
+    }
+    this.syncCheckboxes();
+  }
+
+  formatFileMeta(file) {
+    const size = Number(file.stat && file.stat.size || 0);
+    const sizeText = size >= 1024 * 1024 ? (size / 1024 / 1024).toFixed(1) + " MB" : Math.max(0, Math.round(size / 1024)) + " KB";
+    const time = window.moment(file.stat.mtime).format("MM-DD HH:mm");
+    return `${sizeText} · ${time} · ${file.path}`;
+  }
+
+  renderSingleFile(parent, file, index = 0) {
+    const row = parent.createDiv({ cls: "lexvoice-import-row" });
+    const id = makeImportTextCheckboxId(file.path, index);
+    const cb = row.createEl("input", { type: "checkbox", attr: { id } });
+    const label = row.createEl("label", { attr: { for: id }, cls: "lexvoice-import-label" });
+    label.createEl("div", { cls: "lexvoice-import-name", text: file.basename });
+    label.createEl("div", { cls: "lexvoice-import-meta", text: this.formatFileMeta(file) });
+    this.fileCheckboxes.set(file.path, cb);
+    cb.onchange = () => {
+      if (cb.checked) this.selected.add(file.path);
+      else this.selected.delete(file.path);
+      this.updateButton();
+    };
+  }
+
+  syncCheckboxes() {
+    for (const [path, cb] of this.fileCheckboxes.entries()) cb.checked = this.selected.has(path);
+  }
+
+  updateButton() {
+    const count = this.selected.size;
+    if (this.processBtn) {
+      this.processBtn.setText(`开始处理（${count} 个文件）`);
+      this.processBtn.disabled = count === 0;
+    }
+    if (this.selectionText) {
+      this.selectionText.setText(count ? "将按文件名升序合并为一份 LexVoice 纪要" : "未选择文本");
+    }
+  }
+
+  async process() {
+    const paths = Array.from(this.selected);
+    if (!paths.length) return;
+    const mode = getEffectivePolishMode(this.plugin.settings, this.selectedMode || this.plugin.settings.polishMode, "meeting");
+    if (this.processBtn) {
+      this.processBtn.disabled = true;
+      this.processBtn.setText("处理中…");
+    }
+    try {
+      this.close();
+      await this.plugin.importTextFiles(paths, mode);
+    } catch (e) {
+      console.error("[LexVoice] import text failed", e);
+      if (this.plugin && this.plugin.logDiagnostic) {
+        try {
+          await this.plugin.logDiagnostic("error", "text_import.failed", "导入文本整理失败", {
+            mode,
+            count: paths.length,
+            error: diagnosticError(e),
+          });
+        } catch (logError) {
+          console.warn("[LexVoice] import text diagnostic failed", logError);
+        }
+      }
+      new obsidian.Notice(`导入文本失败：${(e && e.message) || e}`, 8000);
+    }
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
 class ImportAudioModal extends obsidian.Modal {
   constructor(app, plugin) {
     super(app);
@@ -15774,6 +23143,7 @@ class ImportAudioModal extends obsidian.Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    contentEl.addClass("lexvoice-import-modal");
     this.selected.clear();
     this.groupCheckboxes = new Map();
     this.fileCheckboxes = new Map();

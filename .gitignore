@@ -21,6 +21,8 @@ LexVoice/
 node_modules/
 dist/
 build/
+main.js
+*.zip
 
 # Logs and OS files
 *.log
