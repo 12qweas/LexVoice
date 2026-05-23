@@ -1,5 +1,8 @@
 # LexVoice
 
+
+> English summary: LexVoice is an Obsidian desktop plugin for recording audio, transcribing speech, generating live outlines, reviewing meeting sediment candidates, and saving reusable Markdown objects such as todos, learning cards, people records, and ASR hotwords. It is not a hosted cloud service and does not include API keys; users configure their own speech-to-text and LLM providers.
+
 LexVoice 是一个 Obsidian 桌面端插件，做录音、转写、实时大纲和会议沉淀。
 
 它不是云服务，也不自带 API Key。你得接入自己的语音转写服务和大模型——把会议、访谈、课程、视频音频、个人口述这些东西整理成可回听、可复用、可沉淀的 Markdown。
