@@ -110,7 +110,14 @@
 
 /* idle: 主按钮用 Obsidian 红色家族 */
 .lexvoice-bubble.is-idle .lexvoice-bubble-main {
-  all: unset;
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  border: 0;
+  font: inherit;
+  background: transparent;
+  color: inherit;
+  text-decoration: none;
   width: var(--lexvoice-bubble-control-size);
   height: var(--lexvoice-bubble-control-size);
   flex: 0 0 var(--lexvoice-bubble-control-size);
@@ -197,7 +204,14 @@
 }
 
 .lexvoice-bubble-jump {
-  all: unset;
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  border: 0;
+  font: inherit;
+  background: transparent;
+  color: inherit;
+  text-decoration: none;
   width: var(--lexvoice-bubble-control-size);
   height: var(--lexvoice-bubble-control-size);
   flex: 0 0 var(--lexvoice-bubble-control-size);
@@ -265,7 +279,14 @@
 }
 
 .lexvoice-bubble-btn {
-  all: unset;
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  border: 0;
+  font: inherit;
+  background: transparent;
+  color: inherit;
+  text-decoration: none;
   width: var(--lexvoice-bubble-control-size);
   height: var(--lexvoice-bubble-control-size);
   flex: 0 0 var(--lexvoice-bubble-control-size);
@@ -652,7 +673,7 @@
 
 .lexvoice-outline-head {
   --lexvoice-outline-form-label-width: 76px;
-  --lexvoice-outline-form-column-gap: var(--size-4-2);
+  --lexvoice-outline-form-field-gap-x: var(--size-4-2);
   display: flex;
   flex-direction: column;
   gap: var(--size-4-3);
@@ -1691,25 +1712,27 @@
   border: 1px solid var(--background-modifier-border);
   border-radius: 999px;
   background: var(--background-secondary);
-  color: var(--text-muted) !important;
+  color: var(--text-muted);
   font-size: var(--font-ui-smaller);
   font-variant-numeric: tabular-nums;
-  text-decoration: none !important;
+  text-decoration: none;
   vertical-align: baseline;
 }
 
 .lexvoice-time-link::before {
   content: "";
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: currentColor;
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 8px solid currentColor;
+  border-radius: 0;
+  background: transparent;
   opacity: 0.55;
-  clip-path: polygon(24% 12%, 82% 50%, 24% 88%);
 }
 
 .lexvoice-time-link:hover {
-  color: var(--text-accent) !important;
+  color: var(--text-accent);
   border-color: var(--text-accent);
   background: var(--background-modifier-hover);
 }
@@ -1827,8 +1850,7 @@
   display: grid;
   grid-template-columns: var(--lexvoice-outline-form-label-width) minmax(0, 1fr);
   align-items: center;
-  column-gap: var(--lexvoice-outline-form-column-gap);
-  row-gap: var(--size-2-1);
+  gap: var(--size-2-1) var(--lexvoice-outline-form-field-gap-x);
 }
 
 .lexvoice-outline-control-label {
@@ -1847,7 +1869,7 @@
 
 .lexvoice-outline-head.is-idle .lexvoice-outline-actions,
 .lexvoice-outline-head.is-idle .lexvoice-outline-device-status {
-  margin-left: calc(var(--lexvoice-outline-form-label-width) + var(--lexvoice-outline-form-column-gap));
+  margin-left: calc(var(--lexvoice-outline-form-label-width) + var(--lexvoice-outline-form-field-gap-x));
 }
 
 .lexvoice-outline-head.is-idle .lexvoice-outline-actions {
@@ -1856,7 +1878,7 @@
 
 .lexvoice-outline-head.is-idle {
   --lexvoice-outline-form-label-width: 80px;
-  --lexvoice-outline-form-column-gap: 18px;
+  --lexvoice-outline-form-field-gap-x: 18px;
   gap: 14px;
   padding: 24px 10px 0;
   border: 0;
@@ -1917,9 +1939,8 @@
 
 .lexvoice-outline-head.is-idle .lexvoice-outline-control-row select.lexvoice-outline-select-control {
   min-height: 45px;
-  padding-left: 14px;
+  padding-left: 41px;
   padding-right: 36px;
-  text-indent: 27px;
   border-color: color-mix(in srgb, var(--background-modifier-border) 82%, var(--text-accent) 18%);
   border-radius: 11px;
   background-color: color-mix(in srgb, var(--background-primary) 96%, var(--background-secondary) 4%);
@@ -2045,7 +2066,7 @@
 }
 
 .lexvoice-outline-panel-tabs {
-  display: flex !important;
+  display: flex;
   align-items: flex-end;
   gap: 18px;
   min-height: 30px;
@@ -2054,12 +2075,7 @@
   border-bottom: 1px solid var(--background-modifier-border);
   background: transparent;
   overflow-x: auto;
-  scrollbar-width: none;
   flex: 0 0 auto;
-}
-
-.lexvoice-outline-panel-tabs::-webkit-scrollbar {
-  display: none;
 }
 
 .lexvoice-outline-panel-tabs button {
@@ -2472,11 +2488,6 @@
   gap: 0;
   min-width: 0;
   overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.lexvoice-sediment-pipeline::-webkit-scrollbar {
-  display: none;
 }
 
 .lexvoice-sediment-pipeline-node {
@@ -2484,10 +2495,10 @@
   gap: 8px;
   min-height: 36px;
   padding: 6px 14px 6px 8px;
-  border: 1.5px solid transparent !important;
+  border: 1.5px solid transparent;
   border-radius: 18px;
-  background: transparent !important;
-  box-shadow: none !important;
+  background: transparent;
+  box-shadow: none;
   cursor: pointer;
   opacity: 1;
   transition: opacity 0.15s ease, background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
@@ -2540,8 +2551,8 @@
 }
 
 .lexvoice-sediment-pipeline-node.is-current {
-  background: var(--background-primary) !important;
-  border-color: var(--lv-sediment-accent-strong) !important;
+  background: var(--background-primary);
+  border-color: var(--lv-sediment-accent-strong);
 }
 
 .lexvoice-sediment-pipeline-node.is-current .lexvoice-sediment-pipeline-circle {
@@ -2571,7 +2582,7 @@
 .lexvoice-sediment-pipeline-node.is-pending:hover,
 .lexvoice-sediment-pipeline-node.is-done:hover {
   opacity: 1;
-  background: var(--background-modifier-hover) !important;
+  background: var(--background-modifier-hover);
 }
 
 .lexvoice-sediment-pipeline-node.is-done {
@@ -2622,9 +2633,9 @@
 
 .lexvoice-sediment-rescan-button {
   padding: 0;
-  border: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   color: var(--lv-sediment-muted);
   font-size: 11px;
   cursor: pointer;
@@ -3014,11 +3025,11 @@
 
 /* 截止日 quickbar（按设计稿）：外层圆角容器 + 内部胶囊 preset */
 .lexvoice-todo-inline-panel.is-due {
-  margin-top: 8px !important;
-  padding: 8px 10px !important;
-  background: color-mix(in srgb, var(--background-secondary) 55%, transparent) !important;
-  border: 0.5px solid color-mix(in srgb, var(--background-modifier-border) 60%, transparent) !important;
-  border-radius: 14px !important;
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--background-secondary) 55%, transparent);
+  border: 0.5px solid color-mix(in srgb, var(--background-modifier-border) 60%, transparent);
+  border-radius: 14px;
 }
 .lexvoice-todo-inline-quickbar {
   display: flex;
@@ -3028,50 +3039,50 @@
   row-gap: 7px;
 }
 .lexvoice-todo-inline-preset {
-  font-size: var(--font-ui-smaller) !important;
-  padding: 4px 13px !important;
-  border: 0.5px solid var(--background-modifier-border) !important;
-  background: var(--background-primary) !important;
-  border-radius: 999px !important;
+  font-size: var(--font-ui-smaller);
+  padding: 4px 13px;
+  border: 0.5px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  border-radius: 999px;
   cursor: pointer;
-  color: var(--lv-sediment-text) !important;
-  font-family: inherit !important;
-  display: inline-flex !important;
+  color: var(--lv-sediment-text);
+  font-family: inherit;
+  display: inline-flex;
   align-items: center;
   gap: 5px;
-  line-height: 1.5 !important;
-  height: auto !important;
-  min-height: 0 !important;
-  box-shadow: none !important;
-  text-decoration: none !important;
-  text-shadow: none !important;
+  line-height: 1.5;
+  height: auto;
+  min-height: 0;
+  box-shadow: none;
+  text-decoration: none;
+  text-shadow: none;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
   font-weight: 500;
 }
 .lexvoice-todo-inline-preset:hover {
-  border-color: color-mix(in srgb, var(--interactive-accent) 32%, var(--background-modifier-border)) !important;
-  color: var(--lv-sediment-text) !important;
-  background: var(--background-primary) !important;
-  box-shadow: none !important;
+  border-color: color-mix(in srgb, var(--interactive-accent) 32%, var(--background-modifier-border));
+  color: var(--lv-sediment-text);
+  background: var(--background-primary);
+  box-shadow: none;
 }
 .lexvoice-todo-inline-preset.is-active {
-  background: color-mix(in srgb, var(--interactive-accent) 11%, var(--background-primary)) !important;
-  border-color: color-mix(in srgb, var(--interactive-accent) 58%, var(--background-modifier-border)) !important;
-  color: var(--text-accent) !important;
+  background: color-mix(in srgb, var(--interactive-accent) 11%, var(--background-primary));
+  border-color: color-mix(in srgb, var(--interactive-accent) 58%, var(--background-modifier-border));
+  color: var(--text-accent);
   font-weight: 560;
 }
 .lexvoice-todo-inline-preset.is-clear {
   margin-left: auto;
-  color: var(--lv-sediment-faint) !important;
-  background: transparent !important;
-  border-color: transparent !important;
-  font-size: 11px !important;
-  padding: 4px 8px !important;
+  color: var(--lv-sediment-faint);
+  background: transparent;
+  border-color: transparent;
+  font-size: 11px;
+  padding: 4px 8px;
 }
 .lexvoice-todo-inline-preset.is-clear:hover {
-  color: var(--lv-sediment-muted) !important;
-  border-color: var(--background-modifier-border) !important;
-  background: var(--background-primary) !important;
+  color: var(--lv-sediment-muted);
+  border-color: var(--background-modifier-border);
+  background: var(--background-primary);
 }
 .lexvoice-todo-inline-preset-icon {
   display: inline-flex;
@@ -3085,14 +3096,14 @@
 }
 /* native date input：嵌在 pill 容器里展示 */
 .lexvoice-todo-inline-date {
-  background: var(--background-primary) !important;
-  border: 0.5px solid var(--background-modifier-border) !important;
-  border-radius: 999px !important;
-  padding: 4px 12px !important;
-  font-size: var(--font-ui-smaller) !important;
-  color: var(--lv-sediment-text) !important;
-  outline: none !important;
-  box-shadow: none !important;
+  background: var(--background-primary);
+  border: 0.5px solid var(--background-modifier-border);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: var(--font-ui-smaller);
+  color: var(--lv-sediment-text);
+  outline: none;
+  box-shadow: none;
 }
 .lexvoice-todo-inline-date {
   width: 100%;
@@ -3172,7 +3183,7 @@
   opacity: 0.6;
 }
 .lexvoice-todo-subtask-strip-del:hover {
-  opacity: 1 !important;
+  opacity: 1;
   color: var(--text-error, var(--lv-sediment-accent));
 }
 
@@ -3243,7 +3254,7 @@
   opacity: 0.6;
 }
 .lexvoice-todo-inline-subtask-del:hover {
-  opacity: 1 !important;
+  opacity: 1;
   color: var(--text-error, var(--lv-sediment-accent));
 }
 .lexvoice-todo-inline-subtask-add {
@@ -3344,9 +3355,9 @@
 .lexvoice-sediment-action,
 .lexvoice-sediment-text-button {
   padding: 0;
-  border: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   color: var(--lv-sediment-muted);
   font-size: var(--font-ui-smaller);
   cursor: pointer;
@@ -3423,10 +3434,10 @@
   flex: 0 0 14px;
   margin-top: 2px;
   padding: 0;
-  border: 1.2px solid var(--lv-sediment-faint) !important;
+  border: 1.2px solid var(--lv-sediment-faint);
   border-radius: 3px;
-  background: transparent !important;
-  box-shadow: none !important;
+  background: transparent;
+  box-shadow: none;
   cursor: pointer;
   position: relative;
 }
@@ -3437,8 +3448,8 @@
 
 .lexvoice-sediment-checkbox.is-checked,
 .lexvoice-sediment-checkbox.is-indeterminate {
-  border-color: var(--lv-sediment-accent-strong) !important;
-  background: var(--lv-sediment-accent-strong) !important;
+  border-color: var(--lv-sediment-accent-strong);
+  background: var(--lv-sediment-accent-strong);
 }
 
 .lexvoice-sediment-checkbox.is-checked::before {
@@ -3597,31 +3608,31 @@
   padding: 4px 12px;
   border-radius: var(--radius-s);
   font-size: var(--font-ui-smaller);
-  box-shadow: none !important;
+  box-shadow: none;
 }
 
 .lexvoice-sediment-button.is-primary {
   color: var(--text-on-accent);
-  background: var(--lv-sediment-accent-strong) !important;
+  background: var(--lv-sediment-accent-strong);
   border: 1px solid var(--lv-sediment-accent-strong);
 }
 
 .lexvoice-sediment-button.is-secondary {
   color: var(--lv-sediment-muted);
-  background: transparent !important;
+  background: transparent;
   border: 1px solid var(--lv-sediment-line);
-  box-shadow: none !important;
+  box-shadow: none;
 }
 
 .lexvoice-sediment-button.is-secondary:hover {
   color: var(--lv-sediment-accent);
-  background: var(--background-modifier-hover) !important;
+  background: var(--background-modifier-hover);
 }
 
 .lexvoice-sediment-button:hover {
   color: var(--text-on-accent);
   border-color: color-mix(in srgb, var(--interactive-accent) 48%, var(--background-modifier-border));
-  background: var(--lv-sediment-accent-hover) !important;
+  background: var(--lv-sediment-accent-hover);
 }
 
 .lexvoice-sediment-button:disabled,
@@ -3691,11 +3702,11 @@
   min-height: 28px;
   max-width: 136px;
   padding: 0 12px;
-  border: 1px solid var(--background-modifier-border) !important;
+  border: 1px solid var(--background-modifier-border);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--background-primary) 92%, transparent) !important;
+  background: color-mix(in srgb, var(--background-primary) 92%, transparent);
   color: var(--text-muted);
-  box-shadow: none !important;
+  box-shadow: none;
   font-size: var(--font-ui-smaller);
   line-height: 1.2;
   text-align: center;
@@ -3708,25 +3719,25 @@
 
 .lexvoice-outline-recent-filter-chip:hover {
   color: color-mix(in srgb, var(--text-normal) 82%, var(--text-accent));
-  border-color: color-mix(in srgb, var(--text-accent) 30%, var(--background-modifier-border)) !important;
-  background: color-mix(in srgb, var(--background-modifier-hover) 72%, transparent) !important;
-  box-shadow: none !important;
+  border-color: color-mix(in srgb, var(--text-accent) 30%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--background-modifier-hover) 72%, transparent);
+  box-shadow: none;
 }
 
 .lexvoice-outline-recent-filter-chip.is-active {
   color: var(--lex-primary-soft, var(--text-accent));
-  border-color: var(--lex-border-active-soft, color-mix(in srgb, var(--interactive-accent) 24%, var(--background-modifier-border))) !important;
-  background: var(--lex-bg-active, color-mix(in srgb, var(--interactive-accent) 11%, var(--background-primary))) !important;
-  box-shadow: none !important;
+  border-color: var(--lex-border-active-soft, color-mix(in srgb, var(--interactive-accent) 24%, var(--background-modifier-border)));
+  background: var(--lex-bg-active, color-mix(in srgb, var(--interactive-accent) 11%, var(--background-primary)));
+  box-shadow: none;
   font-weight: 560;
 }
 
 .lexvoice-outline-recent-filter-clear {
   flex: 0 0 auto;
   padding: 0;
-  border: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   color: var(--text-muted);
   font-size: var(--font-ui-small);
   line-height: 1;
@@ -3735,7 +3746,7 @@
 
 .lexvoice-outline-recent-filter-clear:hover {
   color: var(--text-accent);
-  background: transparent !important;
+  background: transparent;
 }
 
 .lexvoice-outline-recent-filter-empty {
@@ -3784,7 +3795,7 @@
 .lexvoice-outline-recent-group {
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr);
-  column-gap: 10px;
+  gap: 0 10px;
   position: relative;
 }
 
@@ -4442,7 +4453,7 @@
 @media (max-width: 360px) {
   .lexvoice-outline-recent-group {
     grid-template-columns: 40px minmax(0, 1fr);
-    column-gap: 9px;
+    gap: 0 9px;
   }
 
   .lexvoice-outline-recent-axis-primary {
@@ -4829,13 +4840,13 @@
 
 .lexvoice-vcable-tip {
   color: var(--text-muted);
-  font-size: var(--font-ui-smaller) !important;
+  font-size: var(--font-ui-smaller);
   font-style: italic;
 }
 
 .lexvoice-vcable-warn {
   color: var(--color-orange);
-  font-size: var(--font-ui-smaller) !important;
+  font-size: var(--font-ui-smaller);
 }
 
 /* 复用 Obsidian 原生 modal-button-container 的间距规则，仅补一道分隔线 */
@@ -5097,8 +5108,8 @@
 }
 
 .lexvoice-recruit-label-strong {
-  font-weight: var(--font-semibold) !important;
-  color: var(--text-accent) !important;
+  font-weight: var(--font-semibold);
+  color: var(--text-accent);
 }
 
 .lexvoice-recruit-lib-btn {
@@ -5156,9 +5167,9 @@ select.lexvoice-recruit-input.dropdown {
   min-height: 34px;
   padding-right: calc(var(--size-4-6) + var(--size-2-2));
   background-color: var(--background-primary);
-  background-repeat: no-repeat !important;
-  background-position: right var(--size-2-3) center !important;
-  background-size: 16px 16px !important;
+  background-repeat: no-repeat;
+  background-position: right var(--size-2-3) center;
+  background-size: 16px 16px;
 }
 
 .lexvoice-recruit-actions {
@@ -5960,8 +5971,8 @@ select.lexvoice-recruit-input.dropdown {
 .markdown-reading-view.lvwall-page .markdown-preview-section,
 .lvwall-page .markdown-preview-section,
 .lvwall-page .markdown-source-view.mod-cm6 .cm-sizer {
-  width: 100% !important;
-  max-width: none !important;
+  width: 100%;
+  max-width: none;
 }
 
 .markdown-preview-view.lvwall-page .block-language-dataviewjs,
@@ -5969,19 +5980,19 @@ select.lexvoice-recruit-input.dropdown {
 .lvwall-page .block-language-dataviewjs,
 .lvwall-page pre,
 .lvwall-page code {
-  width: 100% !important;
-  max-width: none !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .markdown-preview-view.lvwall-page .block-language-dataviewjs > .edit-block-button,
 .markdown-reading-view.lvwall-page .block-language-dataviewjs > .edit-block-button,
 .lvwall-page .block-language-dataviewjs > .edit-block-button {
-  display: none !important;
+  display: none;
 }
 
 .lvwall {
@@ -6022,7 +6033,7 @@ select.lexvoice-recruit-input.dropdown {
   isolation: isolate;
   cursor: pointer;
   box-sizing: border-box;
-  color: var(--text-normal) !important;
+  color: var(--text-normal);
   background:
     linear-gradient(135deg,
       color-mix(in srgb, var(--background-primary) 98%, white 2%),
@@ -6033,14 +6044,14 @@ select.lexvoice-recruit-input.dropdown {
     repeating-linear-gradient(0deg,
       color-mix(in srgb, var(--text-normal) 1.7%, transparent) 0 1px,
       transparent 1px 10px),
-    var(--background-secondary) !important;
-  border: none !important;
-  border-radius: var(--radius-m, 8px) !important;
+    var(--background-secondary);
+  border: none;
+  border-radius: var(--radius-m, 8px);
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--background-modifier-border) 82%, transparent),
     inset 0 1px 0 color-mix(in srgb, white 44%, transparent),
     8px 10px 18px -14px color-mix(in srgb, var(--background-primary) 64%, black 36%),
-    18px 22px 34px -26px color-mix(in srgb, var(--background-primary) 74%, black 26%) !important;
+    18px 22px 34px -26px color-mix(in srgb, var(--background-primary) 74%, black 26%);
   transform: translateZ(0);
   transform-origin: center top;
   animation: lvwall-card-in .46s cubic-bezier(.2, .72, .22, 1) both;
@@ -6099,7 +6110,7 @@ select.lexvoice-recruit-input.dropdown {
     inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 22%, var(--background-modifier-border)),
     inset 0 1px 0 color-mix(in srgb, white 50%, transparent),
     10px 13px 22px -14px color-mix(in srgb, var(--background-primary) 58%, black 42%),
-    24px 30px 46px -30px color-mix(in srgb, var(--background-primary) 68%, black 32%) !important;
+    24px 30px 46px -30px color-mix(in srgb, var(--background-primary) 68%, black 32%);
 }
 
 .lvwall .lvwall-card:hover::before {
@@ -6202,8 +6213,8 @@ select.lexvoice-recruit-input.dropdown {
   border-radius: 999px;
   font-size: 11px;
   line-height: 1.35;
-  color: var(--text-muted) !important;
-  background: var(--background-modifier-hover) !important;
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
   box-shadow: inset 0 0 0 1px var(--background-modifier-border);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6244,12 +6255,12 @@ select.lexvoice-recruit-input.dropdown {
     repeating-linear-gradient(0deg,
       color-mix(in srgb, white 3%, transparent) 0 1px,
       transparent 1px 10px),
-    var(--background-secondary) !important;
+    var(--background-secondary);
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--background-modifier-border) 82%, transparent),
     inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
     8px 11px 20px -13px color-mix(in srgb, black 56%, var(--background-primary) 44%),
-    18px 24px 38px -27px color-mix(in srgb, black 48%, var(--background-primary) 52%) !important;
+    18px 24px 38px -27px color-mix(in srgb, black 48%, var(--background-primary) 52%);
 }
 
 .theme-dark .lvwall .lvwall-card::before {
@@ -6266,7 +6277,7 @@ select.lexvoice-recruit-input.dropdown {
     inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 30%, var(--background-modifier-border)),
     inset 0 1px 0 color-mix(in srgb, white 10%, transparent),
     10px 14px 24px -14px color-mix(in srgb, black 62%, var(--background-primary) 38%),
-    24px 32px 50px -32px color-mix(in srgb, black 54%, var(--background-primary) 46%) !important;
+    24px 32px 50px -32px color-mix(in srgb, black 54%, var(--background-primary) 46%);
 }
 
 @keyframes lvwall-card-in {
@@ -6297,7 +6308,7 @@ select.lexvoice-recruit-input.dropdown {
 @media (prefers-reduced-motion: reduce) {
   .lvwall .lvwall-card,
   .lvwall .lvwall-brand {
-    animation: none !important;
+    animation: none;
   }
 
   .lvwall .lvwall-card,
@@ -6306,7 +6317,7 @@ select.lexvoice-recruit-input.dropdown {
   .lvwall .lvwall-type,
   .lvwall .lvwall-tag,
   .lvwall .lvwall-brand {
-    transition: none !important;
+    transition: none;
   }
 
   .lvwall .lvwall-card:hover,
@@ -6315,34 +6326,34 @@ select.lexvoice-recruit-input.dropdown {
   .lvwall .lvwall-card:hover .lvwall-type,
   .lvwall .lvwall-card:hover .lvwall-tag,
   .lvwall .lvwall-card:hover .lvwall-brand {
-    transform: none !important;
+    transform: none;
   }
 
   .lvwall .lvwall-card::before {
-    display: none !important;
+    display: none;
   }
 }
 
 /* LexVoice lightweight styling for Obsidian Bases card views.
    Keep this conservative: no real border/margin/width changes, so Bases layout stays stable. */
 .bases-view .bases-cards-item {
-  border: none !important;
+  border: none;
   background:
     linear-gradient(135deg,
       color-mix(in srgb, var(--background-primary) 98%, white 2%),
-      color-mix(in srgb, var(--background-secondary) 96%, var(--background-primary) 4%)) !important;
-  border-radius: var(--radius-m, 8px) !important;
+      color-mix(in srgb, var(--background-secondary) 96%, var(--background-primary) 4%));
+  border-radius: var(--radius-m, 8px);
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--background-modifier-border) 86%, transparent),
     6px 8px 16px -14px color-mix(in srgb, var(--background-primary) 50%, black 50%),
-    12px 16px 28px -24px color-mix(in srgb, var(--background-primary) 65%, black 35%) !important;
+    12px 16px 28px -24px color-mix(in srgb, var(--background-primary) 65%, black 35%);
 }
 
 .bases-view .bases-cards-item:hover {
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 22%, var(--background-modifier-border)),
     8px 10px 18px -15px color-mix(in srgb, var(--background-primary) 45%, black 55%),
-    14px 18px 32px -26px color-mix(in srgb, var(--background-primary) 62%, black 38%) !important;
+    14px 18px 32px -26px color-mix(in srgb, var(--background-primary) 62%, black 38%);
 }
 
 .bases-view .bases-cards-item .metadata-property-key,
@@ -6350,40 +6361,40 @@ select.lexvoice-recruit-input.dropdown {
 .bases-view .bases-cards-item .bases-cards-property-name,
 .bases-view .bases-cards-item [class*="property-name"],
 .bases-view .bases-cards-item [class*="property-key"] {
-  font-size: 11px !important;
-  line-height: 1.25 !important;
-  color: var(--text-faint) !important;
-  letter-spacing: 0 !important;
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--text-faint);
+  letter-spacing: 0;
 }
 
 .bases-view .bases-cards-item .bases-card-property-value,
 .bases-view .bases-cards-item .bases-cards-property-value,
 .bases-view .bases-cards-item [class*="property-value"] {
-  color: var(--text-muted) !important;
+  color: var(--text-muted);
 }
 
 .bases-view .bases-cards-item .internal-link,
 .bases-view .bases-cards-item a {
-  color: color-mix(in srgb, var(--text-accent) 78%, var(--text-normal) 22%) !important;
-  text-decoration: none !important;
+  color: color-mix(in srgb, var(--text-accent) 78%, var(--text-normal) 22%);
+  text-decoration: none;
 }
 
 .bases-view .bases-cards-item .tag {
-  border-radius: var(--radius-s, 6px) !important;
-  color: var(--text-muted) !important;
-  background: var(--background-modifier-hover) !important;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--background-modifier-border) 80%, transparent) !important;
+  border-radius: var(--radius-s, 6px);
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--background-modifier-border) 80%, transparent);
 }
 
 .theme-dark .bases-view .bases-cards-item {
   background:
     linear-gradient(135deg,
       color-mix(in srgb, var(--background-secondary) 96%, white 4%),
-      color-mix(in srgb, var(--background-primary) 96%, white 4%)) !important;
+      color-mix(in srgb, var(--background-primary) 96%, white 4%));
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--background-modifier-border) 86%, transparent),
     6px 8px 16px -14px color-mix(in srgb, black 62%, var(--background-primary) 38%),
-    12px 16px 28px -24px color-mix(in srgb, black 54%, var(--background-primary) 46%) !important;
+    12px 16px 28px -24px color-mix(in srgb, black 54%, var(--background-primary) 46%);
 }
 
 /* ============================================================
@@ -6458,7 +6469,11 @@ select.lexvoice-recruit-input.dropdown {
 }
 
 .lexvoice-outline-head.is-idle .lexvoice-outline-control-row {
-  display: contents;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: 50px minmax(0, 1fr);
+  gap: 8px 10px;
+  align-items: center;
 }
 
 .lexvoice-outline-head.is-idle .lexvoice-outline-control-label {
@@ -6489,9 +6504,8 @@ select.lexvoice-recruit-input.dropdown {
 
 .lexvoice-outline-head.is-idle .lexvoice-outline-control-row select.lexvoice-outline-select-control {
   min-height: 38px;
-  padding-left: 12px;
+  padding-left: 35px;
   padding-right: 30px;
-  text-indent: 23px;
   border-color: var(--lex-border-line);
   border-radius: 9px;
   background-color: transparent;
@@ -6662,13 +6676,17 @@ select.lexvoice-recruit-input.dropdown {
 
 .lexvoice-recording-player-primary,
 .lexvoice-inline-player-play {
-  all: unset;
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  font: inherit;
+  text-decoration: none;
   box-sizing: border-box;
   width: 28px;
   height: 28px;
   min-width: 28px;
   min-height: 28px;
-  border: 0 !important;
+  border: 0;
   border-radius: 50%;
   background: var(--lex-primary-action);
   color: var(--text-on-accent);
@@ -6678,7 +6696,7 @@ select.lexvoice-recruit-input.dropdown {
   flex: 0 0 auto;
   padding: 0;
   line-height: 1;
-  box-shadow: none !important;
+  box-shadow: none;
   appearance: none;
   -webkit-appearance: none;
   cursor: pointer;
@@ -6761,13 +6779,17 @@ select.lexvoice-recruit-input.dropdown {
 
 .lexvoice-recording-player-secondary,
 .lexvoice-inline-player-icon-btn {
-  all: unset;
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  font: inherit;
+  text-decoration: none;
   box-sizing: border-box;
   width: 28px;
   height: 28px;
   min-width: 28px;
   min-height: 28px;
-  border: 0 !important;
+  border: 0;
   border-radius: 8px;
   background: transparent;
   color: var(--lex-text-tertiary);
@@ -6776,7 +6798,7 @@ select.lexvoice-recruit-input.dropdown {
   justify-content: center;
   padding: 0;
   cursor: pointer;
-  box-shadow: none !important;
+  box-shadow: none;
   appearance: none;
   -webkit-appearance: none;
   flex: 0 0 auto;
@@ -6956,15 +6978,15 @@ select.lexvoice-recruit-input.dropdown {
 .lexvoice-time-link {
   border: 0;
   background: transparent;
-  color: var(--lex-text-tertiary) !important;
+  color: var(--lex-text-tertiary);
   box-shadow: none;
 }
 
 /* 时间标签里原本附带的小圆点（v3 改为只在轨道上保留一个圆点，这里隐藏避免重叠） */
 .lexvoice-outline-ai-body ul.lexvoice-outline-time-rail .lexvoice-time-link.lexvoice-outline-leading-time::before,
 .lexvoice-outline-ai-body ul.lexvoice-outline-time-rail .lexvoice-time-link.lexvoice-outline-leading-time::after {
-  display: none !important;
-  content: none !important;
+  display: none;
+  content: none;
 }
 
 /* 保留窄视图时间链接的列内圆点旧样式（其他场景仍可用） */
@@ -6977,7 +6999,6 @@ select.lexvoice-recruit-input.dropdown {
   border-radius: 50%;
   background: var(--lex-bg-base);
   opacity: 1;
-  clip-path: none;
   box-shadow: 0 0 0 3px var(--lex-bg-base);
 }
 
@@ -7080,10 +7101,10 @@ select.lexvoice-recruit-input.dropdown {
 
 .lexvoice-outline-chapter.is-viewing,
 .lexvoice-outline-chapter.is-playing {
-  margin-left: 0 !important;
-  margin-right: 0 !important;
-  padding-left: var(--lexvoice-outline-rail-content-x) !important;
-  padding-right: 0 !important;
+  margin-left: 0;
+  margin-right: 0;
+  padding-left: var(--lexvoice-outline-rail-content-x);
+  padding-right: 0;
   background: var(--lex-bg-playing);
 }
 
@@ -7119,7 +7140,7 @@ select.lexvoice-recruit-input.dropdown {
 .lexvoice-outline-chapter.is-playing > .lexvoice-time-link.lexvoice-outline-leading-time,
 .lexvoice-outline-chapter.is-viewing > p > .lexvoice-time-link.lexvoice-outline-leading-time,
 .lexvoice-outline-chapter.is-playing > p > .lexvoice-time-link.lexvoice-outline-leading-time {
-  color: var(--lex-primary-soft) !important;
+  color: var(--lex-primary-soft);
   font-weight: 500;
 }
 
@@ -7457,10 +7478,10 @@ select.lexvoice-recruit-input.dropdown {
 
 /* 大纲播放器三角 → 主题强调色（白色三角在浅底按钮上看不见的 bug 修复） */
 .lexvoice-inline-player-play {
-  background: transparent !important;
+  background: transparent;
   color: var(--lex-primary);
-  border: 0 !important;
-  box-shadow: none !important;
+  border: 0;
+  box-shadow: none;
 }
 .lexvoice-inline-player-play::before {
   border-left-color: currentColor;
@@ -7481,33 +7502,33 @@ select.lexvoice-recruit-input.dropdown {
 }
 
 .lexvoice-recording-player .lexvoice-recording-player-primary {
-  background: transparent !important;
-  color: var(--lex-primary) !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  opacity: 1 !important;
+  background: transparent;
+  color: var(--lex-primary);
+  border: 0;
+  box-shadow: none;
+  opacity: 1;
 }
 
 .lexvoice-recording-player .lexvoice-recording-player-primary:disabled {
-  color: var(--lex-primary) !important;
-  opacity: 1 !important;
+  color: var(--lex-primary);
+  opacity: 1;
 }
 
 .lexvoice-recording-player .lexvoice-recording-player-primary svg {
-  color: currentColor !important;
-  stroke: currentColor !important;
+  color: currentColor;
+  stroke: currentColor;
 }
 
 .lexvoice-recording-player .lexvoice-recording-player-primary:hover {
-  background: color-mix(in srgb, var(--lex-primary) 12%, transparent) !important;
+  background: color-mix(in srgb, var(--lex-primary) 12%, transparent);
 }
 
 .lexvoice-recording-player.is-live .lexvoice-recording-player-primary,
 .lexvoice-recording-player.is-live .lexvoice-recording-player-secondary {
-  background: transparent !important;
-  color: var(--lex-primary) !important;
-  border: 0 !important;
-  box-shadow: none !important;
+  background: transparent;
+  color: var(--lex-primary);
+  border: 0;
+  box-shadow: none;
 }
 
 /* Live recording bar: match the compact baseline control.
@@ -7516,8 +7537,8 @@ select.lexvoice-recruit-input.dropdown {
   min-height: 52px;
   padding: 7px 12px;
   border-radius: 14px;
-  background: var(--lex-bg-active) !important;
-  border-color: var(--lex-border-active-soft) !important;
+  background: var(--lex-bg-active);
+  border-color: var(--lex-border-active-soft);
 }
 
 .lexvoice-recording-player.is-live:not(.is-network):not(.is-microphone) .lexvoice-recording-player-main {
@@ -7531,16 +7552,16 @@ select.lexvoice-recruit-input.dropdown {
   min-width: 40px;
   min-height: 40px;
   border-radius: 50%;
-  background: var(--lex-primary) !important;
-  color: var(--lex-on-primary, var(--text-on-accent)) !important;
-  box-shadow: none !important;
+  background: var(--lex-primary);
+  color: var(--lex-on-primary, var(--text-on-accent));
+  box-shadow: none;
 }
 
 .lexvoice-recording-player.is-live:not(.is-network):not(.is-microphone) .lexvoice-recording-stop-square {
   width: 9px;
   height: 9px;
   border-radius: 2px;
-  background: currentColor !important;
+  background: currentColor;
 }
 
 .lexvoice-recording-player.is-live:not(.is-network):not(.is-microphone) .lexvoice-recording-player-middle {
@@ -7563,12 +7584,12 @@ select.lexvoice-recruit-input.dropdown {
 
 .lexvoice-recording-player.is-live:not(.is-network):not(.is-microphone) .lexvoice-recording-wave-bar {
   width: 2px;
-  background: var(--lex-primary) !important;
+  background: var(--lex-primary);
 }
 
 .lexvoice-recording-player.is-live:not(.is-network):not(.is-microphone) .lexvoice-recording-elapsed {
   margin-left: 0;
-  color: var(--lex-primary) !important;
+  color: var(--lex-primary);
   font-size: 16px;
   font-weight: 600;
   line-height: 1;
@@ -7581,19 +7602,19 @@ select.lexvoice-recruit-input.dropdown {
   min-height: 28px;
   margin-left: auto;
   border-radius: 8px;
-  background: transparent !important;
-  color: var(--lex-primary) !important;
-  box-shadow: none !important;
+  background: transparent;
+  color: var(--lex-primary);
+  box-shadow: none;
 }
 
 .lexvoice-recording-player.is-live:not(.is-network):not(.is-microphone) .lexvoice-recording-player-secondary:hover {
-  background: color-mix(in srgb, var(--lex-primary) 10%, transparent) !important;
+  background: color-mix(in srgb, var(--lex-primary) 10%, transparent);
 }
 
 .lexvoice-recording-player.is-live:not(.is-network):not(.is-microphone) .lexvoice-recording-player-secondary svg {
   width: 16px;
   height: 16px;
-  stroke: currentColor !important;
+  stroke: currentColor;
 }
 
 .lexvoice-recording-player-primary svg,
@@ -7603,12 +7624,12 @@ select.lexvoice-recruit-input.dropdown {
 }
 
 .lexvoice-inline-player-icon-btn {
-  background: transparent !important;
-  box-shadow: none !important;
+  background: transparent;
+  box-shadow: none;
 }
 
 .lexvoice-outline-player-section {
-  border-bottom: 0 !important;
+  border-bottom: 0;
   padding-bottom: 8px;
 }
 
@@ -7683,7 +7704,7 @@ select.lexvoice-recruit-input.dropdown {
 /* 纪要：date 列宽收一点，让 axis 不那么占位 */
 .lexvoice-outline-recent-group {
   grid-template-columns: 50px minmax(0, 1fr);
-  column-gap: 8px;
+  gap: 0 8px;
 }
 
 /* 沉淀流水线 · 窄屏响应（未激活节点隐藏数字圈，只留文字） */
@@ -7942,7 +7963,11 @@ select.lexvoice-recruit-input.dropdown {
 /* 覆盖 Obsidian 默认 mod-cta 样式（粉色填充太突兀） */
 .lexvoice-todo-popover-save,
 .lexvoice-todo-popover-save.mod-cta {
-  all: unset;
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  font: inherit;
+  text-decoration: none;
   box-sizing: border-box;
   cursor: pointer;
   padding: 4px 14px;

@@ -1,265 +1,215 @@
 # LexVoice
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+LexVoice 是一个面向 Obsidian 桌面端的录音、转写、实时大纲和会议沉淀插件。它不是云服务，也不自带 API Key；你可以接入自己的语音转写服务和大模型服务，把会议、访谈、课程、视频音频和个人口述整理成可回听、可复用、可沉淀的 Markdown 内容。
 
-LexVoice is an Obsidian desktop plugin for recording audio, transcribing speech, building live outlines, and turning meeting material into reusable Markdown objects.
+## 1.2.0 · 失踪人口回归，带回来一万行代码
 
-It is not a hosted cloud service and it does not include API keys. LexVoice connects recording, transcription, AI organization, object extraction, and local vault writing. You choose and configure your own transcription and large-language-model services.
+这一版改得有点多，超过一万行代码动了。所以它更像一次重做，而不是一次小更新。
 
-## 1.2.0: I Came Back With 10,000 Lines Of Code
+LexVoice 一开始只是一个录音转写插件：录下来、转成文字、生成纪要，完事。但真正有价值的通常不是那篇转写稿，而是会议结束后还能继续被使用的东西：谁说了什么、要做什么、学到了什么、下次还会用到哪些术语。
 
-This is not a “small patch with two buttons and a wording tweak” release. LexVoice 1.2.0 is a major feature rebuild with more than ten thousand lines of code changes. It turns LexVoice from a recording-and-transcription plugin into a meeting workspace inside Obsidian.
+所以 1.2.0 把 LexVoice 从“转写工具”重做成了“会议工作台”。录音只是入口，后面的实时大纲、沉淀工作流、对象库和导出才是重点。
 
-The old core flow was: record audio, transcribe it, generate a note. The new goal is broader: turn a meeting from sound into structure, from structure into actions, and from actions into reusable knowledge objects.
+## 亮点功能
 
-### Product Direction
+### 实时大纲
 
-- **Recording is only the entry point**: the real value is in live outlines, playback anchors, sediment candidates, and deliverables.
-- **AI should not just dump text**: it should split a meeting into objects that can be reviewed, edited, and committed.
-- **The sidebar is now the workspace**: outline, sediment review, and note navigation live in one continuous flow.
-- **Obsidian is not an attachment folder**: todos, learning cards, people, and hotwords should become reusable local knowledge objects.
+- 录音时边说边生成章节大纲，不必等录完才看到整理结果。
+- 录音结束后，大纲章节和播放器联动，点击章节即可跳到对应录音位置。
+- 支持录音中回看已生成章节，同时录音继续进行。
+- 录音结束后进入最终整理态，AI 会补全最终纪要内容。
 
-### Major Feature Rebuilds
+### 会中纪要
 
-- **Live outline rebuild**: generate chapters while recording, then replay by timeline after the meeting.
-- **Sediment workflow**: scan one note into people, todos, learning cards, and hotwords.
-- **Object libraries**: turn action items, knowledge points, people, and ASR terms into reusable Obsidian objects.
-- **Todo capture upgrade**: todos can carry owners, dates, subtasks, and Markdown task output.
-- **Real microphone protection**: detect and avoid virtual audio devices polluting microphone input.
-- **Input meters are back**: confirm whether computer audio and microphone audio are actually coming in.
-- **Export pipeline**: generate HTML reports, HTML slides, editable PPTX files, and email drafts from the same note.
-- **Timeline note navigation**: browse recent notes from the sidebar with week filters, template filters, current-note highlighting, and linked-audio deletion.
+录音过程中可以在“大纲”下方快速记现场备注。它只在录音会话的大纲页出现，不会占用沉淀和纪要列表。
 
-### Fixes And Polish
+特殊前缀会触发不同处理：
 
-- Fixed template classification issues where some template notes were treated as recordings.
-- Improved recruiting evaluation, text import, and failed-organization states.
-- Improved sediment scan, processing, cancel, and rescan feedback.
-- Added the option to delete linked audio when deleting a transcription record.
-- Reworked sidebar context menus to better match Obsidian conventions.
-- Tightened spacing, tab order, playback UI, timelines, and candidate list density.
-- Moved the color system back to Obsidian / Style Settings variables to reduce theme mismatch.
+- `#概念`：让 AI 解释当前讨论里的概念。
+- `?问题`：让 AI 结合当前转写和大纲回答问题。
+- `!重点`：标记需要进入最终纪要的重点。
+- `@指派人`：辅助后续待办归属。
+- `/待办`：直接创建明确待办候选。
 
-### Vision
+半角和全角符号都支持。会中备注会作为“现场补充材料”进入最终整理，不会混进原始转写。
 
-LexVoice is not trying to be just “audio to text.” It is a post-meeting workspace: recording preserves the source, outlines make it understandable, sediment review turns it into decisions, object libraries make it reusable, and exports turn it into deliverables. The goal is for every discussion to enter your Obsidian workflow naturally instead of becoming another transcript you never open again.
+### 沉淀工作流
 
-## Highlights
+每篇纪要可以扫描成四组候选：
 
-### Live Outline
+- 人员：逐条裁决，支持留下、合并、忽略。
+- 待办：默认全选，可编辑责任人、日期和子任务。
+- 学习：沉淀概念、机制、案例、观点和问答。
+- 热词：沉淀人名、机构、品牌、术语，辅助后续 ASR 识别。
 
-- Build an outline while recording.
-- Show a clickable chapter timeline for playback and review.
-- Display audio input meters so you can confirm that microphone and computer audio are actually being captured.
-- Finalize the outline and note after recording ends.
+处理完一组自动进入下一组。已完成的组可以回看，也可以重新处理。
 
-### Sediment Workflow
+### 对象库
 
-- The sidebar is organized around `Outline / Sediment / Notes`.
-- The Sediment tab scans a note into four candidate groups: people, todos, learning cards, and hotwords.
-- People are reviewed one by one: keep, merge, or ignore.
-- Todos, learning cards, and hotwords support multi-select confirmation.
-- Completed groups can be reviewed and reprocessed.
-- Commit actions show a toast with view and undo actions.
+LexVoice 不只是把内容导出成一篇 Markdown，而是把可复用的信息变成 Obsidian 里的独立对象：
 
-### Reusable Object Libraries
+- 人员档案
+- 待办卡片
+- 学习卡片
+- ASR 热词
+- 概念墙 / 待办墙 / 学习卡片墙
 
-- Learning cards for concepts, mechanisms, cases, Q&A, follow-up questions, and opinions.
-- Todo cards for action items, with optional owner, date, and subtasks.
-- People suggestions for reusable contact/person records.
-- ASR hotwords for names, brands, organizations, and domain terms.
-- Learning-card wall, concept wall, and todo wall entry points.
+这些对象会跟随你的本地 vault，而不是留在某个外部服务里。
 
-### Real Microphone Protection
+### 待办增强
 
-- Mixed recording separates computer audio from the real microphone.
-- LexVoice avoids treating `CABLE Output`, `BlackHole`, `VoiceMeeter`, `Stereo Mix`, and similar virtual inputs as the microphone.
-- Settings include real-microphone selection and device diagnostics.
-- Input meters help identify wrong microphone or virtual-audio routing before transcription fails.
+- 候选阶段即可行内编辑责任人、截止日期和子任务。
+- 入库后写入标准 Markdown 待办格式，便于被 Tasks 等插件识别。
+- 删除或重做时保留可追溯来源。
 
-### Export And Sharing
+### 录音可靠性
 
-- Generate an HTML report from the current note.
-- Generate an HTML slide deck.
-- Generate an editable PPTX deck.
-- Generate an `.eml` email draft with Markdown, PDF, and generated report or deck attachments.
+- 录音前后都有电平条，能看到麦克风和电脑音频是否真的有输入。
+- 支持“真实麦克风保护”，避免把 `CABLE Output`、`BlackHole`、`VoiceMeeter`、`Stereo Mix` 等虚拟声卡输入误当成真实麦克风。
+- 设置页提供设备检测，便于定位“录了但没有声音”的问题。
+- 删除转写记录时，可选择是否同时删除关联录音文件。
 
-### Note Navigation
+### 导出
 
-- Recent notes are shown as a date timeline in the sidebar.
-- Default filter focuses on this week; template filtering is available.
-- The current note is highlighted.
-- Deleting a transcription record can optionally delete linked audio files.
+同一篇纪要可以继续生成：
 
-## Who It Is For
+- HTML 报告
+- HTML PPT
+- 可编辑 PPTX
+- 邮件草稿 `.eml`
 
-- People who frequently turn meetings into notes, decisions, action items, and follow-up work.
-- Interviewers, researchers, recruiters, and consultants who need structured records.
-- Learners who want to turn courses, videos, talks, and lectures into reusable notes.
-- Obsidian users who want recordings, transcripts, notes, and extracted objects to stay inside the local vault.
-- Users who prefer local transcription or local LLMs for sensitive content.
+导出使用同一份纪要内容，按不同交付场景换展示形式。
 
-## Basic Workflow
+### 纪要列表
 
-1. Open the LexVoice sidebar.
-2. Choose a template and audio input mode.
-3. Start recording and confirm that input meters are moving.
-4. Review the live outline while the session is running.
-5. Stop recording and let LexVoice finalize the note.
-6. Open Sediment and confirm people, todos, learning cards, and hotwords.
-7. Export HTML reports, slide decks, PPTX files, or email drafts when needed.
+- 侧边栏以时间轴展示最近纪要。
+- 默认筛选本周，支持按模板筛选。
+- 当前打开的纪要会高亮。
+- 右键菜单保留必要操作，尽量贴近 Obsidian 原生习惯。
 
-Default storage paths:
+## 适合谁
 
-- Recordings: `LexVoice/录音`
-- Transcription notes: `LexVoice/转写纪要`
-- Learning cards: `LexVoice/学习卡片`
-- Todo cards: `LexVoice/待办`
-- Email drafts: `LexVoice/邮件草稿`
-- Vocabulary file: `LexVoice/词汇表.md`
+- 经常需要把会议整理成纪要、决策和待办的人。
+- 招聘、访谈、研究、咨询、培训等需要结构化记录的人。
+- 希望把课程、视频、讲座和口述内容沉淀成知识卡片的人。
+- 希望录音、转写、对象库都留在 Obsidian 本地 vault 的用户。
+- 对隐私更敏感，愿意使用本地转写或本地大模型的用户。
 
-All paths can be changed in settings.
+## 基本工作流
 
-## What You Need
+1. 打开 LexVoice 侧边栏。
+2. 选择模板和音频输入模式。
+3. 开始录音，并确认电平条有输入。
+4. 录音中查看实时大纲，必要时添加会中备注。
+5. 停止录音，等待 AI 整理最终纪要内容。
+6. 打开“沉淀”，确认人员、待办、学习卡片和热词。
+7. 需要交付时生成 HTML 报告、PPT、PPTX 或邮件草稿。
 
-Required:
+默认路径：
 
-- Obsidian desktop app
-- A speech-to-text service, either cloud-based or local
-- A folder in your vault for recordings
-- A folder in your vault for generated notes
+- 录音文件：`LexVoice/录音`
+- 转写纪要：`LexVoice/转写纪要`
+- 学习卡片：`LexVoice/学习卡片`
+- 待办卡片：`LexVoice/待办`
+- 邮件草稿：`LexVoice/邮件草稿`
+- 词汇表：`LexVoice/词汇表.md`
 
-Optional but recommended:
+这些路径都可以在设置里修改。
 
-- A large-language-model API for outlines, summaries, sediment extraction, reports, exports, translations, and custom templates
-- A virtual audio device for recording online meetings, videos, browser audio, or other computer playback
-- A real microphone for mixed recording
-- A vocabulary file for domain terms, names, products, and abbreviations
+## 使用前需要准备
 
-## First-Time Setup
+必需：
 
-![LexVoice first-use settings overview](docs/images/first-use-settings.svg)
+- Obsidian 桌面端
+- 一个语音转写服务，可以是云端 API，也可以是本地服务
+- 用于保存录音和纪要的 vault 文件夹
 
-Suggested setup order:
+可选但推荐：
 
-1. Configure the transcription service.
-2. Confirm storage folders for recordings, notes, learning cards, todo cards, and vocabulary.
-3. Configure an LLM endpoint if you want AI organization, live outlines, sediment extraction, reports, and exports.
-4. Choose an audio input mode: microphone only, computer audio only, or microphone plus computer audio.
-5. Run device diagnostics and confirm that the input meters move.
-6. Tune templates, daily-note integration, vocabulary, and custom prompts.
+- 大模型服务，用于实时大纲、纪要整理、沉淀、导出和自定义模板优化
+- 虚拟音频设备，用于录制电脑音频或线上会议音频
+- 真实麦克风，用于混合录制自己的声音
+- 领域词汇表，用于提升人名、产品名、机构名和术语识别准确率
 
-The minimum usable setup is transcription service plus storage paths. The full workflow needs LLM configuration and correct audio routing.
+## 音频输入与真实麦克风
 
-## Audio Input And Real Microphone
+Obsidian 桌面端无法跨平台稳定直接捕获系统音频。录制线上会议、网页视频、课程或电脑播放声音时，通常需要虚拟音频设备。
 
-Obsidian desktop cannot reliably capture system audio directly across platforms. To record online meetings, courses, Bilibili, YouTube, browser videos, or other playback, route that playback through a virtual audio device and select it in LexVoice.
+常见工具：
 
-Common tools:
+- Windows：VB-Cable
+- macOS：BlackHole
+- Linux：PulseAudio / PipeWire monitor source
 
-- Windows: VB-Cable
-- macOS: BlackHole
-- Linux: PulseAudio or PipeWire monitor sources
+Windows 使用 VB-Cable 时要注意命名：
 
-On Windows, `CABLE Input` is a playback/output device. Set the meeting app, browser, or system output to `CABLE Input`; LexVoice records the matching `CABLE Output`, which appears as a recording/input device.
+- 会议软件、浏览器或系统输出应切到 `CABLE Input`。
+- LexVoice 读取的是录音设备里的 `CABLE Output`。
+- 如果还要录自己的声音，真实麦克风必须选择本机麦克风，不要选择 `CABLE Output`、`BlackHole`、`VoiceMeeter` 或 `Stereo Mix`。
 
-If you also need your own voice, choose a real microphone in LexVoice's real-microphone setting. Do not choose `CABLE Output`, `BlackHole`, `VoiceMeeter`, or `Stereo Mix` as the real microphone. If meters do not move while recording, run device diagnostics first.
+如果电平条不动，先运行设备检测，不要直接开始长时间录音。
 
-## AI Organization And Templates
+## 隐私说明
 
-AI organization is optional. Without it, LexVoice still saves audio and transcript text. With it, LexVoice can produce structured notes, live outlines, sediment candidates, reports, slide decks, and prompt-optimized outputs.
+LexVoice 没有广告、分析或遥测。设置保存在本地 `.obsidian/plugins/lexvoice/data.json`。
 
-Built-in templates cover work notes, learning notes, interviews, recruiting evaluation, and personal notes. Custom templates can be created and reused in recording, import, and re-organize flows.
+录音文件保存到你选择的本地 Obsidian vault 路径。LexVoice 不运营自己的云端存储，也不会把录音上传到 LexVoice 服务器。
 
-A useful template should specify:
+如果使用云端语音转写或云端大模型，相关音频、转写文本和 prompt 上下文会发送给你配置的服务商。涉及客户资料、医疗、法律、人事、招聘、内部战略或其他敏感内容时，建议使用本地转写和本地大模型，并在录音前取得必要同意。
 
-- The content scenario
-- Which information matters most
-- Whether decisions, todos, risks, questions, or follow-up items are required
-- Whether translation or bilingual output is needed
-- Who will use the output next
+详见 [PRIVACY.md](PRIVACY.md)。
 
-## Import And Re-Organize
+## 安装
 
-- Import existing audio and transcribe it.
-- Import existing text or Markdown and organize it without recording.
-- Re-organize an existing note with another template.
-- Add extra preference instructions for a re-organization pass.
+手动安装：
 
-## Exports
-
-LexVoice can turn the same note into multiple deliverables:
-
-- HTML report for reading, printing, sharing, or archiving
-- HTML slide deck for presentation
-- Editable PPTX for further editing in PowerPoint
-- `.eml` email draft with summary and related attachments
-
-Export folders are configurable in settings.
-
-## Diagnostics
-
-LexVoice can copy a diagnostic report for troubleshooting transcription, queues, LLM calls, audio devices, and local settings.
-
-The report redacts common API keys, tokens, user folders, and vault paths. It does not include audio, transcript body, or full prompts.
-
-## Installation
-
-1. Close Obsidian.
-2. Put this folder under your vault:
+1. 关闭 Obsidian。
+2. 将插件文件放到：
 
    ```text
-   <your vault>/.obsidian/plugins/lexvoice/
+   <你的 vault>/.obsidian/plugins/lexvoice/
    ```
 
-3. Start Obsidian.
-4. Open Settings -> Community plugins and enable LexVoice.
-5. Open LexVoice settings and configure transcription before recording.
+3. 重新打开 Obsidian。
+4. 进入“设置 -> 第三方插件”，启用 LexVoice。
+5. 打开 LexVoice 设置页，先配置转写服务和音频输入。
 
-Do not publish or share your local `data.json`. It may contain API keys and user settings.
+不要提交或分享本地 `data.json`，它可能包含 API Key、服务地址和个人配置。
 
-## Privacy
+## 开发与构建
 
-LexVoice has no analytics, ads, or telemetry. It stores settings locally in `.obsidian/plugins/lexvoice/data.json`.
+```bash
+npm install
+npm run build
+```
 
-LexVoice does not operate its own cloud storage service and does not upload recordings to a LexVoice server. Recording files are saved only to the local Obsidian vault path you choose.
+开发入口是 `src/main.ts`。构建后生成 `main.js`。
 
-When you use transcription or AI features, the relevant audio, transcript, and prompt context are sent to the cloud API provider or local model endpoint you configure. Review your provider's privacy policy and obtain consent before recording or processing sensitive conversations.
+注意：按照 Obsidian 官方插件审核要求，发布时应将以下文件作为 GitHub Release assets 直接附加：
 
-For confidential, private, client, medical, legal, HR, or regulated content, prefer local speech-to-text and a local large-language model instead of cloud APIs.
+- `main.js`
+- `manifest.json`
+- `styles.css`
 
-See [PRIVACY.md](PRIVACY.md) for details.
+`main.js` 不应为了发布而提交到仓库根目录；Release 资产由构建产物提供。
 
-## Open Source And Notices
+## 发布检查
 
-This project is released under the MIT License. See [LICENSE](LICENSE).
+发布前请确认：
 
-Third-party services and tools mentioned in the plugin are optional integrations or setup references, not bundled dependencies. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- 没有提交 `data.json`。
+- 没有提交 API Key、真实会议记录、个人路径或隐私内容。
+- 已运行 `npm run build`。
+- Release 直接附加 `main.js`、`manifest.json`、`styles.css`。
+- `manifest.json` 的版本号与 Git tag 一致，tag 形如 `1.2.0`，不要带 `v` 前缀。
+- 已在干净测试 vault 中启用并验证插件。
 
-### Design Inspiration
+## 开源与声明
 
-The HTML PPT feature was inspired by the HTML-first slide-deck workflow and design principles documented in [alchaincyf/huashu-design](https://github.com/alchaincyf/huashu-design). In the language requested by that project's license notice: **Derived from alchaincyf/huashu-design**.
+LexVoice 使用 MIT License 发布。详见 [LICENSE](LICENSE)。
 
-LexVoice does not bundle or redistribute `huashu-design` source code, scripts, assets, demos, or media. The LexVoice implementation is an independent renderer and prompt workflow written for this plugin. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the attribution and license-scope note.
+第三方服务、模型和工具只作为可选集成或配置参考，不随插件一起分发。详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
-## Known Limitations
+HTML PPT 功能参考了 [alchaincyf/huashu-design](https://github.com/alchaincyf/huashu-design) 中 HTML-first 幻灯片工作流和设计原则。按该项目许可说明要求，在此显著注明：**Derived from alchaincyf/huashu-design**。
 
-- Desktop only.
-- Mobile Obsidian is not supported.
-- Local transcription requires a separate local service.
-- System or meeting audio usually requires a virtual audio device.
-- API keys live in local plugin settings; do not commit `data.json`.
-
-## Development
-
-LexVoice follows the standard Obsidian plugin build layout: edit the source in `src/main.ts`, run `npm install`, then use `npm run dev` while developing or `npm run build` before publishing. The generated `main.js` is kept in the repository because Obsidian loads that file directly and GitHub releases distribute `manifest.json`, `main.js`, and `styles.css`.
-
-## Release Checklist
-
-Before publishing a release:
-
-- Confirm `data.json` is not committed.
-- Rotate any API key that was previously committed or shared.
-- Include `manifest.json`, `main.js`, `styles.css`, `README.md`, `README.zh-CN.md`, `LICENSE`, `PRIVACY.md`, `SECURITY.md`, and `THIRD_PARTY_NOTICES.md`.
-- Verify `manifest.json` has a unique plugin id and a semantic version.
-- Test the plugin in a separate Obsidian vault.
+LexVoice 没有打包或再分发 `huashu-design` 的源码、脚本、素材、示例或媒体文件；当前实现是为 LexVoice 独立编写的渲染器和 prompt 工作流。

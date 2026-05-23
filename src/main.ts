@@ -4677,7 +4677,7 @@ function buildSedimentPreExtractionInstruction() {
       "due": "截止时间；无法判断留空字符串",
       "sourceTime": "如 12:34；没有则空",
       "note": "依据或补充说明",
-      "subtasks": ["可拆分的子任务；没有则空数组"]
+      "subtasks": ["可勾选的拆分子动作；按执行顺序；至少 2 条，除非任务本身是原子动作"]
     }
   ],
   "learningCards": [
@@ -4706,7 +4706,14 @@ ${SEDIMENT_PREEXTRACT_END}-->
 - 四组字段必须都存在；没有内容时输出空数组或空对象字段。
 - 每组最多 8 条，宁缺毋滥。
 - 必须是合法 JSON，不要尾随逗号，不要 Markdown 代码块，不要解释文字。
-- 这段必须放在整篇回复最后。`;
+- 这段必须放在整篇回复最后。
+
+待办 subtasks 拆分（固定生效）：
+- 每个 task 都尝试拆出 2-5 条 subtasks；任务本身是单一原子动作（如"发邮件给张三"）才允许空数组。
+- 每条 subtask 是**具体可勾选完成**的小动作（动词开头，短句，≤ 20 字），不要写成抽象描述。
+- 必须来自纪要原文里能找到依据的拆分；不要凭空发明工序。
+- 按执行先后排列；前置/准备工作在前，验收/收尾在后。
+- 不要在 subtask 里重复 owner / due / sourceTime；只写动作本身。`;
 }
 
 function appendSedimentPreExtractionInstruction(prompt) {
@@ -4789,6 +4796,13 @@ function buildSedimentExtractionPrompt(fileName, markdown) {
 - ASR 热词只输出后续录音里可能复现、且容易转写错的专名、术语或标准写法。
 - 不要输出 Markdown、代码块或解释文字，只输出合法 JSON。
 
+待办子任务拆分规则（subtasks 字段固定生效，不要省略）：
+- 每个 task 都尝试拆出 2-5 条 subtasks；只有任务本身是单一原子动作（如"发邮件给张三"）时才允许空数组。
+- 每条 subtask 必须是**具体可勾选完成**的小动作（动词开头，短句，≤ 20 字），不要写成抽象描述或重复 task 本身。
+- subtasks 应来自纪要原文里能找到依据的拆分（讨论里出现的步骤、子条件、依赖项、子环节），不要凭空发明工序。
+- 顺序按执行先后排列；前置/准备工作放前面，验收/收尾放后面。
+- 不要在 subtask 里重复 owner / due / sourceTime 信息——只写动作本身。
+
 JSON 结构：
 {
   "people": [
@@ -4808,7 +4822,8 @@ JSON 结构：
       "owner": "责任人；无法判断留空字符串",
       "due": "截止时间；无法判断留空字符串",
       "sourceTime": "如 12:34；没有则空",
-      "note": "依据或补充说明"
+      "note": "依据或补充说明",
+      "subtasks": ["可勾选的拆分子动作；按执行顺序；至少 2 条，除非任务本身是原子动作"]
     }
   ],
   "learningCards": [
@@ -9386,7 +9401,6 @@ function injectHtmlDeckExportScript(html) {
   const update = () => {
     slides.forEach((slide, index) => slide.classList.toggle("is-active", index === current));
     if (progress) progress.style.width = ((current + 1) / Math.max(1, slides.length) * 100) + "%";
-    try { localStorage.setItem("lexvoice-html-deck-slide", String(current)); } catch (error) {}
     if (location.hash !== "#slide-" + (current + 1)) {
       try { history.replaceState(null, "", "#slide-" + (current + 1)); } catch (error) {}
     }
@@ -9533,9 +9547,7 @@ function injectHtmlDeckExportScript(html) {
   });
   try {
     const hash = location.hash.match(/^#slide-(\\d+)$/);
-    const stored = localStorage.getItem("lexvoice-html-deck-slide");
     if (hash) current = Math.max(0, Math.min(slides.length - 1, Number(hash[1]) - 1));
-    else if (stored !== null) current = Math.max(0, Math.min(slides.length - 1, Number(stored) || 0));
   } catch (error) {}
   updateScale();
   updateFullscreenState();
@@ -12029,9 +12041,10 @@ class OutlineView extends obsidian.ItemView {
     this.syncSessionOutline(session);
 
     if (session) {
-      root.addClass("has-meeting-composer");
       const sessionNote = this.getSessionNoteFile(session);
       const activeTab = this.idlePanelTab || "outline";
+      const showMeetingComposer = activeTab === "outline" && recInfo && (recInfo.state === "recording" || recInfo.state === "paused");
+      if (showMeetingComposer) root.addClass("has-meeting-composer");
       this.renderActiveHead(root, session, recInfo, recordingIssue);
       this.renderIdleTabs(root, activeTab);
       if (activeTab === "recent") {
@@ -12060,7 +12073,11 @@ class OutlineView extends obsidian.ItemView {
         this.renderRecent(root);
       }
     }
-    if (session) this.renderMeetingComposer(root, session);
+    if (session) {
+      const activeTab = this.idlePanelTab || "outline";
+      const showMeetingComposer = activeTab === "outline" && recInfo && (recInfo.state === "recording" || recInfo.state === "paused");
+      if (showMeetingComposer) this.renderMeetingComposer(root, session);
+    }
     this._lastSig = this.computeSignature();
   }
 

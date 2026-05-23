@@ -1,10 +1,10 @@
 {
-  "id": "lexvoice",
-  "name": "LexVoice",
-	"version": "1.2.0",
-  "minAppVersion": "1.4.0",
-  "description": "Background recording, segmented or streaming transcription, and AI-organized Markdown notes for meetings, interviews, monologues, and learning material.",
-  "author": "Lynnx",
-  "authorUrl": "https://github.com/Lynn-x",
-  "isDesktopOnly": false
+	"id": "lexvoice",
+	"name": "LexVoice",
+	"version": "1.2.1",
+	"minAppVersion": "1.4.0",
+	"description": "Background recording, segmented or streaming transcription, and AI-organized Markdown notes for meetings, interviews, monologues, and learning material.",
+	"author": "Lynnx",
+	"authorUrl": "https://github.com/Lynn-x",
+	"isDesktopOnly": false
 }
