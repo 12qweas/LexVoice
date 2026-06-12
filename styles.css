@@ -36,7 +36,7 @@
 .lexvoice-bubble {
   --lexvoice-bubble-control-size: 28px;
   --lexvoice-bubble-control-radius: 999px;
-  --lexvoice-bubble-icon-size: 15px;
+  --lexvoice-bubble-icon-size: 20px;
   position: relative;
   display: flex;
   align-items: center;
@@ -215,33 +215,66 @@
   align-items: center;
   justify-content: center;
   border-radius: var(--lexvoice-bubble-control-radius);
-  background: var(--background-modifier-hover);
-  color: var(--text-normal);
+  background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-secondary));
+  color: var(--text-accent);
   cursor: pointer;
   font-size: var(--font-ui-small);
   line-height: 1;
-  transition: background 0.12s ease, transform 0.1s ease;
+  transition: background 0.12s ease;
 }
 
+/* 关键：Obsidian setIcon 生成的 <svg class="svg-icon"> 默认读 --icon-size，
+   会把图标压成 Obsidian 全局尺寸。这里在按钮上直接覆盖 --icon-size，
+   并用 .lexvoice-bubble 父链提特异性强制显式尺寸 + min 防塌缩，确保 file-text 真正画到 18px。 */
+.lexvoice-bubble-jump,
+.lexvoice-bubble-btn {
+  --icon-size: var(--lexvoice-bubble-icon-size);
+}
+.lexvoice-bubble .lexvoice-bubble-jump svg,
+.lexvoice-bubble .lexvoice-bubble-btn svg,
 .lexvoice-bubble-jump svg,
 .lexvoice-bubble-btn svg {
   width: var(--lexvoice-bubble-icon-size);
   height: var(--lexvoice-bubble-icon-size);
+  min-width: var(--lexvoice-bubble-icon-size);
+  min-height: var(--lexvoice-bubble-icon-size);
   stroke-width: 2;
 }
 
 .lexvoice-bubble-jump.is-fallback-icon::before {
   content: "";
-  width: 12px;
-  height: 15px;
-  border: 1.6px solid currentColor;
+  width: 14px;
+  height: 17px;
+  border: 2px solid currentColor;
   border-radius: 2px;
-  box-shadow: inset 0 4px 0 -2px currentColor;
+  box-shadow: inset 0 5px 0 -3px currentColor;
 }
 
 .lexvoice-bubble-jump:hover {
   background: var(--interactive-accent);
   color: var(--text-on-accent);
+}
+
+/* 录音态（红底）：file-text 是细描线图标，白细线糊在半透明圆上对比度太低。
+   改成实心近白圆 + 红色图标，高对比、一眼可见，像个真正的控制按钮。 */
+.lexvoice-bubble.is-recording .lexvoice-bubble-jump {
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--color-red);
+}
+.lexvoice-bubble.is-recording .lexvoice-bubble-jump:hover {
+  background: #fff;
+  color: var(--color-red);
+  transform: scale(1.08);
+}
+
+/* 暂停态（浅灰底）：实心 primary 白圆 + muted 深色图标，同样高对比 */
+.lexvoice-bubble.is-paused .lexvoice-bubble-jump {
+  background: var(--background-primary);
+  color: var(--text-muted);
+}
+.lexvoice-bubble.is-paused .lexvoice-bubble-jump:hover {
+  background: var(--background-primary);
+  color: var(--text-normal);
   transform: scale(1.08);
 }
 
@@ -325,15 +358,14 @@
 }
 
 /* Core floating controls are drawn with CSS shapes instead of theme/icon-font glyphs.
-   This keeps recording controls visible even when Obsidian button styles or icon sets change. */
-body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-jump.is-note-icon svg,
+   This keeps recording controls visible even when Obsidian button styles or icon sets change.
+   注：jump 按钮已切换到 Lucide file-text，仅在 setIcon 失败的兜底场景才走 .is-fallback-icon 的 CSS 形状（见上方 line 233）。 */
 body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-play-icon svg,
 body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-pause-icon svg,
 body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-icon svg {
   display: none;
 }
 
-body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-jump.is-note-icon::before,
 body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-play-icon::before,
 body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-pause-icon::before,
 body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-icon::before {
@@ -341,14 +373,6 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   display: block;
   flex: 0 0 auto;
   color: currentColor;
-}
-
-body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-jump.is-note-icon::before {
-  width: 12px;
-  height: 15px;
-  border: 1.6px solid currentColor;
-  border-radius: 2px;
-  box-shadow: inset 0 4px 0 -2px currentColor;
 }
 
 body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-play-icon::before {
@@ -449,6 +473,85 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   flex-shrink: 0;
 }
 
+/* 处理进度面板分区 + 状态行 */
+.lexvoice-queue-section {
+  margin-bottom: var(--size-4-4);
+}
+.lexvoice-queue-section .lexvoice-queue-section-title {
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  color: var(--text-faint);
+  letter-spacing: 0.04em;
+  margin-bottom: var(--size-2-2);
+}
+.lexvoice-queue-section .lexvoice-queue-actions {
+  margin-bottom: var(--size-2-2);
+}
+.lexvoice-queue-row.is-running {
+  border-left: 2px solid var(--color-accent);
+}
+.lexvoice-queue-row.is-done {
+  border-left: 2px solid var(--color-green);
+  opacity: 0.85;
+}
+.lexvoice-queue-row.is-done .lexvoice-queue-title {
+  font-weight: var(--font-normal);
+  color: var(--text-muted);
+}
+
+/* 处理进度面板·当前活动详情卡（任务类型 / 模式 / 当前步骤 / 进度条 / 说明） */
+.lexvoice-queue-row.lexvoice-activity-card {
+  display: block;
+  background: color-mix(in srgb, var(--color-accent) 7%, var(--background-secondary));
+  border-left-width: 3px;
+}
+.lexvoice-activity-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--size-2-2);
+}
+.lexvoice-activity-kind {
+  font-weight: var(--font-semibold);
+  color: var(--color-accent);
+}
+.lexvoice-activity-sep {
+  color: var(--text-faint);
+}
+.lexvoice-activity-mode {
+  color: var(--text-muted);
+}
+.lexvoice-activity-count {
+  margin-left: auto;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.lexvoice-activity-step {
+  margin-top: var(--size-2-2);
+  font-weight: var(--font-medium);
+  color: var(--text-normal);
+}
+.lexvoice-activity-bar {
+  margin-top: var(--size-2-2);
+  height: 6px;
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-border);
+  overflow: hidden;
+}
+.lexvoice-activity-bar-fill {
+  height: 100%;
+  border-radius: var(--radius-s);
+  background: var(--color-accent);
+  transition: width 0.4s ease;
+}
+.lexvoice-activity-detail {
+  margin-top: var(--size-2-2);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
 /* ============================================================
    4. 导入 Modal
    ============================================================ */
@@ -492,6 +595,45 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   flex: 1;
 }
 
+.lexvoice-import-category-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-2);
+  margin: 0 0 var(--size-2-2);
+}
+
+.lexvoice-import-category-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  padding: 4px 9px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+}
+
+.lexvoice-import-category-button:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.lexvoice-import-category-button.is-active {
+  border-color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+  color: var(--text-accent);
+}
+
+.lexvoice-import-category-count {
+  color: var(--text-faint);
+}
+
+.lexvoice-import-category-button.is-active .lexvoice-import-category-count {
+  color: var(--text-accent);
+}
+
 .lexvoice-import-empty {
   color: var(--text-muted);
   font-size: var(--font-ui-small);
@@ -531,11 +673,39 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   width: 100%;
 }
 
+.lexvoice-import-section {
+  padding: var(--size-2-1) 0 var(--size-2-2);
+}
+
+.lexvoice-import-section + .lexvoice-import-section {
+  border-top: 1px solid var(--background-modifier-border);
+  margin-top: var(--size-2-2);
+  padding-top: var(--size-3-2);
+}
+
+.lexvoice-import-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+  padding: var(--size-2-2) var(--size-4-2) var(--size-2-1);
+}
+
+.lexvoice-import-section-copy {
+  min-width: 0;
+}
+
 .lexvoice-import-section-title {
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
   font-weight: var(--font-semibold);
-  padding: var(--size-2-2) var(--size-4-2) var(--size-2-1);
+}
+
+.lexvoice-import-section-desc {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  line-height: var(--line-height-tight);
+  margin-top: 2px;
 }
 
 .lexvoice-import-batch {
@@ -646,16 +816,64 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   min-width: 0;
 }
 
+.lexvoice-import-name-row {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+  min-width: 0;
+}
+
 .lexvoice-import-name {
   font-weight: var(--font-medium);
   color: var(--text-normal);
-  word-break: break-all;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .lexvoice-import-meta {
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
   margin-top: var(--size-2-1);
+}
+
+.lexvoice-import-reason {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lexvoice-import-badge {
+  flex-shrink: 0;
+  border-radius: 999px;
+  border: 1px solid var(--background-modifier-border);
+  padding: 1px 6px;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  color: var(--text-muted);
+  background: var(--background-primary);
+}
+
+.lexvoice-import-badge-lexvoice-normal {
+  border-color: color-mix(in srgb, var(--text-success) 40%, var(--background-modifier-border));
+  color: var(--text-success);
+  background: color-mix(in srgb, var(--text-success) 10%, transparent);
+}
+
+.lexvoice-import-badge-lexvoice-repair {
+  border-color: color-mix(in srgb, var(--text-error) 35%, var(--background-modifier-border));
+  color: var(--text-error);
+  background: color-mix(in srgb, var(--text-error) 8%, transparent);
+}
+
+.lexvoice-import-badge-external {
+  border-color: var(--background-modifier-border);
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
 }
 
 .lexvoice-import-warn {
@@ -1594,22 +1812,58 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   bottom: calc(100% - 17px);
 }
 
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li.lexvoice-outline-untimed-top {
+  min-height: 0;
+  padding: 2px 0 8px;
+  margin: 0 0 4px;
+  color: var(--text-muted);
+  font-weight: var(--font-normal);
+  line-height: 1.55;
+}
+
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li.lexvoice-outline-untimed-top::before,
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li.lexvoice-outline-untimed-top::after {
+  display: none;
+}
+
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li.lexvoice-outline-untimed-top > p {
+  display: block;
+  margin: 0;
+}
+
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li.lexvoice-outline-untimed-top > ul,
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li.lexvoice-outline-untimed-top > ol {
+  margin-top: 4px;
+}
+
 /* 章节圆点（设计稿 #outline-1/2/3 的 .lex-dot）
-   位置：贴在轨道线上，时间数字右侧；尺寸：10px（默认）/ 12px（活跃）
-   状态：默认空心灰，活跃 / 生成 / 播放 / 已播放 各有变体 */
+   直觉规则：只有"带时间戳的 L1"才是真正的时间锚点 → 大实心圈点；
+   没时间戳的 L1（同一时间段内的延续话题）→ 小淡点，视觉次一级，不抢"时间点"语义。 */
+
+/* 默认（无时间戳的 L1）：小淡点，作为延续节点 */
 .lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li::after {
   content: "";
   position: absolute;
+  left: calc(var(--lexvoice-outline-rail-x) - 2.5px);
+  top: 16px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text-muted) 45%, transparent);
+  border: none;
+  box-sizing: border-box;
+  z-index: 1;
+  transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+
+/* 带时间戳的 L1：真正的时间锚点 → 大空心圈点 */
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li.lexvoice-outline-has-leading-time::after {
   left: calc(var(--lexvoice-outline-rail-x) - 5px);
   top: 13px;
   width: 10px;
   height: 10px;
-  border-radius: 50%;
   background: var(--background-primary);
   border: 2px solid color-mix(in srgb, var(--text-muted) 70%, transparent);
-  box-sizing: border-box;
-  z-index: 1;
-  transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
 }
 
 /* 正在生成（首段 / 活跃章节）：实心 accent + 脉动光晕 */
@@ -2093,19 +2347,249 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
 }
 
 /* === 招聘面试模式 · 大纲面板列表项 ===
-   emoji 已承载语义识别，CSS 只走原生 text-* 三档，无硬编码色与边框 */
+   三类内容做视觉分层，让面试官一眼分清「候选人原话 / AI 建议」：
+   ❓面试官提问 = 加粗标题（每个问题块的锚） · 💬候选人回答 = 干净正文（主角，无底色）
+   🤖AI 评价 / ⛏AI 追问 = 浅底色 + 左边框，明确标识为 AI 生成的辅助内容（用主题变量 color-mix，不用 !important） */
 .lexvoice-outline-ai-body li.lexvoice-ai-question {
   font-weight: var(--font-semibold);
   color: var(--text-normal);
   margin-top: var(--size-4-2);
 }
 
-.lexvoice-outline-ai-body li.lexvoice-ai-eval {
-  color: var(--text-muted);
+/* 候选人回答：候选人的真实表达是「主角」，保持清爽正文，不加底色干扰 */
+.lexvoice-outline-ai-body li.lexvoice-ai-answer {
+  color: var(--text-normal);
 }
 
-.lexvoice-outline-ai-body li.lexvoice-ai-followup {
-  color: var(--text-accent);
+/* AI 评价行文色（顶层/嵌套都生效） */
+.lexvoice-outline-ai-body li.lexvoice-ai-eval { color: var(--text-muted); }
+.lexvoice-outline-ai-body li.lexvoice-ai-followup { color: var(--text-accent); }
+
+/* AI 评价：淡主题色底 + 左边框，与候选人原话区隔——这是 AI 的判断，不是候选人说的。
+   底色/边框只加在「非时间轴直接子项」上（即问题下的嵌套子要点），避免叠到 time-rail 顶层项把竖线圆点错位 */
+.lexvoice-outline-ai-body ul:not(.lexvoice-outline-time-rail) > li.lexvoice-ai-eval {
+  background: color-mix(in srgb, var(--interactive-accent) 7%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--interactive-accent) 45%, transparent);
+  border-radius: var(--radius-s);
+  padding: 2px 6px;
+  margin: 3px 0;
+}
+
+/* AI 追问建议：淡暖色底 + 左边框，标识为「可执行的 AI 建议」，与评价区分开 */
+.lexvoice-outline-ai-body ul:not(.lexvoice-outline-time-rail) > li.lexvoice-ai-followup {
+  background: color-mix(in srgb, var(--color-yellow, var(--text-accent)) 10%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--color-yellow, var(--text-accent)) 50%, transparent);
+  border-radius: var(--radius-s);
+  padding: 2px 6px;
+  margin: 3px 0;
+}
+
+/* 招聘模式条目的语义图标（替代 ❓💬🤖⛏ emoji）。inline-flex 紧裹 SVG，
+   与文字基线对齐；颜色按类型区分，svg 用 currentColor 跟随。 */
+.lexvoice-outline-marker-icon {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: -0.16em;
+  margin-right: 5px;
+  flex: 0 0 auto;
+}
+.lexvoice-outline-marker-icon svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2;
+}
+.lexvoice-outline-ai-body li.lexvoice-ai-question > .lexvoice-outline-marker-icon { color: var(--text-muted); }
+.lexvoice-outline-ai-body li.lexvoice-ai-answer > .lexvoice-outline-marker-icon { color: var(--text-normal); }
+.lexvoice-outline-ai-body li.lexvoice-ai-eval > .lexvoice-outline-marker-icon { color: var(--interactive-accent); }
+.lexvoice-outline-ai-body li.lexvoice-ai-followup > .lexvoice-outline-marker-icon { color: var(--text-accent); }
+
+/* ============ 招聘需求挖掘 · 会中画像字段树（Phase 2，structure-based 大纲） ============ */
+.lexvoice-outline-jobportrait-head {
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--size-4-3);
+}
+.lexvoice-outline-jobportrait-progress {
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+.lexvoice-outline-dim-group {
+  margin-bottom: var(--size-4-3);
+}
+.lexvoice-outline-dim-group-title {
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  color: var(--text-faint);
+  letter-spacing: 0.04em;
+  margin-bottom: var(--size-4-1);
+}
+.lexvoice-outline-dim-leaf {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px 6px;
+  border-radius: var(--radius-s);
+  line-height: 1.5;
+}
+.lexvoice-outline-dim-leaf:hover {
+  background: var(--background-modifier-hover);
+}
+.lexvoice-outline-dim-name {
+  color: var(--text-normal);
+}
+.lexvoice-outline-dim-evidence {
+  margin-left: 4px;
+  font-size: var(--font-ui-smaller);
+}
+.lexvoice-outline-dim-missing {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  font-style: italic;
+}
+/* 三态色：图标走主题语义色，整行 missing 弱化 */
+.lexvoice-outline-dim-status-covered .lexvoice-outline-marker-icon { color: var(--color-green); }
+.lexvoice-outline-dim-status-partial .lexvoice-outline-marker-icon { color: var(--color-yellow); }
+.lexvoice-outline-dim-status-missing .lexvoice-outline-marker-icon { color: var(--text-faint); }
+.lexvoice-outline-dim-status-missing .lexvoice-outline-dim-name { color: var(--text-muted); }
+.lexvoice-outline-dim-status-missing { opacity: 0.75; }
+
+/* Phase 3 会中"追问建议"卡片：放字段树最顶，作行动召唤。无 emoji，全 Lucide。 */
+.lexvoice-outline-followup {
+  margin-bottom: var(--size-4-4);
+  padding-bottom: var(--size-4-2);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.lexvoice-outline-followup-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: var(--size-4-2);
+}
+.lexvoice-outline-followup-title-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-accent);
+}
+.lexvoice-outline-followup-title-icon .svg-icon {
+  width: var(--icon-s);
+  height: var(--icon-s);
+}
+.lexvoice-outline-followup-title-text {
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+  letter-spacing: 0.02em;
+}
+.lexvoice-outline-followup-card {
+  padding: var(--size-4-2);
+  margin-bottom: var(--size-4-2);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  border-left: 2px solid var(--background-modifier-border);
+}
+.lexvoice-outline-followup-card.lexvoice-followup-status-missing { border-left-color: var(--text-faint); }
+.lexvoice-outline-followup-card.lexvoice-followup-status-partial { border-left-color: var(--color-yellow); }
+.lexvoice-outline-followup-card .lexvoice-followup-card-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+.lexvoice-outline-followup-card .lexvoice-followup-dim-icon {
+  display: inline-flex;
+  align-items: center;
+}
+.lexvoice-outline-followup-card.lexvoice-followup-status-missing .lexvoice-followup-dim-icon { color: var(--text-faint); }
+.lexvoice-outline-followup-card.lexvoice-followup-status-partial .lexvoice-followup-dim-icon { color: var(--color-yellow); }
+.lexvoice-outline-followup-card .lexvoice-followup-dim-icon .svg-icon {
+  width: var(--icon-s);
+  height: var(--icon-s);
+}
+.lexvoice-outline-followup-card .lexvoice-followup-dim-name {
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+}
+.lexvoice-outline-followup-card .lexvoice-followup-badge {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  padding: 0 5px;
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-border);
+}
+.lexvoice-outline-followup-card .lexvoice-followup-reason {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+.lexvoice-outline-followup-card .lexvoice-followup-question {
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+  line-height: 1.5;
+  margin-bottom: var(--size-4-2);
+}
+.lexvoice-outline-followup-card .lexvoice-followup-actions {
+  display: flex;
+  gap: var(--size-4-2);
+}
+.lexvoice-outline-followup-card .lexvoice-followup-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+  box-shadow: none;
+}
+.lexvoice-outline-followup-card .lexvoice-followup-btn:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+.lexvoice-outline-followup-card .lexvoice-followup-btn-icon {
+  display: inline-flex;
+  align-items: center;
+}
+.lexvoice-outline-followup-card .lexvoice-followup-btn-icon .svg-icon {
+  width: var(--icon-xs);
+  height: var(--icon-xs);
+}
+
+/* 转写进度状态栏指示器（常驻、可点击打开队列；空闲时收起）。*/
+.lexvoice-statusbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.lexvoice-statusbar.lexvoice-statusbar-hidden { display: none; }
+.lexvoice-statusbar .lexvoice-statusbar-icon {
+  display: inline-flex;
+  align-items: center;
+}
+.lexvoice-statusbar .lexvoice-statusbar-icon .svg-icon {
+  width: var(--icon-xs);
+  height: var(--icon-xs);
+}
+.lexvoice-statusbar .lexvoice-statusbar-spin .svg-icon {
+  transform-origin: center;
+  animation: lexvoice-statusbar-rotate 0.9s linear infinite;
+}
+.lexvoice-statusbar .lexvoice-statusbar-text {
+  font-size: var(--font-ui-smaller);
+}
+.lexvoice-statusbar.lexvoice-statusbar-idle .lexvoice-statusbar-text,
+.lexvoice-statusbar.lexvoice-statusbar-idle .lexvoice-statusbar-icon {
+  color: var(--text-faint);
+}
+@keyframes lexvoice-statusbar-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .lexvoice-outline-panel-tabs {
@@ -2533,7 +3017,10 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   overflow-x: auto;
 }
 
-.lexvoice-sediment-pipeline-node {
+/* 用 .lexvoice-sediment 父选择器链把特异性提到 0,2,0，
+   避免主题里 body button / .theme-light button 这种 0,1,1 规则覆盖，
+   也避免使用 !important（Obsidian 插件审核会扣分） */
+.lexvoice-sediment .lexvoice-sediment-pipeline-node {
   flex: 0 0 auto;
   gap: 8px;
   min-height: 36px;
@@ -2593,7 +3080,7 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   height: 13px;
 }
 
-.lexvoice-sediment-pipeline-node.is-current {
+.lexvoice-sediment .lexvoice-sediment-pipeline-node.is-current {
   background: var(--background-primary);
   border-color: var(--lv-sediment-accent-strong);
 }
@@ -2674,7 +3161,7 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   gap: 4px;
 }
 
-.lexvoice-sediment-rescan-button {
+.lexvoice-sediment .lexvoice-sediment-rescan-button {
   padding: 0;
   border: 0;
   background: transparent;
@@ -2811,6 +3298,48 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   white-space: nowrap;
 }
 
+/* 学习卡片标题行：标题在左、带主题色底的「图标+文字」类型标签在同一行右上角。
+   顶部对齐，长标题换行也不挤标签。 */
+.lexvoice-sediment-item-title-row.is-card {
+  align-items: flex-start;
+  gap: 8px;
+}
+.lexvoice-sediment-item-title-row.is-card .lexvoice-sediment-item-title {
+  flex: 1 1 auto;
+}
+.lexvoice-sediment-item-title-row.is-card .lexvoice-sediment-type-pill {
+  margin-left: auto;
+  flex: 0 0 auto;
+  margin-top: 1px;
+  background: color-mix(in srgb, var(--interactive-accent) 13%, transparent);
+  border-color: color-mix(in srgb, var(--interactive-accent) 26%, transparent);
+  color: var(--text-accent);
+}
+.lexvoice-sediment-item-title-row.is-card .lexvoice-sediment-type-pill .lexvoice-sediment-type-icon {
+  color: var(--text-accent);
+}
+
+/* 观点类卡片：标题下方的「谁的观点」一行，主题色、小字、带引号图标 */
+.lexvoice-sediment-card-holder {
+  margin-top: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-accent);
+  font-weight: 560;
+}
+.lexvoice-sediment-card-holder-icon {
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  opacity: 0.85;
+}
+.lexvoice-sediment-card-holder-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
 /* 学习卡片：标题允许换行，不再截断 */
 .lexvoice-sediment-item-title.is-card {
   white-space: normal;
@@ -2818,11 +3347,12 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   overflow: visible;
   word-break: break-word;
   overflow-wrap: anywhere;
-  line-height: 1.35;
+  line-height: 1.4;
 }
 
-/* 学习卡片：摘要允许 2 行，超出再省略 */
+/* 学习卡片：摘要允许 2 行，超出再省略；与标题留出呼吸间距 */
 .lexvoice-sediment-item-summary.is-card {
+  margin-top: 6px;
   white-space: normal;
   text-overflow: clip;
   overflow: hidden;
@@ -2831,19 +3361,7 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   -webkit-box-orient: vertical;
   word-break: break-word;
   overflow-wrap: anywhere;
-}
-
-/* 学习卡片底部：类型胶囊靠右下，作为轻量元信息 */
-.lexvoice-sediment-card-footer {
-  margin-top: 6px;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-}
-
-.lexvoice-sediment-card-footer .lexvoice-sediment-type-pill {
-  background: var(--lv-sediment-bg-subtle, var(--background-modifier-hover));
-  border-color: transparent;
+  line-height: 1.5;
 }
 
 .lexvoice-sediment-type-pill {
@@ -2951,6 +3469,26 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   outline: none;
 }
 .lexvoice-sediment-item-title.lexvoice-todo-title.is-editing:focus { outline: none; }
+
+/* 热词 / 人员候选：可点击改名的标题，复用待办标题的编辑视觉 */
+.lexvoice-sediment-editable-title {
+  cursor: text;
+  padding: 1px 5px;
+  margin-left: -5px;
+  border-radius: 4px;
+  transition: background-color 0.15s;
+}
+.lexvoice-sediment-editable-title:hover {
+  background: var(--background-modifier-hover);
+}
+.lexvoice-sediment-editable-title.is-editing {
+  background: var(--lv-sediment-active);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 28%, var(--background-modifier-border));
+  outline: none;
+  white-space: normal;
+  word-break: break-word;
+}
+.lexvoice-sediment-editable-title.is-editing:focus { outline: none; }
 
 /* 字段在 editing 态做出视觉占位（设计稿对齐：accent 边 + accent 软底 + accent 字） */
 .lexvoice-sediment-field.is-editing {
@@ -3395,8 +3933,8 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   gap: 9px;
 }
 
-.lexvoice-sediment-action,
-.lexvoice-sediment-text-button {
+.lexvoice-sediment .lexvoice-sediment-action,
+.lexvoice-sediment .lexvoice-sediment-text-button {
   padding: 0;
   border: 0;
   background: transparent;
@@ -3741,55 +4279,61 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   gap: 9px;
 }
 
-.lexvoice-outline-recent-filter-chip {
-  min-height: 28px;
+/* 筛选 chip：软胶囊，不再用 Obsidian 默认 button 的白底硬框。
+   父链 .lexvoice-outline-recent-filter-wrap 提特异性到 0,2,0，
+   稳压主题里 body button / .theme-light button 这种 0,1,1，不用 !important（插件审核合规）。 */
+.lexvoice-outline-recent-filter-wrap .lexvoice-outline-recent-filter-chip {
+  min-height: 26px;
   max-width: 136px;
   padding: 0 12px;
-  border: 1px solid var(--background-modifier-border);
+  border: none;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--background-primary) 92%, transparent);
+  background: color-mix(in srgb, var(--background-secondary) 60%, transparent);
   color: var(--text-muted);
   box-shadow: none;
   font-size: var(--font-ui-smaller);
   line-height: 1.2;
+  font-weight: 500;
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: pointer;
   letter-spacing: 0;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
-.lexvoice-outline-recent-filter-chip:hover {
-  color: color-mix(in srgb, var(--text-normal) 82%, var(--text-accent));
-  border-color: color-mix(in srgb, var(--text-accent) 30%, var(--background-modifier-border));
-  background: color-mix(in srgb, var(--background-modifier-hover) 72%, transparent);
+.lexvoice-outline-recent-filter-wrap .lexvoice-outline-recent-filter-chip:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
   box-shadow: none;
 }
 
-.lexvoice-outline-recent-filter-chip.is-active {
-  color: var(--lex-primary-soft, var(--text-accent));
-  border-color: var(--lex-border-active-soft, color-mix(in srgb, var(--interactive-accent) 24%, var(--background-modifier-border)));
-  background: var(--lex-bg-active, color-mix(in srgb, var(--interactive-accent) 11%, var(--background-primary)));
+.lexvoice-outline-recent-filter-wrap .lexvoice-outline-recent-filter-chip.is-active {
+  color: var(--text-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 13%, transparent);
   box-shadow: none;
-  font-weight: 560;
+  font-weight: 600;
 }
 
-.lexvoice-outline-recent-filter-clear {
+/* 清除筛选：纯文字链，无框无底 */
+.lexvoice-outline-recent-filter-wrap .lexvoice-outline-recent-filter-clear {
   flex: 0 0 auto;
   padding: 0;
-  border: 0;
+  border: none;
   background: transparent;
   box-shadow: none;
-  color: var(--text-muted);
-  font-size: var(--font-ui-small);
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
   line-height: 1;
   cursor: pointer;
+  transition: color 0.15s ease;
 }
 
-.lexvoice-outline-recent-filter-clear:hover {
+.lexvoice-outline-recent-filter-wrap .lexvoice-outline-recent-filter-clear:hover {
   color: var(--text-accent);
   background: transparent;
+  box-shadow: none;
 }
 
 .lexvoice-outline-recent-filter-empty {
@@ -4538,9 +5082,26 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
 .lexvoice-settings-tabs {
   display: flex;
   gap: 0;
+  flex-wrap: wrap;
   border-bottom: 1px solid var(--background-modifier-border);
   margin-bottom: var(--size-4-4);
-  margin-top: var(--size-2-2);
+  /* 常驻吸顶：滚动设置内容时标签栏始终可见。背景不透明 + z-index 压住下方内容。 */
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--background-primary);
+  padding-top: var(--size-2-2);
+}
+
+/* 吸顶时把不透明背景向上延伸一段，盖住设置容器自带 padding-top 透出来的内容。 */
+.lexvoice-settings-tabs::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 48px;
+  background: var(--background-primary);
 }
 
 .lexvoice-settings-tabs button {
@@ -4673,6 +5234,110 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   display: flex;
   gap: var(--size-2-2);
   margin-top: var(--size-4-2);
+}
+
+.lexvoice-audio-input-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-3);
+  margin: var(--size-4-2) 0 var(--size-4-4);
+  padding: var(--size-4-4);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+}
+
+.lexvoice-audio-input-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--size-4-4);
+}
+
+.lexvoice-audio-input-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.lexvoice-audio-input-title {
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+  line-height: var(--line-height-tight);
+}
+
+.lexvoice-audio-input-desc {
+  margin-top: var(--size-2-1);
+  max-width: 620px;
+  font-size: var(--font-ui-small);
+  line-height: var(--line-height-normal);
+  color: var(--text-muted);
+}
+
+.lexvoice-audio-input-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--size-2-2);
+  flex-shrink: 0;
+}
+
+.lexvoice-audio-input-btn {
+  white-space: nowrap;
+}
+
+.lexvoice-audio-input-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(260px, 1.2fr);
+  gap: var(--size-4-3);
+}
+
+.lexvoice-audio-input-field {
+  min-width: 0;
+}
+
+.lexvoice-audio-input-label {
+  margin-bottom: var(--size-2-2);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-medium);
+  color: var(--text-muted);
+}
+
+.lexvoice-audio-input-select {
+  width: 100%;
+}
+
+.lexvoice-audio-input-hint,
+.lexvoice-audio-input-warning {
+  margin-top: var(--size-2-2);
+  font-size: var(--font-ui-smaller);
+  line-height: var(--line-height-normal);
+  color: var(--text-muted);
+}
+
+.lexvoice-audio-input-warning {
+  margin-top: 0;
+  padding-top: var(--size-2-3);
+  border-top: 1px solid var(--background-modifier-border);
+  color: var(--text-faint);
+}
+
+.lexvoice-audio-input-diag {
+  margin-top: calc(var(--size-2-2) * -1);
+}
+
+@media (max-width: 760px) {
+  .lexvoice-audio-input-head {
+    flex-direction: column;
+  }
+
+  .lexvoice-audio-input-actions {
+    justify-content: flex-start;
+  }
+
+  .lexvoice-audio-input-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 
@@ -5183,6 +5848,61 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   grid-template-columns: 1fr 1fr;
   gap: var(--size-2-3);
   margin-bottom: var(--size-4-3);
+}
+
+/* 招聘项目化（F2）：JD 项目下拉行 / 综合素质 chips / 简历 PDF 下拉 */
+.lexvoice-recruit-project-row {
+  display: flex;
+  gap: var(--size-2-3);
+  align-items: center;
+  margin-bottom: var(--size-2-2);
+}
+.lexvoice-recruit-project-row .dropdown {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.lexvoice-recruit-pdf-sel {
+  flex: 0 1 auto;
+  max-width: 60%;
+  font-size: var(--font-ui-smaller);
+}
+.lexvoice-recruit-qualities {
+  margin-top: var(--size-2-2);
+}
+.lexvoice-recruit-quality-title {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin-bottom: var(--size-2-2);
+}
+.lexvoice-recruit-quality-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-2);
+}
+.lexvoice-recruit-quality-chip {
+  font-size: var(--font-ui-smaller);
+  padding: var(--size-2-1) var(--size-2-3);
+  border-radius: var(--radius-l);
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--background-secondary));
+  color: var(--text-normal);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+.lexvoice-recruit-quality-detail {
+  margin-top: var(--size-2-2);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  padding: var(--size-2-2) var(--size-2-3);
+  border-left: 2px solid var(--color-accent);
+  border-radius: 0 var(--radius-s) var(--radius-s) 0;
+  background: var(--background-secondary);
+}
+.lexvoice-recruit-quality-warn {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  padding: var(--size-2-2) var(--size-2-3);
+  border-left: 2px solid var(--color-yellow);
+  border-radius: 0 var(--radius-s) var(--radius-s) 0;
+  background: color-mix(in srgb, var(--color-yellow) 10%, var(--background-secondary));
 }
 
 .lexvoice-recruit-meta-cell {
@@ -6917,8 +7637,17 @@ select.lexvoice-recruit-input.dropdown {
 }
 
 .lexvoice-finalizing-banner-icon {
+  /* inline-flex 紧裹 SVG，配合 svg{display:block} 消除基线下伸空隙，
+     让盒子中心 = 图标视觉中心，旋转才不会晃。transform-origin 显式居中兜底。 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--lex-primary-soft);
+  transform-origin: center center;
   animation: lexvoice-spin 1.4s linear infinite;
+}
+.lexvoice-finalizing-banner-icon svg {
+  display: block;
 }
 
 .lexvoice-finalizing-banner-text {
@@ -7069,6 +7798,27 @@ select.lexvoice-recruit-input.dropdown {
   font-variant-numeric: tabular-nums;
   color: var(--lex-text-muted, var(--text-muted));
   white-space: nowrap;
+}
+
+/* 连续重复时间戳（同段内多个 L1 共用一个段起点）：
+   隐藏文字，用 ↘ 暗示是上一时间段的延续；rail 圆点和点击仍正常 */
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li > .lexvoice-time-link.lexvoice-outline-leading-time.is-duplicate-time,
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li > p > .lexvoice-time-link.lexvoice-outline-leading-time.is-duplicate-time {
+  color: transparent;
+  position: absolute;
+}
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li > .lexvoice-time-link.lexvoice-outline-leading-time.is-duplicate-time::after,
+.lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li > p > .lexvoice-time-link.lexvoice-outline-leading-time.is-duplicate-time::after {
+  content: "↘";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 10px;
+  color: var(--text-faint);
+  font-size: 11px;
+  pointer-events: none;
 }
 
 .lexvoice-outline-ai-body ul.lexvoice-outline-time-rail > li {
@@ -8119,4 +8869,343 @@ select.lexvoice-recruit-input.dropdown {
 .workspace-leaf-content .lexvoice-outline .lexvoice-inline-player button.lexvoice-inline-player-icon-btn svg {
   color: currentColor;
   stroke: currentColor;
+}
+
+/* ============================================================
+   Mobile layout fixes
+   ============================================================ */
+
+.lexvoice-outline.is-mobile {
+  padding: 14px 18px max(22px, env(safe-area-inset-bottom));
+}
+
+.lexvoice-outline.is-mobile .lexvoice-outline-head.is-idle,
+.lexvoice-outline.is-mobile .lexvoice-outline-head.is-active-session {
+  gap: 10px;
+  padding: 0;
+}
+
+.lexvoice-outline.is-mobile .lexvoice-outline-title {
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+.lexvoice-outline.is-mobile .lexvoice-outline-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lexvoice-outline.is-mobile .lexvoice-outline-control-row {
+  display: grid;
+  grid-template-columns: minmax(42px, auto) minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 6px;
+  align-items: center;
+}
+
+.lexvoice-outline.is-mobile .lexvoice-outline-control-label {
+  font-size: 14px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.lexvoice-outline.is-mobile .lexvoice-outline-select-wrap {
+  min-width: 0;
+}
+
+.lexvoice-outline.is-mobile .lexvoice-outline-control-row select.lexvoice-outline-select-control {
+  min-height: 38px;
+  font-size: 15px;
+}
+
+.lexvoice-outline.is-mobile .lexvoice-outline-control-row > .setting-item-description {
+  grid-column: 2;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+  line-height: 1.45;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.lexvoice-outline.is-mobile .lexvoice-outline-device-status {
+  margin-left: 0;
+}
+
+.lexvoice-outline.is-mobile .lexvoice-outline-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.85fr) minmax(0, 0.85fr);
+  gap: 8px;
+  margin: 0;
+}
+
+.lexvoice-outline.is-mobile .lexvoice-outline-action-button {
+  min-width: 0;
+  height: 38px;
+  padding: 0 8px;
+  border-radius: 9px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.lexvoice-outline.is-mobile .lexvoice-outline-action-button.is-record,
+.lexvoice-outline.is-mobile .lexvoice-outline-action-button.is-record.mod-cta {
+  font-size: 14px;
+}
+
+.lexvoice-outline.is-mobile .lexvoice-outline-action-icon,
+.lexvoice-outline.is-mobile .lexvoice-outline-action-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.lexvoice-outline.is-mobile .lexvoice-outline-panel-tabs {
+  gap: 22px;
+  margin-top: 8px;
+  padding-bottom: 8px;
+}
+
+.lexvoice-outline.is-mobile .lexvoice-inline-player,
+.lexvoice-outline.is-mobile .lexvoice-recording-player {
+  padding: 9px 10px;
+  border-radius: 12px;
+}
+
+.lexvoice-outline.is-mobile .lexvoice-inline-player-play,
+.lexvoice-outline.is-mobile .lexvoice-recording-player-primary {
+  width: 32px;
+  height: 32px;
+  flex-basis: 32px;
+}
+
+.lexvoice-outline.is-mobile .lexvoice-recording-player.is-live:not(.is-network):not(.is-microphone) .lexvoice-recording-player-primary {
+  width: 34px;
+  height: 34px;
+  flex-basis: 34px;
+}
+
+.lexvoice-outline.is-mobile .lexvoice-inline-player-main,
+.lexvoice-outline.is-mobile .lexvoice-recording-player-main {
+  gap: 9px;
+}
+
+.lexvoice-outline.is-mobile .lexvoice-inline-player-icon-btn,
+.lexvoice-outline.is-mobile .lexvoice-recording-player-secondary {
+  width: 32px;
+  height: 32px;
+  flex-basis: 32px;
+}
+
+.lexvoice-outline.is-mobile .lexvoice-outline-ai-body,
+.lexvoice-outline.is-mobile .lexvoice-outline-note-timeline {
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.lexvoice-outline.is-mobile .lexvoice-outline-empty,
+.lexvoice-outline.is-mobile .lexvoice-outline-section-title {
+  overflow-wrap: break-word;
+}
+
+@media (max-width: 520px) {
+  .lexvoice-bubble-wrap {
+    display: none;
+  }
+}
+
+/* 招聘上下文弹窗：「总是弹出本窗口」开关行 */
+.lexvoice-recruit-ask-row {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.lexvoice-recruit-ask-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+/* 一卡通快速配置：首页推荐快捷路径，轻微主题色强调 */
+.lexvoice-home-block.lexvoice-home-onecard {
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 30%, transparent);
+  background: color-mix(in srgb, var(--interactive-accent) 5%, transparent);
+  border-radius: var(--radius-m);
+  padding: var(--size-4-3);
+}
+
+/* 模型选择 Modal：搜索框 + 可点列表 */
+.lexvoice-pick-search {
+  width: 100%;
+  margin: 4px 0 10px;
+  padding: 6px 8px;
+}
+.lexvoice-pick-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.lexvoice-pick-item {
+  text-align: left;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 6px 8px;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+}
+.lexvoice-pick-item:hover {
+  background: var(--background-modifier-hover);
+}
+.lexvoice-pick-empty {
+  color: var(--text-muted);
+  padding: 8px;
+}
+
+/* API 方案块：说明整行 → 下拉+按钮一行 → 激活态提示整行（替代 obsidian.Setting 左名右控件的拥挤布局） */
+.lexvoice-scheme-block {
+  padding: var(--size-4-2) 0 var(--size-4-1);
+}
+.lexvoice-scheme-desc {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  line-height: 1.55;
+  margin-bottom: 10px;
+}
+.lexvoice-scheme-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.lexvoice-scheme-select {
+  flex: 1 1 220px;
+  min-width: 180px;
+  max-width: 380px;
+}
+.lexvoice-scheme-btns {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.lexvoice-scheme-status {
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.5;
+}
+.lexvoice-scheme-status-name {
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+}
+.lexvoice-scheme-status-sep {
+  color: var(--text-faint);
+}
+.lexvoice-scheme-status-hint {
+  color: var(--text-faint);
+}
+
+/* 招聘设置·文件夹路径不存在时的警示行 + 创建按钮 */
+.lexvoice-folder-warn {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-3);
+  flex-wrap: wrap;
+  margin: calc(-1 * var(--size-2-2)) 0 var(--size-4-2);
+  padding: var(--size-2-2) var(--size-2-3);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--color-yellow) 10%, var(--background-secondary));
+  border-left: 2px solid var(--color-yellow);
+  border-radius: 0 var(--radius-s) var(--radius-s) 0;
+}
+.lexvoice-settings-hint {
+  margin: 0 0 var(--size-4-3);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* F7 招聘主页 code block 渲染 */
+.lexvoice-hr-actions {
+  display: flex;
+  gap: var(--size-4-2);
+  flex-wrap: wrap;
+  margin: var(--size-2-2) 0;
+}
+.lexvoice-hr-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--size-4-2);
+  margin: var(--size-2-2) 0;
+}
+.lexvoice-hr-stat-card {
+  background: var(--background-secondary);
+  border-radius: var(--radius-m);
+  padding: var(--size-4-3);
+  text-align: center;
+}
+.lexvoice-hr-stat-value {
+  font-size: 1.7em;
+  font-weight: var(--font-bold);
+  color: var(--text-normal);
+  line-height: 1.2;
+}
+.lexvoice-hr-stat-label {
+  margin-top: var(--size-2-1);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+.lexvoice-hr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-ui-small);
+}
+.lexvoice-hr-table th,
+.lexvoice-hr-table td {
+  text-align: left;
+  padding: var(--size-2-2) var(--size-2-3);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.lexvoice-hr-table th {
+  font-weight: var(--font-semibold);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+.lexvoice-hr-row {
+  cursor: pointer;
+}
+.lexvoice-hr-row:hover {
+  background: var(--background-modifier-hover);
+}
+.lexvoice-hr-latest {
+  margin: var(--size-2-2) 0;
+  padding-left: var(--size-4-4);
+}
+.lexvoice-hr-latest li {
+  margin: var(--size-2-1) 0;
+}
+.lexvoice-hr-empty {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  padding: var(--size-4-2) 0;
+}
+.lexvoice-hr-block-error {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-3);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  padding: var(--size-2-2) var(--size-2-3);
+  background: var(--background-secondary);
+  border-radius: var(--radius-s);
 }
