@@ -45,7 +45,10 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        # 用 npm install 而非 npm ci：本仓库 devDeps 含 obsidian:"latest" 与 ^ 范围 +
+        # vitest 的平台相关 esbuild 可选依赖，lock 跨平台严格校验易失配；release 只需构建可发布产物，
+        # 用 npm install 让 CI 按运行平台现解析依赖，避免 npm ci 因 lock 漂移而失败。
+        run: npm install --no-audit --no-fund
 
       - name: Build plugin
         run: npm run build
