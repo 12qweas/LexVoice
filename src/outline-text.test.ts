@@ -338,36 +338,36 @@ describe("deriveFollowupCards —— Phase3 追问卡：派生/排序/去重/反
   });
 });
 
-// 真实事故：recruit-needs 岗位画像把全场只零星出现的称呼"老爷"指认为一号位并贯穿全文
-// （凭空的实体-角色绑定）。本探测找"产出高频引用 vs 转写低频出现"的倒挂实体作软提示。
+// 回归场景：岗位画像曾把全场只零星出现的某称呼指认为一号位并贯穿全文（凭空的实体-角色绑定，此处用占位名复现）。
+// 本探测找"产出高频引用 vs 转写低频出现"的倒挂实体作软提示。
 describe("findLowEvidenceEntities（人物指认幻觉机械探测）", () => {
-  const transcript = "今天聊聊团队。老爷上次说过授权的事。后来又提到老爷。小兵今天也在，小兵说小兵的事，小兵又说，小兵补充，小兵最后总结。";
+  const transcript = "今天聊聊团队。张三上次说过授权的事。后来又提到张三。李四今天也在，李四说李四的事，李四又说，李四补充，李四最后总结。";
   it("产出高频引用、转写低频出现的实体被标记", () => {
-    const output = "一号位（老爷）的风格如何。老爷期待抓手。老爷希望有人疏通。嵌入老爷团队。<!-- lexvoice-people: 老爷, 小兵 -->";
-    const findings = findLowEvidenceEntities(["老爷", "小兵"], output, transcript);
+    const output = "一号位（张三）的风格如何。张三期待抓手。张三希望有人疏通。嵌入张三团队。<!-- lexvoice-people: 张三, 李四 -->";
+    const findings = findLowEvidenceEntities(["张三", "李四"], output, transcript);
     expect(findings.length).toBe(1);
-    expect(findings[0].name).toBe("老爷");
+    expect(findings[0].name).toBe("张三");
     expect(findings[0].outputCount).toBeGreaterThanOrEqual(3);
     expect(findings[0].transcriptCount).toBe(2);
   });
-  it("转写中证据充分的实体不报（小兵 6 次）", () => {
-    const output = "小兵的问题。小兵没结果。小兵敏感。小兵销声匿迹。<!-- lexvoice-people: 小兵 -->";
-    expect(findLowEvidenceEntities(["小兵"], output, transcript)).toEqual([]);
+  it("转写中证据充分的实体不报（李四 6 次）", () => {
+    const output = "李四的问题。李四没结果。李四敏感。李四销声匿迹。<!-- lexvoice-people: 李四 -->";
+    expect(findLowEvidenceEntities(["李四"], output, transcript)).toEqual([]);
   });
   it("产出引用不足 3 次不报（偶尔提一句不算核心锚点）", () => {
-    const output = "提到过老爷一次。<!-- lexvoice-people: 老爷 -->";
-    expect(findLowEvidenceEntities(["老爷"], output, transcript)).toEqual([]);
+    const output = "提到过张三一次。<!-- lexvoice-people: 张三 -->";
+    expect(findLowEvidenceEntities(["张三"], output, transcript)).toEqual([]);
   });
   it("产出与转写次数持平（不倒挂）不报", () => {
-    const out2 = "老爷甲。老爷乙。"; // 2 次，转写也 2 次
-    expect(findLowEvidenceEntities(["老爷"], out2, transcript, { minOutputMentions: 2 })).toEqual([]);
+    const out2 = "张三甲。张三乙。"; // 2 次，转写也 2 次
+    expect(findLowEvidenceEntities(["张三"], out2, transcript, { minOutputMentions: 2 })).toEqual([]);
   });
   it("单字名与空名跳过（子串误命中率太高）", () => {
     const output = "扣扣扣扣扣扣。<!-- lexvoice-people: 扣 -->";
     expect(findLowEvidenceEntities(["扣", "", "  "], output, "无")).toEqual([]);
   });
   it("重复名只算一次；空输入不崩", () => {
-    expect(findLowEvidenceEntities(["老爷", "老爷"], "老爷老爷老爷老爷", "")).toHaveLength(1);
+    expect(findLowEvidenceEntities(["张三", "张三"], "张三张三张三张三", "")).toHaveLength(1);
     expect(findLowEvidenceEntities([], "", "")).toEqual([]);
     expect(findLowEvidenceEntities(null as any, null as any, null as any)).toEqual([]);
   });

@@ -2362,16 +2362,32 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
 }
 
 /* AI 评价行文色（顶层/嵌套都生效） */
-.lexvoice-outline-ai-body li.lexvoice-ai-eval { color: var(--text-muted); }
-.lexvoice-outline-ai-body li.lexvoice-ai-followup { color: var(--text-accent); }
+.lexvoice-outline-ai-body li.lexvoice-ai-answer {
+  color: var(--text-muted);
+}
+.lexvoice-outline-ai-body li.lexvoice-ai-eval {
+  color: var(--text-normal);
+}
+.lexvoice-outline-ai-body li.lexvoice-ai-followup {
+  color: var(--text-accent);
+}
+
+/* 候选人回答 / 原始转写事实：中性引用样式，避免和 AI 判断混在一起。 */
+.lexvoice-outline-ai-body ul:not(.lexvoice-outline-time-rail) > li.lexvoice-ai-answer {
+  background: color-mix(in srgb, var(--background-secondary) 70%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--background-modifier-border) 80%, transparent);
+  border-radius: var(--radius-s);
+  padding: 3px 8px;
+  margin: 3px 0;
+}
 
 /* AI 评价：淡主题色底 + 左边框，与候选人原话区隔——这是 AI 的判断，不是候选人说的。
    底色/边框只加在「非时间轴直接子项」上（即问题下的嵌套子要点），避免叠到 time-rail 顶层项把竖线圆点错位 */
 .lexvoice-outline-ai-body ul:not(.lexvoice-outline-time-rail) > li.lexvoice-ai-eval {
-  background: color-mix(in srgb, var(--interactive-accent) 7%, transparent);
-  border-left: 2px solid color-mix(in srgb, var(--interactive-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--interactive-accent) 9%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--interactive-accent) 55%, transparent);
   border-radius: var(--radius-s);
-  padding: 2px 6px;
+  padding: 3px 8px;
   margin: 3px 0;
 }
 
@@ -7725,13 +7741,59 @@ select.lexvoice-recruit-input.dropdown {
 }
 
 .lexvoice-outline-ai-head.is-utility {
-  justify-content: flex-end;
-  min-height: 0;
-  margin: 0 0 4px;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 26px;
+  margin: 0 0 8px;
+  gap: 8px;
 }
 
 .lexvoice-outline-ai-head.is-utility .lexvoice-outline-section-title {
   display: none;
+}
+
+.lexvoice-outline-ai-section {
+  padding: 10px 12px 12px;
+  border: 0.5px solid color-mix(in srgb, var(--interactive-accent) 20%, var(--background-modifier-border));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--interactive-accent) 4%, var(--background-primary));
+}
+
+.lexvoice-outline-source-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-normal);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  flex: 1 1 auto;
+}
+
+.lexvoice-outline-source-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--interactive-accent);
+}
+
+.lexvoice-outline-source-icon .svg-icon {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.2;
+}
+
+.lexvoice-outline-source-badge {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--interactive-accent) 9%, transparent);
+  color: var(--text-accent);
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .lexvoice-outline-ai-head.is-utility button {
@@ -7741,6 +7803,7 @@ select.lexvoice-recruit-input.dropdown {
   font-size: 11px;
   box-shadow: none;
   padding: 2px 4px;
+  flex: 0 0 auto;
 }
 
 .lexvoice-time-link {

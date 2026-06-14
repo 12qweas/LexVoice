@@ -233,6 +233,7 @@ const DEFAULT_SETTINGS = {
     interviewer: "",
     seniority: "",  // 初级 / 中级 / 高级 / 资深 / 总监
     customNote: "",
+    interviewBrief: "",
     savedAt: null,
   },
   recruitAlwaysAskOnStart: true,  // 每次开始招聘录音时弹 Modal 确认上下文
@@ -294,8 +295,8 @@ const LLM_SERVICE_PRESETS = [
     endpoint: "https://api.poe.com/v1",
     endpointHelp: "Poe 的 OpenAI 兼容 API Base URL，保持默认即可。一把 Poe Key 即可调用 Claude / GPT / Gemini 等众多模型。",
     keyHelp: "填写 Poe 访问密钥（在 poe.com/api_key 获取）。注意 Poe 按积分计费，每次请求消耗积分。",
-    modelPlaceholder: "Claude-Sonnet-4.6",
-    modelHelp: "填 Poe 的 bot 名（区分大小写），例如 Claude-Sonnet-4.6、Claude-Opus-4.7、GPT-5.4、Gemini-3.1-Pro。不确定确切名称时，点下方「获取可用模型」直接从 Poe 实时列表里选，省得手敲。",
+    modelPlaceholder: "点击「获取可用模型」选择 Poe bot 名",
+    modelHelp: "填 Poe 的 bot 名，区分大小写，必须以 Poe 模型列表返回的名称为准。建议点下方「获取可用模型」直接选择，避免手敲名称导致 404。",
   },
   {
     id: "openrouter",
@@ -1928,6 +1929,7 @@ const FRONTMATTER_SCHEMA = {
   monologue: `主题: <一句话主题>`,
   recruit: `主题: <一句话主题>
 候选人: <候选人姓名；未提及写 "未提及">
+联系方式: <手机号 / 邮箱 / 微信等联系方式；未提及写 "未提及">
 应聘岗位: <应聘岗位；未提及写 "未提及">
 轮次: <初面 / 二面 / 终面 / 复试；未提及写 "未提及">
 录用建议: <强烈推荐 / 推荐 / 倾向推荐 / 倾向不推荐 / 不推荐>
@@ -2000,6 +2002,7 @@ ${frontmatterSection}**整体结构原则**：顶部用 callout 做结构化速�
 - \`> [!tip]\` 模式不匹配的软建议
 - \`> [!question]\` 悬而未决/待澄清（仅在出现时）
 - 其他正文一律不用 callout
+- 连续 callout 之间必须保留两个引用空行：上一块结束后写两行单独的 \`>\`，再写下一个 \`> [!type]\`，避免 Obsidian 把多个 callout 合并成一个块
 
 **主体内容写作要求**（**还原优先，提炼为辅**——结构化是为了让人读懂，不是为了变短）：
 - 把讨论的逻辑层级**结构化**呈现：议题/主论点 → 支撑（事实、案例、数据、异议）→ 关键细节
@@ -8570,6 +8573,15 @@ function isMoonshotKimiModel(endpoint, model) {
   }
 }
 
+function isPoeLlmEndpoint(endpoint) {
+  try {
+    const url = new URL(normalizeLlmEndpoint(endpoint));
+    return (url.hostname || "").toLowerCase() === "api.poe.com";
+  } catch {
+    return /api\.poe\.com/i.test(String(endpoint || ""));
+  }
+}
+
 function buildLlmHeaders(apiKey, endpoint) {
   const headers = { "Content-Type": "application/json" };
   const key = String(apiKey || "").trim();
@@ -8582,6 +8594,57 @@ function buildLlmHeaders(apiKey, endpoint) {
     }
   } catch {}
   return headers;
+}
+
+function getHeaderValue(headers, name) {
+  if (!headers || !name) return "";
+  const wanted = String(name).toLowerCase();
+  try {
+    if (typeof headers.get === "function") {
+      return headers.get(name) || headers.get(wanted) || "";
+    }
+  } catch {}
+  try {
+    for (const key of Object.keys(headers)) {
+      if (String(key).toLowerCase() === wanted) return String(headers[key] || "");
+    }
+  } catch {}
+  return "";
+}
+
+function parseRetryAfterMs(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return 0;
+  if (/^\d+(?:\.\d+)?$/.test(raw)) return Math.max(0, Math.round(Number(raw) * 1000));
+  const time = Date.parse(raw);
+  if (Number.isFinite(time)) return Math.max(0, time - Date.now());
+  return 0;
+}
+
+function getLlmRetryAfterMsFromHeaders(headers) {
+  const retryAfter = parseRetryAfterMs(getHeaderValue(headers, "retry-after"));
+  if (retryAfter > 0) return retryAfter;
+  return parseRetryAfterMs(getHeaderValue(headers, "x-ratelimit-reset-requests"));
+}
+
+function decorateLlmHttpDetail(status, detail, endpoint) {
+  const base = String(detail || "").trim();
+  if (!isPoeLlmEndpoint(endpoint)) return base;
+  const code = Number(status) || 0;
+  let hint = "";
+  if (code === 400 || code === 404) {
+    hint = "Poe 的 model 必须填写 Poe bot 名，且区分大小写；请点「获取可用模型」从列表中选择。";
+  } else if (code === 401 || code === 403) {
+    hint = "请检查 Poe API Key 是否有效，且已按 Bearer token 使用。";
+  } else if (code === 402) {
+    hint = "Poe 积分或订阅额度不足，请到 Poe 账户检查额度。";
+  } else if (code === 413) {
+    hint = "本次请求上下文可能超过 Poe 目标 bot 的限制，请缩短输入或换更长上下文的 bot。";
+  } else if (code === 429 || code === 503 || code === 529) {
+    hint = "Poe 当前限流或服务繁忙；LexVoice 会按服务端 Retry-After 退避后重试一次。";
+  }
+  if (!hint) return base;
+  return base ? `${base}。${hint}` : hint;
 }
 
 function extractLlmContent(data) {
@@ -8607,11 +8670,12 @@ async function readLlmError(res) {
   return text.slice(0, 500);
 }
 
-function createLlmHttpError(status, detail) {
-  const cleanDetail = String(detail || "").slice(0, 500);
+function createLlmHttpError(status, detail, endpoint, headers) {
+  const cleanDetail = decorateLlmHttpDetail(status, detail, endpoint).slice(0, 500);
   const err = new Error(`LLM 调用失败 ${status}：${cleanDetail}`) as any;
   err.status = status;
   err.statusDetail = cleanDetail;
+  err.retryAfterMs = getLlmRetryAfterMsFromHeaders(headers);
   err.nonRetryable = isNonRetryableLlmHttpFailure(status, cleanDetail);
   return err;
 }
@@ -8690,7 +8754,7 @@ async function requestLlmChatCompletionViaObsidian(endpoint, headers, payloadTex
       const json = JSON.parse(text);
       detail = json && (json.error && json.error.message || json.message || json.detail) || text;
     } catch {}
-    throw createLlmHttpError(status, detail);
+    throw createLlmHttpError(status, detail, endpoint, response && response.headers);
   }
   return parseRequestUrlJson(response);
 }
@@ -8937,8 +9001,9 @@ async function requestLlmChatCompletion(plugin, messages, options) {
           messageChars,
           payloadChars,
           statusDetail: msg,
+          retryAfterMs: getLlmRetryAfterMsFromHeaders(res.headers),
         });
-        throw createLlmHttpError(res.status, msg);
+        throw createLlmHttpError(res.status, msg, endpoint, res.headers);
       }
       if (streamWanted) {
         armTimer(); // 给"首个 token 到达"一个完整的空闲窗口
@@ -8968,7 +9033,15 @@ async function testLlmConnection(plugin) {
 function isTransientLlmError(error) {
   if (isLlmNonRetryableError(error)) return false;
   const msg = String((error && error.message) || error || "");
-  return /Failed to fetch|network|ECONNRESET|ETIMEDOUT|\b(429|500|502|503|504)\b|rate\s*limit|temporarily|service unavailable/i.test(msg);
+  return /Failed to fetch|network|ECONNRESET|ETIMEDOUT|\b(429|500|502|503|504|529)\b|rate\s*limit|temporarily|service unavailable|overloaded/i.test(msg);
+}
+
+function getLlmRetryDelayMs(error, attemptIndex) {
+  const hinted = Number(error && error.retryAfterMs);
+  const jitter = Math.floor(Math.random() * 300);
+  const fallback = 1000 * Math.pow(2, Math.max(0, Number(attemptIndex) || 0)) + jitter;
+  const raw = Number.isFinite(hinted) && hinted > 0 ? Math.max(hinted, 250 + jitter) : fallback;
+  return Math.max(250, Math.min(60 * 1000, Math.round(raw)));
 }
 
 // 拉取 OpenAI 兼容服务的可用模型列表（GET {base}/models）。用 obsidian.requestUrl 绕过 CORS。
@@ -9095,7 +9168,7 @@ async function callLlmWithMeta(plugin, system, user, options) {
     } catch (e) {
       lastError = e;
       if (i >= attempts - 1 || !isTransientLlmError(e)) throw e;
-      await delayMs(1000 + Math.floor(Math.random() * 700));
+      await delayMs(getLlmRetryDelayMs(e, i));
     }
   }
   if (!data && lastError) throw lastError;
@@ -9193,6 +9266,30 @@ function isLexVoiceCalloutBoundary(line) {
     || /^####\s+/.test(trimmed);
 }
 
+function ensureLexVoiceCalloutGapBeforeHeader(out) {
+  if (!Array.isArray(out) || !out.length) return;
+  let lastContentIndex = -1;
+  for (let i = out.length - 1; i >= 0; i--) {
+    if (String(out[i] || "").trim()) { lastContentIndex = i; break; }
+  }
+  if (lastContentIndex < 0) return;
+  if (!/^\s*>/.test(String(out[lastContentIndex] || ""))) return;
+  let quoteBlankCount = 0;
+  for (let i = out.length - 1; i >= 0; i--) {
+    const line = String(out[i] || "");
+    if (/^\s*>\s*$/.test(line)) {
+      quoteBlankCount++;
+      continue;
+    }
+    if (!line.trim()) continue;
+    break;
+  }
+  while (quoteBlankCount < 2) {
+    out.push(">");
+    quoteBlankCount++;
+  }
+}
+
 function normalizeLexVoiceCallouts(markdown) {
   if (!markdown) return "";
   const lines = String(markdown).replace(/\r\n/g, "\n").split("\n");
@@ -9214,6 +9311,7 @@ function normalizeLexVoiceCallouts(markdown) {
 
     const header = getLexVoiceCalloutHeader(line);
     if (header) {
+      ensureLexVoiceCalloutGapBeforeHeader(out);
       out.push(`> ${header.text}`);
       // 模型把标题和长正文折叠到同一行时，把正文拆到续行，避免标题超长
       if (header.inlineBody) out.push(`> ${header.inlineBody}`);
@@ -12281,6 +12379,58 @@ function buildRecruitContextPrefix(ctx) {
 
 // 录音开始时据 JD / 简历 / 特殊关注点生成「面试提纲」——供面试官面试中照着提问。
 // 重点围绕"候选人经历 × JD 要求的匹配度"设计针对性问题。无 JD 且无简历则返回空（不生成）。
+function buildRecruitInterviewBriefStrategy(ctx) {
+  const round = String(ctx && ctx.round || "").trim() || "初面";
+  const seniority = String(ctx && ctx.seniority || "").trim() || "未指定";
+  const interviewer = String(ctx && ctx.interviewer || "").trim();
+  const roundKey = round.replace(/\s+/g, "").toLowerCase();
+  const interviewerText = interviewer || "未指定面试官";
+  const lines = [
+    `- 本场轮次：${round}。`,
+    `- 岗位资历：${seniority}。`,
+    `- 面试官/角色：${interviewerText}。`,
+    "",
+    "### 轮次策略",
+  ];
+  if (/初面|初试|一面/.test(roundKey)) {
+    lines.push("- 初面重点：基础能力摸底、简历事实核验、项目角色边界、关键数字口径、JD 硬性要求是否具备。");
+    lines.push("- 追问风格：多问细节和证据链，少问宏大战略；每题都要能逼出“我做了什么、怎么做、结果怎么算”。");
+  } else if (/二面|复试|交叉面|三面/.test(roundKey)) {
+    lines.push("- 复面/交叉面重点：专业深度、复杂场景决策、跨部门推动、失败复盘、与前一轮遗留问题的闭环。");
+    lines.push("- 追问风格：围绕关键项目拆解方法论、取舍、利益冲突和真实影响。");
+  } else if (/hr面|人力面/.test(roundKey)) {
+    lines.push("- HR 面重点：动机、稳定性、薪酬/期望、文化适配、管理风格、风险项解释。");
+    lines.push("- 追问风格：用行为事件验证，不要只问主观偏好。");
+  } else if (/终面|终试|总监面|董事长|老板|ceo|vp|合伙人/.test(roundKey + interviewerText.toLowerCase())) {
+    lines.push("- 终面重点：战略理解、组织适配、业务迁移、风险承担、入职 90 天优先级、长期动机。");
+    lines.push("- 追问风格：少问流程细节，多问判断标准、取舍逻辑、业务视角和不可逆决策。");
+  } else {
+    lines.push("- 未明确轮次时：默认按“事实核验 + 专业深挖 + 动机风险”平衡设计。");
+  }
+  lines.push("", "### 面试官角色策略");
+  if (/董事长|老板|ceo|创始人|合伙人|集团|总裁|vp|高管/i.test(interviewerText)) {
+    lines.push("- 高层面试：问题必须上升到业务、组织、战略、价值观和关键风险，不要输出招聘专员式基础核验题。");
+    lines.push("- 必须包含：为什么现在换机会、为什么适合本公司、过往最大判断失误、90 天优先级。");
+  } else if (/招聘|hr|人力|人才|组织|od/i.test(interviewerText)) {
+    lines.push("- 招聘/HR 面试：重点验证简历真实性、动机稳定性、岗位基本匹配、薪酬预期、组织适配和风险解释。");
+  } else if (/业务|用人|部门|负责人|总监|经理|leader|李总|王总|张总/i.test(interviewerText)) {
+    lines.push("- 用人经理面试：重点验证能否解决本岗位真实业务问题、跨部门推动、交付质量和上手路径。");
+  } else {
+    lines.push("- 面试官角色不明时：默认按用人经理视角输出，兼顾少量动机和风险问题。");
+  }
+  lines.push("", "### 岗位资历策略");
+  if (/初级|junior|助理|专员/i.test(seniority)) {
+    lines.push("- 初级岗位：少问战略，多问基础功、执行稳定性、学习能力、细节意识。");
+  } else if (/中级|高级|资深|专家|senior/i.test(seniority)) {
+    lines.push("- 高级/资深岗位：必须追问独立主导范围、复杂度、方法论、跨部门影响和失败复盘。");
+  } else if (/总监|负责人|head|director|leader|管理/i.test(seniority)) {
+    lines.push("- 总监/负责人岗位：必须追问组织设计、团队管理、预算/成本、机制建设、业务取舍、关键风险兜底。");
+  } else {
+    lines.push("- 资历未指定时：按 JD 要求推断问题深度，不默认放宽。");
+  }
+  return lines.join("\n");
+}
+
 async function generateInterviewBriefForRecruit(plugin, ctx, opts) {
   if (!ctx || (!ctx.jd && !ctx.resume)) return "";
   opts = opts || {};
@@ -12291,21 +12441,102 @@ async function generateInterviewBriefForRecruit(plugin, ctx, opts) {
   if (ctx.seniority) meta.push(`岗位资历：${ctx.seniority}`);
   if (ctx.candidateName) meta.push(`候选人：${ctx.candidateName}`);
   if (ctx.round) meta.push(`轮次：${ctx.round}`);
+  if (ctx.interviewer) meta.push(`面试官：${ctx.interviewer}`);
   const metaLine = meta.length ? meta.join(" · ") + "\n\n" : "";
   const jdBlock = ctx.jd ? `## 岗位 JD\n${String(ctx.jd).trim()}\n\n` : "";
   const resumeBlock = ctx.resume ? `## 候选人简历\n${String(ctx.resume).trim()}\n\n` : "";
   const focusBlock = ctx.customNote ? `## 面试官特别想考察的点（必须单独设计如何验证）\n${String(ctx.customNote).trim()}\n\n` : "";
   const generalBlock = general ? `## 已有通用提纲（这些题已覆盖，请**不要重复**，只补针对本候选人的深挖题）\n${general}\n\n` : "";
   const prevBlock = prevPending.length ? `## 上一轮面试遗留的「待澄清」点\n${prevPending.map(p => "- " + p).join("\n")}\n\n` : "";
-  const sys = "你是资深面试官教练，擅长在面试开始前据 JD 和候选人简历设计有针对性的面试提纲，帮面试官把该挖的点挖透，避免泛泛而谈。";
-  const user = `这是一场面试**开始前**的准备。请基于下面的 JD、候选人简历和面试官关注点，生成${general ? "**针对这位候选人**的提纲（通用题已在上面通用提纲覆盖，本次聚焦简历×JD 的针对性深挖，不要重复通用题）" : "一份**面试提纲**"}，供面试官面试中照着提问。
+  const strategyBlock = buildRecruitInterviewBriefStrategy(ctx);
+  const sys = "你是集团级面试官提纲助手，不是招聘专员。你擅长把 JD 与候选人简历之间的张力转成高质量面试问题，帮助面试官验证战略匹配、动机稳定性、组织取舍、风险底线和真实主导程度。";
+  const user = `这是一场面试**开始前**的准备。请基于下面的 JD、候选人简历、面试轮次、岗位资历、面试官角色和面试官关注点，生成${general ? "**针对这位候选人**的现场提词卡（通用题已在上面通用提纲覆盖，本次聚焦简历×JD 的针对性深挖，不要重复通用题）" : "一份**现场面试提词卡**"}，供面试官面试中快速扫读和照着追问。
 
-要求：
-- 紧扣"候选人经历 × JD 要求的匹配度"设计问题——尤其针对**简历里写到、但需要当面验证深浅/真伪/独立主导程度**的经历（如某个项目的真实角色、某个数字的来源、某段跨行业经历能否迁移）。
-- 按主题分组（如：① JD 硬性要求核验 ② 关键经历深挖 ③ 面试官特别关注点 ④ 软素质与动机）。每组下 2-4 个**具体**问题。
-- 问题要能挖到事实层：不要"介绍一下你的 X 项目"，而要"X 项目里那个 20% 提升的基线是多少、你具体负责哪部分、谁拍的板"。
-- 若有"面试官特别想考察的点"，单独一组重点设计——含可以从候选人哪些经历切入来侧面验证它。
-${prevPending.length ? "- 上一轮遗留的「待澄清」点务必逐条转成追问题，单独成组，每题以「【上轮遗留】」开头。\n" : ""}- 直接输出 Markdown（## 分组标题 + 列表），简洁实用，不要前言、不要解释、不要代码围栏。
+## 角色定位
+
+你不是在生成普通 HR 题库。你要先判断本场面试官的视角：
+- 如果面试官是董事长 / CEO / 创始人 / 集团高管：问题要少而重，关注战略理解、岗位动机、组织取舍、长期稳定性、风险底线和入职后优先级。
+- 如果面试官是招聘负责人 / HRD：问题可更多追简历真实性、项目细节、数据口径、职责边界和风险解释。
+- 如果面试官是用人部门负责人：问题更关注入职后能否解决业务问题、跨部门协同、交付质量和落地路径。
+
+## 必须先内部完成的分析
+
+请先在内部完成下面 4 步判断，不要输出分析过程：
+1. 从 JD 中提取岗位真正要解决的 3-5 个组织问题、关键能力和做不好会造成的风险。
+2. 从简历中提取最强匹配证据、最大不确定点、可能夸大的成果或需要核验的数字、行业/规模/团队/职级迁移风险、稳定性和动机风险。
+3. 找出 JD 与简历之间的张力：看似匹配但场景不同、规模落差、项目很多但主导程度不明、技术/系统投入的长期成本不明、AI/自动化成果的 ROI 口径不明。
+4. 根据面试官角色选择最值得问的 6-8 个问题。
+
+## 出题规则
+
+- 先按下面的【本场出题策略】决定问题重心。初面、终面、HR 面、高层面、用人经理面不能输出同一套模板。
+- 默认输出**现场提词卡**，不是完整题库。文字必须短，便于面试时扫读。
+- 紧扣"候选人经历 × JD 要求的匹配度"设计问题，尤其针对简历里写到但需要验证深浅/真伪/独立主导程度的经历。
+- 每个必问问题都必须绑定至少一个具体来源：JD 要求 + 简历事实。若简历缺失，则明确写"简历材料不足，仅基于 JD"。
+- 好问题要逼候选人讲取舍、边界、代价、失败、底线和口径，不要只让候选人复述经历。
+- 主问必须短，追问必须是线索，不要写成长段完整问题。
+- 若有"面试官特别想考察的点"，必须进入「本场目标」或「必问问题」，不能只放备用题库。
+${prevPending.length ? "- 上一轮遗留的「待澄清」点务必逐条转成追问题，优先进入必问问题；每题标「上轮遗留」。\n" : ""}- 直接输出 Markdown，不要前言、不要解释、不要代码围栏。
+
+## 董事长/高管终面优先主题
+
+如果本场是终面、高管面、董事长面或 CEO 面，请优先从以下主题中选择 6-8 个，不必全部覆盖：
+1. 动机与岗位落差：是否真想做这个岗位，是否有屈才感，是否稳定。
+2. 行业迁移：是否清楚原行业经验哪些不能直接迁移。
+3. 数智化基础骨架：是否理解数据、流程、权限、系统、服务边界是 AI 化前提。
+4. 组织设计取舍：有限团队如何撑起多个职能，而不是靠堆人。
+5. 自研 vs 外采：技术投入、长期维护成本和组织能力沉淀。
+6. AI / 自动化 ROI：是否为了业务结果做 AI，而不是追技术概念。
+7. 跨部门服务边界：如何处理 SSC、HRBP、COE、行政、IT、法务之间的边界。
+8. 不可逆风险兜底：用工合规、薪酬、权限、数据、员工关系的底线机制。
+9. 90 天优先级：入职后先诊断什么、先动什么、怎么证明价值。
+
+## 禁止项
+
+- 不要问"请介绍一下你的经历"。
+- 不要问"你做过哪些系统/项目"这类泛题。
+- 不要照抄 JD。
+- 不要生成泛泛的 STAR 面试题。
+- 不要把所有经历都问一遍。
+- 不要超过 8 个主问题。
+- 不要输出长篇背景解释。
+- 不要把通用题库整段搬运到必问问题里。
+
+## 输出格式必须严格遵守
+
+# 面试提纲
+
+## 本场目标
+- 最多 3 条，每条不超过 28 字。
+
+## 必问问题
+
+### 1. <问题标题，不超过 14 字>
+**主问**：<不超过 55 字>
+
+**追问**：
+- <不超过 32 字>
+- <不超过 32 字>
+- <不超过 32 字>
+
+**看点**：<不超过 32 字>
+
+**来源**：JD：<不超过 36 字>；简历：<不超过 42 字>
+
+继续输出 6-8 个必问问题。总数不要超过 8 个。
+
+## 备用追问
+<details>
+<summary>按模块展开备用题库</summary>
+
+### <模块名>
+- <备用题，不超过 45 字>
+- <备用题，不超过 45 字>
+
+</details>
+
+## 本场出题策略
+${strategyBlock}
 
 ${metaLine}${jdBlock}${resumeBlock}${focusBlock}${generalBlock}${prevBlock}`;
   const text = await callLlm(plugin, sys, user, { timeoutMs: 60000 });
@@ -12435,10 +12666,19 @@ async function getRecruitInterviewOutline(plugin, ctx) {
   try { const prev = await findPrevRoundRecruitNote(plugin.app, ctx); if (prev && prev.pending) prevPending = prev.pending; } catch {}
   // 3) 针对段
   const targeted = await generateInterviewBriefForRecruit(plugin, ctx, { generalOutline: general, prevPending });
-  // 4) 组合（粗体小标 + 分隔，避免与各段内部 ## 标题层级打架）
+  // 4) 组合：面试现场优先看「本场提词卡」；通用题库折叠保留，避免整屏长题库压住真正要问的问题。
   const parts = [];
-  if (general) parts.push("**【通用提纲 · 本岗位通用】**\n\n" + general);
-  if (targeted) parts.push((general ? "---\n\n" : "") + "**【针对本候选人】**\n\n" + targeted);
+  if (targeted) parts.push(targeted);
+  if (general) {
+    parts.push([
+      "<details>",
+      "<summary>📚 通用题库 · 本岗位通用</summary>",
+      "",
+      general,
+      "",
+      "</details>",
+    ].join("\n"));
+  }
   return parts.join("\n\n");
 }
 
@@ -12447,6 +12687,19 @@ function buildInterviewBriefDetails(session) {
   const brief = session && session.interviewBrief ? String(session.interviewBrief).trim() : "";
   if (!brief) return "";
   return ["<details>", "<summary>📋 面试提纲（录音前据 JD / 简历生成）</summary>", "", brief, "", "</details>"].join("\n");
+}
+
+function renderRecordingInterviewBriefBlock(sessionId, brief) {
+  const body = String(brief || "").trim();
+  if (!body) return "";
+  return [
+    "",
+    "## 📋 面试提纲（录音前据 JD / 简历生成 · 仅供面试参考）",
+    `<!-- lexvoice-interview-brief-start:${sessionId} -->`,
+    body,
+    `<!-- lexvoice-interview-brief-end:${sessionId} -->`,
+    "",
+  ].join("\n");
 }
 
 // 由代码注入的会话元信息前缀 —— LLM 不需要推断 frontmatter 里的 time/时长
@@ -12458,7 +12711,7 @@ const FRONTMATTER_CONTENT_KEYS = {
   seminar: ["主题", "研讨对象", "参与者"],
   huddle: ["主题", "当事人", "参谋"],
   monologue: ["主题"],
-  recruit: ["主题", "候选人", "应聘岗位", "轮次", "录用建议", "一句话评价", "待澄清"],
+  recruit: ["主题", "候选人", "联系方式", "应聘岗位", "轮次", "录用建议", "一句话评价", "待澄清"],
 };
 
 // 把任意 mode（含 custom-xxx / recruit-needs）映射到用于查 frontmatter schema 表的 baseKey。
@@ -14034,6 +14287,8 @@ class OutlineView extends obsidian.ItemView {
     this.inlineAudioFile = null;
     this.inlineOutlineBody = null;
     this.outlineViewingMs = null;
+    this.lastLiveOutlineFocusKey = "";
+    this._outlineFollowRaf = 0;
     this.sedimentToastTimer = 0;
     this.sedimentAdvanceTimer = 0;
     this.sedimentScanToken = 0;
@@ -14064,6 +14319,7 @@ class OutlineView extends obsidian.ItemView {
   async onClose() {
     if (this.unsubscribeRecorder) { this.unsubscribeRecorder(); this.unsubscribeRecorder = null; }
     if (this._renderRaf) { cancelAnimationFrame(this._renderRaf); this._renderRaf = 0; }
+    if (this._outlineFollowRaf) { cancelAnimationFrame(this._outlineFollowRaf); this._outlineFollowRaf = 0; }
     if (this.sedimentToastTimer) { clearTimeout(this.sedimentToastTimer); this.sedimentToastTimer = 0; }
     if (this.sedimentAdvanceTimer) { clearTimeout(this.sedimentAdvanceTimer); this.sedimentAdvanceTimer = 0; }
   }
@@ -16886,6 +17142,7 @@ class OutlineView extends obsidian.ItemView {
         if (target && target.closest && target.closest("a,button")) return;
         if (li === current) {
           this.outlineViewingMs = null;
+          this.lastLiveOutlineFocusKey = "";
         } else if (Number.isFinite(ms)) {
           this.outlineViewingMs = ms;
         }
@@ -16918,10 +17175,35 @@ class OutlineView extends obsidian.ItemView {
         back.createSpan({ cls: "lexvoice-back-to-current-label", text: "回到当前" });
         back.onclick = () => {
           this.outlineViewingMs = null;
+          this.lastLiveOutlineFocusKey = "";
           this.render();
         };
       }
     }
+    this.autoFocusLiveOutlineCurrent(body, session, recInfo, current, items);
+  }
+
+  autoFocusLiveOutlineCurrent(body, session, recInfo, current, items) {
+    if (!body || !session || !recInfo || !current) return;
+    if (recInfo.state !== "recording" && recInfo.state !== "paused") return;
+    if (Number.isFinite(this.outlineViewingMs)) return;
+    const segCount = Array.isArray(session.segments) ? session.segments.length : 0;
+    const itemCount = Array.isArray(items) ? items.length : 0;
+    const updatedAt = session.realtimeOutlineUpdatedAt || "";
+    const outlineLen = (this.aiOutline || session.realtimeOutline || "").length;
+    const key = [session.id || "", recInfo.state || "", segCount, itemCount, updatedAt, outlineLen].join("|");
+    if (key === this.lastLiveOutlineFocusKey) return;
+    this.lastLiveOutlineFocusKey = key;
+    if (this._outlineFollowRaf) cancelAnimationFrame(this._outlineFollowRaf);
+    this._outlineFollowRaf = requestAnimationFrame(() => {
+      this._outlineFollowRaf = 0;
+      try {
+        if (!current || !current.isConnected) return;
+        current.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+      } catch (e) {
+        try { current.scrollIntoView(false); } catch {}
+      }
+    });
   }
 
   decoratePlaybackOutlineChapters(body) {
@@ -17686,8 +17968,13 @@ class OutlineView extends obsidian.ItemView {
   }
 
   renderAIOutline(root, session, recInfo = null, recordingIssue = null) {
-    const aiWrap = root.createDiv({ cls: "lexvoice-outline-section" });
+    const aiWrap = root.createDiv({ cls: "lexvoice-outline-section lexvoice-outline-ai-section" });
     const aiHead = aiWrap.createDiv({ cls: "lexvoice-outline-ai-head is-utility" });
+    const aiTitle = aiHead.createDiv({ cls: "lexvoice-outline-source-title" });
+    const aiIcon = aiTitle.createSpan({ cls: "lexvoice-outline-source-icon" });
+    try { obsidian.setIcon(aiIcon, session && session.mode === "recruit" ? "user-check" : "sparkles"); } catch {}
+    aiTitle.createSpan({ text: session && session.mode === "recruit" ? "AI 面试大纲" : "AI 整理大纲" });
+    aiHead.createDiv({ cls: "lexvoice-outline-source-badge", text: session && session.mode === "recruit" ? "转写 + AI 判断" : "由转写整理" });
     const refreshBtn = aiHead.createEl("button", { text: this.outlineRunning ? "停止等待" : "刷新" });
     refreshBtn.disabled = !session || session.segments.length === 0;
     refreshBtn.onclick = () => {
@@ -17716,6 +18003,8 @@ class OutlineView extends obsidian.ItemView {
           if (text.startsWith("🤖")) li.addClass("lexvoice-ai-eval");
           else if (text.startsWith("⛏")) li.addClass("lexvoice-ai-followup");
           else if (text.startsWith("❓")) li.addClass("lexvoice-ai-question");
+          else if (/^[?？]\s*/.test(text)) li.addClass("lexvoice-ai-question");
+          else if (text.startsWith("💬")) li.addClass("lexvoice-ai-answer");
         }
       };
       const decorateAfterRender = () => {
@@ -17867,6 +18156,8 @@ class OutlineView extends obsidian.ItemView {
   applyOutlineMarkerIcon(li, text) {
     const markers = [
       { emoji: "❓", cls: "lexvoice-ai-question", icon: "help-circle" },
+      { emoji: "？", cls: "lexvoice-ai-question", icon: "help-circle" },
+      { emoji: "?", cls: "lexvoice-ai-question", icon: "help-circle" },
       { emoji: "💬", cls: "lexvoice-ai-answer", icon: "message-square" },
       { emoji: "🤖", cls: "lexvoice-ai-eval", icon: "bot" },
       { emoji: "⛏", cls: "lexvoice-ai-followup", icon: "search" },
@@ -20634,6 +20925,24 @@ class LexVoicePlugin extends obsidian.Plugin {
         : obsidian.normalizePath(`${this.settings.mdFolder}/${mdName}.md`);
 
       const meta = getModeMeta(this.settings, mode);
+      let recordingInterviewBrief = "";
+      if (!continuationInfo && mode === "recruit" && this._currentRecruitContext && (this._currentRecruitContext.jd || this._currentRecruitContext.resume)) {
+        recordingInterviewBrief = String(this._currentRecruitContext.interviewBrief || "").trim();
+        if (!recordingInterviewBrief) {
+          try {
+            new obsidian.Notice("正在据 JD / 简历创建面试提纲…", 4000);
+            recordingInterviewBrief = await getRecruitInterviewOutline(this, this._currentRecruitContext);
+            if (recordingInterviewBrief) {
+              this._currentRecruitContext.interviewBrief = recordingInterviewBrief;
+              this.settings.recruitContext = { ...normalizeRecruitContext(this._currentRecruitContext) };
+              await this.saveSettings();
+            }
+          } catch (e) {
+            console.error("[LexVoice] create interview brief before recording failed", e);
+            new obsidian.Notice("面试提纲创建失败，已继续开始录音；稍后可在纪要里手动补充。", 7000);
+          }
+        }
+      }
       const oneShotMode = this._oneShotCaptureMode;
       const requestedCaptureMode = oneShotMode || this.settings.captureMode || "mic";
       const captureMode = resolveRuntimeAudioInputMode(requestedCaptureMode);
@@ -20657,7 +20966,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         realtimeOutlineWorkbenchSignature: "",
         realtimeOutlineFailureCount: 0,
         realtimeOutlineNextAllowedAt: 0,
-        interviewBrief: "",
+        interviewBrief: recordingInterviewBrief,
         writeQueue: Promise.resolve(),
         activeSegmentJobs: 0,
         pendingMeetingWorkbenchInteractions: [],
@@ -20681,52 +20990,20 @@ class LexVoicePlugin extends obsidian.Plugin {
       const titleLine = continuationInfo
         ? `## 🔁 续录 ${startedAt.format("YYYY-MM-DD HH:mm")} · ${meta.prefix}（录音中…）`
         : `# ${meta.emoji} ${startedAt.format("YYYY-MM-DD HH:mm")} · ${meta.prefix}（录音中…）`;
+      const interviewBriefBlock = (!continuationInfo && recordingInterviewBrief)
+        ? renderRecordingInterviewBriefBlock(this.session.id, recordingInterviewBrief).trimEnd()
+        : null;
       const header = [
         continuationInfo ? "" : null,
         titleLine,
         "",
         `<!-- lexvoice-session:${this.session.id} -->`,
+        interviewBriefBlock,
         `<!-- lexvoice-segments-start:${this.session.id} -->`,
         `<!-- lexvoice-segments-end:${this.session.id} -->`,
         "",
       ].filter(v => v !== null).join("\n");
       await this.appendToNote(mdPath, header);
-
-      // 招聘模式 + 注入了 JD/简历：录音开始时据 JD/简历/特殊关注点异步生成「面试提纲」写到分段上方，
-      // 供面试官面试中照着提问。不阻塞录音；生成失败静默忽略。续录不重新生成。
-      if (!continuationInfo && mode === "recruit") {
-        const briefSession = this.session;
-        const recruitCtx = briefSession && briefSession.recruitContext;
-        if (recruitCtx && (recruitCtx.jd || recruitCtx.resume)) {
-          new obsidian.Notice("正在据 JD / 简历生成面试提纲…", 4000);
-          (async () => {
-            try {
-              const brief = await getRecruitInterviewOutline(this, recruitCtx);
-              if (!brief || this.session !== briefSession) return; // 生成期间会话已结束/切换
-              briefSession.interviewBrief = brief;
-              const block = [
-                "",
-                "## 📋 面试提纲（录音前据 JD / 简历生成 · 仅供面试参考）",
-                `<!-- lexvoice-interview-brief-start:${briefSession.id} -->`,
-                brief,
-                `<!-- lexvoice-interview-brief-end:${briefSession.id} -->`,
-                "",
-              ].join("\n");
-              // 自吞错误：绝不让提纲写入把 writeQueue 链变成 rejected——否则后续每段 handleSegment 挂到
-              // rejected 链上会被静默跳过、丢段（与 processSegment "吞掉本段异常保护写链" 同纪律）。
-              const writeBrief = async () => {
-                try { await this.insertBeforeSegmentsStart(briefSession.mdPath, block, briefSession.id); }
-                catch (e) { console.error("[LexVoice] write interview brief failed", e); }
-              };
-              briefSession.writeQueue = briefSession.writeQueue.then(writeBrief, writeBrief);
-              await briefSession.writeQueue;
-              new obsidian.Notice("面试提纲已生成，可在笔记顶部查看", 4000);
-            } catch (e) {
-              console.error("[LexVoice] interview brief generation failed", e);
-            }
-          })();
-        }
-      }
 
       const segmentDurationMs = isStreaming
         ? 0
@@ -26855,7 +27132,7 @@ const RECRUIT_CONTEXT_FLOW_COPY = {
     title: "招聘评估上下文",
     desc: "录音前先注入 JD 和简历，AI 评价才有锚点；否则评价会偏宽，默认按通用 HR 框架打分。所有字段都可跳过，但建议至少填写 JD。",
     skipText: "跳过注入，继续录音",
-    primaryText: "保存并开始录音",
+    primaryText: "创建提纲并开始录音",
     draftText: "保存草稿",
   },
   import: {
@@ -26883,7 +27160,7 @@ const RECRUIT_CONTEXT_FLOW_COPY = {
     title: "招聘评估上下文",
     desc: "这里保存招聘评估常用的 JD、简历和候选人信息。录音、导入音频或重新整理时仍可临时修改。",
     skipText: "不保存关闭",
-    primaryText: "保存上下文",
+    primaryText: "创建面试提纲",
     draftText: "保存草稿",
   },
 };
@@ -26906,6 +27183,7 @@ function normalizeRecruitContext(ctx) {
     // F2 招聘项目化：选中 JD 项目时携带的派生上下文（供注入与落盘 frontmatter 用）
     jdFile: String(raw.jdFile || "").trim(),                       // 项目 JD 文件路径（落盘时写 frontmatter 的 jd 链接）
     generalOutline: String(raw.generalOutline || "").trim(),        // 统一面试提纲
+    interviewBrief: String(raw.interviewBrief || "").trim(),          // 针对候选人的录音前面试提纲
     requiredQualities: Array.isArray(raw.requiredQualities)         // 综合素质（必备素质清单）
       ? raw.requiredQualities
           .map(q => ({ 素质: String((q && q.素质) || "").trim(), 定义: String((q && q.定义) || "").trim(), 信号: String((q && q.信号) || "").trim() }))
@@ -27023,6 +27301,12 @@ function listJDProjects(app, jdFolderPath) {
   return out;
 }
 
+function stripMarkdownDetailsWrapper(text) {
+  const s = String(text || "").trim();
+  const m = s.match(/^<details(?:\s+[^>]*)?>\s*<summary>[\s\S]*?<\/summary>\s*([\s\S]*?)\s*<\/details>\s*$/i);
+  return m ? String(m[1] || "").trim() : s;
+}
+
 // 解析单个 JD 文件：岗位描述 / 综合素质（frontmatter 对象数组）/ 统一面试提纲。
 // 综合素质格式异常但有数据 → qualitiesError=true（调用方提示"按未配置处理"），不抛错、不阻断。
 async function parseJdProject(app, jdFilePath) {
@@ -27034,8 +27318,8 @@ async function parseJdProject(app, jdFilePath) {
   const fm = (app.metadataCache.getFileCache(jdFile) || {}).frontmatter || {};
   let desc = extractMarkdownSection(md, "## 岗位描述");
   if (!desc) desc = md.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
-  result.岗位描述 = desc;
-  result.统一提纲 = extractMarkdownSection(md, "## 统一面试提纲");
+  result.岗位描述 = stripMarkdownDetailsWrapper(desc);
+  result.统一提纲 = stripMarkdownDetailsWrapper(extractMarkdownSection(md, "## 统一面试提纲"));
   const raw = fm.综合素质;
   if (Array.isArray(raw)) {
     const parsed = [];
@@ -27117,6 +27401,7 @@ function renderRecruitJdTemplate(fm, jdBody) {
     qLines.push(`    定义: ${q.定义}`);
     qLines.push(`    信号: ${q.信号}`);
   }
+  const qualityNames = DEFAULT_RECRUIT_QUALITIES.map(q => q.素质).join("、");
   return [
     "---",
     "类型: 招聘项目",
@@ -27132,8 +27417,35 @@ function renderRecruitJdTemplate(fm, jdBody) {
     `开放日期: ${today}`,
     "---",
     "",
+    `# ${name}`,
+    "",
+    "> [!summary] 招聘项目",
+    `> **状态**：${status} · **序列**：${seq} · **开放日期**：${today || "未记录"}`,
+    "> **候选人**：0 · **已面试**：0 · **推荐**：0 · **倾向不推荐**：0",
+    "> **最新动态**：暂无",
+    "",
+    "## 候选人看板",
+    "",
+    `![[${name}.base#全部]]`,
+    "",
+    "> [!tip] 使用方式",
+    "> 面试纪要放在本项目文件夹后，会自动出现在上方看板。看板里的「面试纪要」可跳回原始面试记录。",
+    "",
+    "## 岗位速览",
+    "",
+    `- **职位**：${name}`,
+    `- **序列**：${seq}`,
+    `- **状态**：${status}`,
+    `- **重点素质**：${qualityNames}`,
+    "",
     "## 岗位描述",
+    "",
+    "<details>",
+    "<summary>展开完整 JD</summary>",
+    "",
     body,
+    "",
+    "</details>",
     "",
     "## 统一面试提纲",
     "",
@@ -27147,7 +27459,7 @@ function renderRecruitCandidateBase(qualities) {
   // 素质名只收纯中文/字母/数字/下划线（排除空格/冒号/# 等会破坏 order 行内数组或属性引用的字符）。
   const qs = (Array.isArray(qualities) ? qualities : []).map(q => String(q || "").trim()).filter(q => /^[一-龥A-Za-z0-9_]+$/.test(q));
   const qCols = qs.map(n => `素质_${n}`);
-  const allOrder = ["候选人", "轮次", "一句话评价", "录用建议", "time", "时长"].concat(qCols);
+  const allOrder = ["file.name", "候选人", "联系方式", "轮次", "一句话评价", "录用建议", "time", "时长"].concat(qCols);
   // 录用建议过滤一律用 contains（与 PRD F5.1 一致）：兼容「倾向推荐」「倾向推荐（条件性）」等带后缀枚举，
   // 避免精确 == 漏过条件性档；取反用 not 分组包 contains。
   return [
@@ -27156,8 +27468,18 @@ function renderRecruitCandidateBase(qualities) {
     "    - file.folder == this.file.folder",
     "    - jd != null",
     "properties:",
+    "  file.name:",
+    "    displayName: 面试纪要",
+    "  候选人:",
+    "    displayName: 姓名",
+    "  联系方式:",
+    "    displayName: 联系方式",
     "  轮次:",
     "    displayName: 面试轮次",
+    "  一句话评价:",
+    "    displayName: 一句话评价",
+    "  录用建议:",
+    "    displayName: 录用建议",
     "  time:",
     "    displayName: 面试时间",
     "  时长:",
@@ -27176,7 +27498,7 @@ function renderRecruitCandidateBase(qualities) {
     '        - 录用建议.contains("推荐")',
     "        - not:",
     '            - 录用建议.contains("不推荐")',
-    "    order: [候选人, 轮次, 一句话评价, 录用建议, time]",
+    "    order: [file.name, 候选人, 联系方式, 轮次, 一句话评价, 录用建议, time]",
     "    sort:",
     "      - property: time",
     "        direction: DESC",
@@ -27185,7 +27507,7 @@ function renderRecruitCandidateBase(qualities) {
     "    filters:",
     "      and:",
     '        - 录用建议.contains("不推荐")',
-    "    order: [候选人, 轮次, 一句话评价, 录用建议, time]",
+    "    order: [file.name, 候选人, 联系方式, 轮次, 一句话评价, 录用建议, time]",
     "  - type: table",
     "    name: 待复试",
     "    filters:",
@@ -27193,7 +27515,7 @@ function renderRecruitCandidateBase(qualities) {
     '        - 轮次 == "初面"',
     "        - not:",
     '            - 录用建议.contains("不推荐")',
-    "    order: [候选人, 轮次, 一句话评价, 录用建议, time]",
+    "    order: [file.name, 候选人, 联系方式, 轮次, 一句话评价, 录用建议, time]",
     "",
   ].join("\n");
 }
@@ -27336,6 +27658,7 @@ class RecruitContextModal extends obsidian.Modal {
       // F2：恢复上次选中的招聘项目（让重开 Modal 仍显示已选项目与其综合素质）
       jdFile: saved.jdFile || "",
       generalOutline: saved.generalOutline || "",
+      interviewBrief: saved.interviewBrief || "",
       requiredQualities: Array.isArray(saved.requiredQualities) ? saved.requiredQualities : [],
     };
   }
@@ -27382,7 +27705,7 @@ class RecruitContextModal extends obsidian.Modal {
     const jdTa = jdSec.createEl("textarea", { cls: "lexvoice-recruit-textarea lexvoice-recruit-textarea-large" });
     jdTa.value = this.ctx.jd;
     jdTa.placeholder = "粘贴完整 JD 文本，含岗位职责、任职要求、加分项等。\n整理时会从中拆解硬性要求作为评分锚点。";
-    jdTa.addEventListener("input", () => { this.ctx.jd = jdTa.value; });
+    jdTa.addEventListener("input", () => { this.ctx.jd = jdTa.value; this.clearCachedInterviewBrief(); });
     this.formEls.jd = jdTa;
 
     // 综合素质预览（仅解锁后；选中招聘项目且配置了素质时显示，chip 点开看定义）
@@ -27416,6 +27739,7 @@ class RecruitContextModal extends obsidian.Modal {
           }
           if (this.plugin.settings.recruitResumeDesensitize !== false) text = desensitizeResumeText(text);
           this.ctx.resume = text;
+          this.clearCachedInterviewBrief();
           if (this.formEls.resume) this.formEls.resume.value = text;
           new obsidian.Notice("已提取简历文本，可在下方编辑");
         });
@@ -27424,7 +27748,7 @@ class RecruitContextModal extends obsidian.Modal {
     const resumeTa = resumeSec.createEl("textarea", { cls: "lexvoice-recruit-textarea" });
     resumeTa.value = this.ctx.resume;
     resumeTa.placeholder = "粘贴简历文本，或从上方简历库选 PDF 自动提取。建议含：现任公司+岗位+年限、过往主要项目、技能栈、教育背景。";
-    resumeTa.addEventListener("input", () => { this.ctx.resume = resumeTa.value; });
+    resumeTa.addEventListener("input", () => { this.ctx.resume = resumeTa.value; this.clearCachedInterviewBrief(); });
     this.formEls.resume = resumeTa;
 
     // —— 元信息 grid ——
@@ -27435,7 +27759,7 @@ class RecruitContextModal extends obsidian.Modal {
       const inp = cell.createEl("input", { type: "text", cls: "lexvoice-recruit-input" });
       inp.value = this.ctx[key] || "";
       inp.placeholder = placeholder || "";
-      inp.addEventListener("input", () => { this.ctx[key] = inp.value; });
+      inp.addEventListener("input", () => { this.ctx[key] = inp.value; this.clearCachedInterviewBrief(); });
       this.formEls[key] = inp;
     };
     const addMetaSelect = (label, key, options) => {
@@ -27446,7 +27770,7 @@ class RecruitContextModal extends obsidian.Modal {
         const o = sel.createEl("option", { value: opt, text: opt || "（未指定）" });
         if (this.ctx[key] === opt) o.selected = true;
       }
-      sel.addEventListener("change", () => { this.ctx[key] = sel.value; });
+      sel.addEventListener("change", () => { this.ctx[key] = sel.value; this.clearCachedInterviewBrief(); });
       this.formEls[key] = sel;
     };
 
@@ -27485,6 +27809,41 @@ class RecruitContextModal extends obsidian.Modal {
 
     const startBtn = actions.createEl("button", { text: this.copy.primaryText, cls: "mod-cta" });
     startBtn.onclick = async () => {
+      const flow = (this.opts && this.opts.flow) || "recording";
+      if (flow === "settings" || flow === "recording") {
+        const originalText = startBtn.textContent || this.copy.primaryText;
+        try {
+          this.ctx = normalizeRecruitContext(this.ctx);
+          if (flow === "settings" && !this.ctx.jd && !this.ctx.resume) {
+            new obsidian.Notice("请先填写 JD 或简历，再创建面试提纲。", 5000);
+            return;
+          }
+          const shouldCreateBrief = !!(this.ctx.jd || this.ctx.resume);
+          if (shouldCreateBrief && !String(this.ctx.interviewBrief || "").trim()) {
+            startBtn.disabled = true;
+            startBtn.setText(flow === "recording" ? "正在创建提纲…" : "正在创建…");
+            const brief = await getRecruitInterviewOutline(this.plugin, this.ctx);
+            if (!brief) {
+              new obsidian.Notice("没有生成可用的面试提纲，请检查 JD / 简历和大模型配置。", 7000);
+              return;
+            }
+            this.ctx.interviewBrief = brief;
+          }
+          await this.saveCurrentContext(true);
+          this.confirmed = flow === "settings" ? "brief" : "start";
+          if (flow === "settings") {
+            new obsidian.Notice("面试提纲已创建；下一次招聘录音会写在转写内容前面。", 5000);
+          }
+          this.close();
+        } catch (e) {
+          console.error("[LexVoice] create interview brief from settings failed", e);
+          new obsidian.Notice(`创建面试提纲失败：${(e && e.message) || e}`, 8000);
+        } finally {
+          startBtn.disabled = false;
+          startBtn.setText(originalText);
+        }
+        return;
+      }
       await this.saveCurrentContext(true);
       this.confirmed = "start";
       this.close();
@@ -27497,6 +27856,9 @@ class RecruitContextModal extends obsidian.Modal {
     const added = addToJdLibrary ? upsertRecruitJdLibrary(this.plugin.settings, this.ctx) : false;
     await this.plugin.saveSettings();
     return added;
+  }
+  clearCachedInterviewBrief() {
+    if (this.ctx) this.ctx.interviewBrief = "";
   }
   openLibrary() {
     const lib = getRecruitJdLibrary(this.plugin.settings);
@@ -27517,6 +27879,7 @@ class RecruitContextModal extends obsidian.Modal {
       row.createDiv({ cls: "lexvoice-recruit-lib-meta", text: meta });
       row.onclick = () => {
         applyRecruitJdLibraryItem(this.ctx, item);
+        this.clearCachedInterviewBrief();
         sub.close();
         this.applyContextToForm();
         new obsidian.Notice("已填入历史 JD，不会覆盖当前候选人和简历");
@@ -27536,7 +27899,7 @@ class RecruitContextModal extends obsidian.Modal {
   async applyJdProjectSelection(path) {
     const seq = (this._jdSeq = (this._jdSeq || 0) + 1);  // 切换竞态守卫：丢弃过期解析结果
     if (!path) {
-      this.ctx.jdFile = ""; this.ctx.requiredQualities = []; this.ctx.generalOutline = "";
+      this.ctx.jdFile = ""; this.ctx.requiredQualities = []; this.ctx.generalOutline = ""; this.clearCachedInterviewBrief();
       this.renderQualities([]);
       return;
     }
@@ -27546,6 +27909,7 @@ class RecruitContextModal extends obsidian.Modal {
     if (parsed.岗位描述) this.ctx.jd = parsed.岗位描述;
     this.ctx.requiredQualities = parsed.综合素质 || [];
     this.ctx.generalOutline = parsed.统一提纲 || "";
+    this.clearCachedInterviewBrief();
     const proj = (this._jdProjects || []).find(p => p.jdFilePath === path);
     if (proj && !this.ctx.position) this.ctx.position = proj.position;
     this.applyContextToForm();
