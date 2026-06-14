@@ -8962,8 +8962,7 @@ select.lexvoice-recruit-input.dropdown {
 .lexvoice-outline.is-mobile .lexvoice-outline-control-row {
   display: grid;
   grid-template-columns: minmax(42px, auto) minmax(0, 1fr);
-  column-gap: 12px;
-  row-gap: 6px;
+  gap: 6px 12px;
   align-items: center;
 }
 
