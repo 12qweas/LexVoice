@@ -21522,7 +21522,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       detail: textImportSession ? "已跳过 ASR，正在准备结构化整理" : "转写已结束，正在整理上下文",
     });
     this.refreshOutlineView();
-    new obsidian.Notice(textImportSession ? "🧠 文本已读取，AI 结构化整理中…" : "🧠 所有段已处理，GPT 合并润色中…");
+    new obsidian.Notice(textImportSession ? "🧠 文本已读取，AI 结构化整理中…" : "🧠 所有段已处理，AI 合并润色中…");
 
     let polished = ""; let mergeError = null; let nonRetryableMergeError = false;
     try {
