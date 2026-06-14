@@ -26,6 +26,7 @@ import {
   serializeRequiredQualities,
   desensitizeResumeText,
   sanitizeProjectFolderName,
+  recolorReportHtml,
 } from "./outline-text";
 import {
   RECRUIT_REPORT_TEMPLATE,
@@ -10285,6 +10286,48 @@ async function generateStyledReportFromMarkdown(plugin, mode, markdown) {
   return filled;
 }
 
+// 报告生成前的配色选择器：预设或自定义颜色 → 返回 hex（取消/关闭返回 null）。报告按所选色相整体重着色。
+function pickReportAccentColor(app, defaultHex) {
+  return new Promise((resolve) => {
+    const modal = new obsidian.Modal(app);
+    modal.titleEl.setText("选择报告配色");
+    let chosen = defaultHex || "#E85F28";
+    let settled = false;
+    const finish = (val) => { if (settled) return; settled = true; resolve(val); try { modal.close(); } catch {} };
+    const wrap = modal.contentEl.createDiv({ cls: "lexvoice-color-pick" });
+    wrap.createEl("p", { cls: "lexvoice-color-hint", text: "报告按所选色相整体重新着色，纯白弥散风格不变。可多次生成不同配色（文件名自动加序号，不覆盖旧的）。" });
+    const sw = wrap.createDiv({ cls: "lexvoice-color-swatches" });
+    const presets = [["暖橙（默认）", "#E85F28"], ["宝石蓝", "#2F6BD8"], ["青墨", "#138A8A"], ["松绿", "#3B9A4B"], ["藕紫", "#7A4AD8"], ["玫红", "#D8407E"], ["棕金", "#B5811A"], ["石墨蓝", "#54627A"]];
+    const swatchEls = [];
+    let customInput;
+    const select = (hex) => {
+      chosen = hex;
+      if (customInput) customInput.value = hex;
+      for (const [el, h] of swatchEls) el.toggleClass("is-active", h.toLowerCase() === hex.toLowerCase());
+    };
+    for (const [name, hex] of presets) {
+      const el = sw.createDiv({ cls: "lexvoice-color-swatch" });
+      el.style.backgroundColor = hex;
+      el.setAttr("aria-label", name);
+      el.setAttr("title", name);
+      el.onclick = () => select(hex);
+      swatchEls.push([el, hex]);
+    }
+    const crow = wrap.createDiv({ cls: "lexvoice-color-custom" });
+    crow.createEl("label", { text: "自定义" });
+    customInput = crow.createEl("input");
+    customInput.type = "color";
+    customInput.value = chosen;
+    customInput.oninput = () => select(customInput.value);
+    const actions = wrap.createDiv({ cls: "lexvoice-color-actions" });
+    actions.createEl("button", { text: "生成报告", cls: "mod-cta" }).onclick = () => finish(chosen);
+    actions.createEl("button", { text: "取消" }).onclick = () => finish(null);
+    modal.onClose = () => finish(null);
+    select(chosen);
+    modal.open();
+  });
+}
+
 function normalizeSlideVisualItems(value, limit) {
   const arr = Array.isArray(value) ? value : [];
   return arr.map(item => {
@@ -18793,6 +18836,9 @@ class OutlineView extends obsidian.ItemView {
         .setTitle("HTML 报告")
         .onClick(() => this.plugin.generateHtmlReportForMarkdownFile(file)));
       sub.addItem((subItem) => subItem
+        .setTitle("PDF 报告（整页不截断）")
+        .onClick(() => this.plugin.generatePdfReportForMarkdownFile(file)));
+      sub.addItem((subItem) => subItem
         .setTitle("HTML 幻灯片")
         .onClick(() => this.plugin.generateHtmlDeckForMarkdownFile(file)));
       sub.addItem((subItem) => subItem
@@ -19253,6 +19299,18 @@ class LexVoicePlugin extends obsidian.Plugin {
         if (!isMd) return false;
         if (checking) return true;
         this.generateHtmlReportForMarkdownFile(file);
+        return true;
+      },
+    });
+    this.addCommand({
+      id: "generate-pdf-report",
+      name: "AI 生成当前纪要 PDF 报告（整页不截断）",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        const isMd = file instanceof obsidian.TFile && file.extension === "md";
+        if (!isMd) return false;
+        if (checking) return true;
+        this.generatePdfReportForMarkdownFile(file);
         return true;
       },
     });
@@ -22232,31 +22290,45 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
     }
   }
 
-  async generateHtmlReportForMarkdownFile(file) {
-    if (!(file instanceof obsidian.TFile) || file.extension !== "md") return;
+  // 报告生成共用：校验 LLM 配置 →（招聘/研讨）弹配色选择 → 调模型产 HTML → 按所选色相整体重着色。
+  // 返回 { html } 或 null（未配置/用户取消）。HTML 报告与 PDF 报告共用，保证选色/改色逻辑只有一份。
+  async produceReportHtmlForFile(file) {
+    if (!(file instanceof obsidian.TFile) || file.extension !== "md") return null;
     if (!this.settings.llmApiKey && !isLocalLlmEndpoint(this.settings.llmEndpoint)) {
       new obsidian.Notice("请先在 API 页配置大模型服务；本地 localhost 服务可留空密钥。", 8000);
-      return;
+      return null;
     }
     if (!this.settings.llmEndpoint || !this.settings.llmModel) {
       new obsidian.Notice("请先配置大模型服务地址和模型标识。", 8000);
-      return;
+      return null;
     }
+    // 招聘评估 / 研讨纪要：纯白弥散数据驱动模板（大模型只产 DATA JSON 注入固定模板），生成前先选配色；其余模式沿用通用 HTML 报告。
+    const frontmatter = await readFileFrontmatter(this, file);
+    const mode = detectRecentNoteMode(this, file, frontmatter);
+    const styled = mode === "recruit" || mode === "seminar";
+    let accentHex = null;
+    if (styled) {
+      accentHex = await pickReportAccentColor(this.app);
+      if (accentHex === null) return null;  // 用户取消
+    }
+    new obsidian.Notice("LexVoice：正在生成报告…");
+    const markdown = await this.app.vault.read(file);
+    let html = styled
+      ? await generateStyledReportFromMarkdown(this, mode, markdown)
+      : await generateHtmlReportFromMarkdown(this, file.basename, markdown);
+    if (styled && accentHex) html = recolorReportHtml(html, accentHex);
+    return { html };
+  }
+
+  async generateHtmlReportForMarkdownFile(file) {
     try {
-      // 招聘评估 / 研讨纪要：用纯白弥散数据驱动模板（大模型只产 DATA JSON 注入固定模板）；其余模式沿用通用 HTML 报告。
-      const frontmatter = await readFileFrontmatter(this, file);
-      const mode = detectRecentNoteMode(this, file, frontmatter);
-      const styled = mode === "recruit" || mode === "seminar";
-      new obsidian.Notice(styled ? "LexVoice：正在生成报告…" : "LexVoice：正在生成 HTML 报告…");
-      const markdown = await this.app.vault.read(file);
-      const html = styled
-        ? await generateStyledReportFromMarkdown(this, mode, markdown)
-        : await generateHtmlReportFromMarkdown(this, file.basename, markdown);
+      const r = await this.produceReportHtmlForFile(file);
+      if (!r) return;
       const folder = obsidian.normalizePath(this.settings.htmlReportFolder || DEFAULT_SETTINGS.htmlReportFolder);
       await this.ensureFolder(folder);
       const target = this.getAvailableVaultPath(`${folder}/${sanitizeReportFileStem(file.basename)}-HTML报告.html`);
       if (!target) throw new Error("无法生成可用的 HTML 报告路径");
-      const outFile = await this.app.vault.create(target, html);
+      const outFile = await this.app.vault.create(target, r.html);
       new obsidian.Notice(`LexVoice：已生成 HTML 报告：${target}`, 8000);
       if (this.settings.autoOpenHtmlReportAfterGenerate !== false) {
         this.openVaultFileInSystem(outFile.path);
@@ -22264,6 +22336,65 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
     } catch (e) {
       console.error("[LexVoice] generate html report failed", e);
       new obsidian.Notice(`HTML 报告生成失败：${(e && e.message) || e}`, 8000);
+    }
+  }
+
+  async generatePdfReportForMarkdownFile(file) {
+    try {
+      const r = await this.produceReportHtmlForFile(file);
+      if (!r) return;
+      new obsidian.Notice("LexVoice：正在渲染整页 PDF…");
+      const folder = obsidian.normalizePath(this.settings.htmlReportFolder || DEFAULT_SETTINGS.htmlReportFolder);
+      await this.ensureFolder(folder);
+      const target = this.getAvailableVaultPath(`${folder}/${sanitizeReportFileStem(file.basename)}-报告.pdf`);
+      if (!target) throw new Error("无法生成可用的 PDF 路径");
+      const pdfBuffer = await this.printHtmlToSinglePagePdfBuffer(r.html);
+      const bytes = pdfBuffer instanceof Uint8Array ? pdfBuffer : new Uint8Array(pdfBuffer || []);
+      const arrayBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      const outFile = await this.app.vault.createBinary(target, arrayBuffer);
+      new obsidian.Notice(`LexVoice：已生成 PDF 报告：${target}`, 8000);
+      if (this.settings.autoOpenHtmlReportAfterGenerate !== false) {
+        this.openVaultFileInSystem(outFile.path);
+      }
+    } catch (e) {
+      console.error("[LexVoice] generate pdf report failed", e);
+      new obsidian.Notice(`PDF 报告生成失败：${(e && e.message) || e}`, 8000);
+    }
+  }
+
+  // 整页不截断 PDF：隐藏窗口量内容真实尺寸 → 注入 @page 为整页全高 + preferCSSPageSize → 单页长 PDF（非 A4 分页，不截断）。
+  async printHtmlToSinglePagePdfBuffer(html) {
+    let BrowserWindow = null;
+    try { const e = require("electron"); BrowserWindow = e && (e.BrowserWindow || (e.remote && e.remote.BrowserWindow)); } catch {}
+    if (!BrowserWindow) { try { BrowserWindow = require("@electron/remote").BrowserWindow; } catch {} }
+    if (!BrowserWindow) throw new Error("当前 Obsidian 环境不支持自动生成 PDF");
+    const win = new BrowserWindow({ show: false, width: 1024, height: 1400, webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true } });
+    // 超时兜底：渲染进程崩溃/卡死时这些 await 可能永不 settle，不加超时会让用户卡在"正在渲染…"且无法取消。
+    const withTimeout = (p, ms, label) => Promise.race([
+      Promise.resolve(p),
+      new Promise((_, rej) => setTimeout(() => rej(new Error(`${label}超时（${ms / 1000}s）`)), ms)),
+    ]);
+    try {
+      await withTimeout(win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`), 30000, "PDF 页面加载");
+      await new Promise(r => setTimeout(r, 200));  // 等字体/布局稳定，量高才准
+      // 页宽量 .doc（内容定宽容器，纯白弥散模板为 960px）实际宽度，避免把溢出/留白算进页宽导致左右白边；无 .doc 退回文档滚动宽。
+      const dims = await withTimeout(win.webContents.executeJavaScript(
+        "(()=>{const d=document.documentElement,b=document.body,doc=document.querySelector('.doc');return{w:(doc&&doc.offsetWidth)||Math.max(b.scrollWidth,d.scrollWidth,640),h:Math.max(b.scrollHeight,d.scrollHeight,400)};})()"
+      ), 10000, "PDF 内容测量");
+      const wpx = Math.min(1600, Math.max(640, Math.ceil(Number(dims && dims.w) || 960)));
+      const rawH = Math.max(400, Math.ceil(Number(dims && dims.h) || 1320) + 24);
+      // 单页高度上限保护：PDF 单页约 200in≈19200px(96dpi)，超了会被裁，封顶 18000px 留余量。超长则提示用户，避免静默丢内容。
+      const hpx = Math.min(18000, rawH);
+      if (rawH > 18000) {
+        try { new obsidian.Notice("报告较长，整页 PDF 已按单页高度上限裁切；要完整内容请改用 HTML 报告。", 9000); } catch {}
+      }
+      await withTimeout(win.webContents.executeJavaScript(
+        "(()=>{const s=document.createElement('style');s.textContent='@page{size:" + wpx + "px " + hpx + "px;margin:0}';document.head.appendChild(s);return true;})()"
+      ), 10000, "PDF 页面尺寸注入");
+      const pdf = await withTimeout(win.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, margins: { marginType: "none" } }), 45000, "PDF 渲染");
+      return pdf;
+    } finally {
+      try { win.destroy(); } catch {}
     }
   }
 

@@ -9271,3 +9271,55 @@ select.lexvoice-recruit-input.dropdown {
   background: var(--background-secondary);
   border-radius: var(--radius-s);
 }
+
+/* 报告配色选择器 Modal */
+.lexvoice-color-hint {
+  margin: 0 0 var(--size-4-2);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.lexvoice-color-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+  margin-bottom: var(--size-4-3);
+}
+.lexvoice-color-swatch {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid var(--background-modifier-border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 0.1s ease;
+}
+.lexvoice-color-swatch:hover {
+  transform: scale(1.1);
+}
+.lexvoice-color-swatch.is-active {
+  border-color: var(--text-normal);
+  box-shadow: 0 0 0 2px var(--background-primary), 0 0 0 4px var(--text-normal);
+}
+.lexvoice-color-custom {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-3);
+  margin-bottom: var(--size-4-3);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+.lexvoice-color-custom input[type="color"] {
+  width: 44px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: transparent;
+  cursor: pointer;
+}
+.lexvoice-color-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--size-2-3);
+}

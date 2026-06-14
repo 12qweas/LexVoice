@@ -18,6 +18,10 @@ import {
   serializeRequiredQualities,
   desensitizeResumeText,
   sanitizeProjectFolderName,
+  hexToHue,
+  reportHueDelta,
+  recolorReportHtml,
+  REPORT_BASE_ACCENT_HEX,
 } from "./outline-text";
 
 const countSubPoints = (md: string) => md.split("\n").filter((l) => /^ {2,}[-*+]\s/.test(l)).length;
@@ -432,5 +436,33 @@ describe("sanitizeProjectFolderName —— 项目名净化", () => {
     expect(sanitizeProjectFolderName("  ..名字..  ")).toBe("名字");
     expect(sanitizeProjectFolderName("   ")).toBe("未命名项目");
     expect(sanitizeProjectFolderName("...")).toBe("未命名项目");
+  });
+});
+
+describe("报告改色 hue-rotate", () => {
+  it("hexToHue 识别基准橙与常见色，灰阶返回 0", () => {
+    expect(Math.round(hexToHue(REPORT_BASE_ACCENT_HEX))).toBe(17);  // #E85F28 ≈ 17°
+    expect(Math.round(hexToHue("#2F6BD8"))).toBeGreaterThan(200);   // 蓝
+    expect(hexToHue("#FFFFFF")).toBe(0);
+    expect(hexToHue("#808080")).toBe(0);
+    expect(hexToHue("乱码")).toBeNull();
+  });
+  it("reportHueDelta 取最短旋转方向 [-180,180]，默认橙=0", () => {
+    expect(reportHueDelta("#E85F28")).toBe(0);          // 同色相
+    expect(Math.abs(reportHueDelta("#2F6BD8"))).toBeGreaterThan(0);   // 橙→蓝最短方向为负，取绝对值
+    expect(Math.abs(reportHueDelta("#2F6BD8"))).toBeLessThanOrEqual(180);
+    expect(reportHueDelta("非法")).toBe(0);
+  });
+  it("recolorReportHtml：默认橙原样；换色注入 hue-rotate 到 </head> 前", () => {
+    const html = "<html><head><style>x</style></head><body>报告</body></html>";
+    expect(recolorReportHtml(html, "#E85F28")).toBe(html);          // 同色相不改
+    const out = recolorReportHtml(html, "#2F6BD8");
+    expect(out).toContain("filter:hue-rotate(");
+    expect(out.indexOf("hue-rotate")).toBeLessThan(out.indexOf("</head>"));  // 在 head 内
+    expect(out).toContain("<body>报告</body>");                      // 正文不动
+  });
+  it("无 head 时也能注入；空输入安全", () => {
+    expect(recolorReportHtml("<body>x</body>", "#2F6BD8")).toContain("hue-rotate");
+    expect(recolorReportHtml("", "#2F6BD8")).toBe("");
   });
 });
