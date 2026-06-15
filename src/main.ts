@@ -34,6 +34,11 @@ import {
   RECRUIT_REPORT_PROMPT,
   SEMINAR_REPORT_PROMPT,
 } from "./report-templates";
+import { STANDARD_POLISH_MODES, ALL_POLISH_MODES, isKnownPolishMode, isCustomPromptModeTemplate, makeCustomPromptModeId, getCustomPromptModeTemplate, getCustomPromptModeTemplates, getBuiltInVisiblePolishModeKeys, getVisiblePolishModeKeys, getModeMeta, getEffectivePolishMode, getVisibleModeEntries, setLexVoiceModePillIcon, sanitizePromptTemplate } from "./shared/mode-meta";
+import { compareVersions, isLexVoiceMobileRuntime } from "./shared/util-platform";
+import { normalizeKnowledgeExtractionHistory } from "./shared/util-knowledge";
+import { listJDProjects } from "./recruit/jd-projects";
+import { snapshotActiveAsr, schemeIsOneKey, syncWorkingAsrToActiveScheme } from "./llm/asr-scheme";
 import { sanitizeGeneratedHtmlReport, injectHtmlReportExportScript, extractMarkdownForHtmlReport, sanitizeReportFileStem, normalizeReportArray, normalizeReportObjects, normalizeHtmlReportModel, renderReportList, renderReportParagraphs, renderReportChips, renderHtmlReport, buildHtmlReportPrompt, generateHtmlReportFromMarkdown, generateStyledReportFromMarkdown, normalizeSlideVisualItems, normalizeSlideTodos, LEXVOICE_DECK_THEMES, LEXVOICE_LAYOUT_PRESETS, LEXVOICE_LAYOUT_ALIASES, normalizeDeckThemePreset, getDeckTheme, normalizeHtmlDeckModel, renderDeckPoints, renderDeckMetricGrid, renderDeckBars, renderDeckTree, renderDeckMatrix, renderDeckQuote, renderDeckFlow, renderDeckRowline, renderDeckPillars, renderDeckVisual, renderHtmlDeck, injectHtmlDeckExportScript, normalizePptSlideRange, buildHtmlDeckPrompt, generateDeckModelFromMarkdown, generateHtmlDeckFromMarkdown, generateEditablePptxFromMarkdown, pptxIn, pptxXml, pptxColor, pptxAlphaXml, pptxSolidFill, pptxLineFill, pptxShortText, pptxTextParagraphs, pptxTextBox, pptxShape, pptxRect, pptxLine, pptxSlideBase, pptxDecorativeBackdrop, pptxCommonSlideChrome, pptxRenderVisualShapes, pptxRenderSlide, pptxRelsXml, pptxContentTypesXml, pptxPresentationXml, pptxMasterXml, pptxLayoutXml, pptxThemeXml, pptxCoreXml, pptxAppXml, createStoreZip, renderEditablePptxDeck, stripHtmlCodeFence, renderDecisionPanel, renderTodoPanel, renderVisualCards, renderLogicFlow, hexToRgbParts, normalizeLayoutPreset, getLayoutPresetInfo, extractVisualNumber, PPTX_W, PPTX_H, PPTX_DPI, crc32, zipDosDateTime, u16, u32 } from "./report/render";
 import { BRIEFING_LANGUAGE_LABELS, parseElapsedMsToken, parseLexVoiceDurationLabel, TEXT_IMPORT_PRE_SUMMARY_CHUNK_CHARS, getBriefingTargetLanguage, buildBriefingLanguageInstruction, applyBriefingLanguageInstruction, getSessionMetaDurationMs, getSegmentsDurationMs, truncateForLlmPrompt, splitLongTextForLlm, stripMarkdownDetailsWrapper } from "./shared/util-text";
 import { RECRUIT_ROUND_RANK, JOBPORTRAIT_DIMENSIONS, RECRUIT_CONTEXT_FLOW_COPY, DEFAULT_RECRUIT_QUALITIES, isRecruitFeatureUnlocked, buildRecruitContextPrefix, buildRecruitInterviewBriefStrategy, generateInterviewBriefForRecruit, recruitRoundRank, findPrevRoundRecruitNote, writeGeneralOutlineToJd, generateRecruitGeneralOutline, getRecruitInterviewOutline, parseRecruitQualitiesFromOutput, buildCompactRecruitContextPrefix, buildRecruitTextImportMergePrompt, buildJobPortraitMergePrompt, generateJobPortrait, getRecruitContextCopy, normalizeRecruitContext, hasRecruitContextContent, normalizeRecruitJdSignatureText, hashRecruitJdText, makeRecruitJdLibraryEntry, getRecruitJdLibrarySignature, upsertRecruitJdLibrary, getRecruitJdLibrary, applyRecruitJdLibraryItem, getRecruitJdPreview, isRecruitJdFile, parseJdProject, extractPdfTextBestEffort, listResumePdfs, renderRecruitJdTemplate, renderRecruitCandidateBase, renderRecruitAggregateBase, ensureRecruitAggregateBase, createRecruitProject, renderRecruitHomepageTemplate, listRecruitCandidateNotes, recruitRecommendationColor } from "./recruit";
@@ -96,30 +101,6 @@ const KNOWLEDGE_EXTRACTION_BATCH_LIMIT = 20;
 
 
 
-function normalizeKnowledgeExtractionHistory(value) {
-  const normalizeBucket = (bucket) => {
-    const out = {};
-    if (!bucket || typeof bucket !== "object" || Array.isArray(bucket)) return out;
-    for (const [path, raw] of Object.entries(bucket)) {
-      const key = obsidian.normalizePath(path || "");
-      if (!key) continue;
-      if (raw && typeof raw === "object") {
-        out[key] = {
-          mtime: Number(raw.mtime) || 0,
-          size: Number(raw.size) || 0,
-          scannedAt: String(raw.scannedAt || ""),
-        };
-      } else {
-        out[key] = { mtime: Number(raw) || 0, size: 0, scannedAt: "" };
-      }
-    }
-    return out;
-  };
-  return {
-    vocabulary: normalizeBucket(value && value.vocabulary),
-    people: normalizeBucket(value && value.people),
-  };
-}
 
 function knowledgeExtractionRecordForFile(file) {
   return {
@@ -154,43 +135,14 @@ function countKnowledgeExtractionHistory(settings, kind) {
 
 
 // API 方案是否「一个 Key 通用」：带转写快照、且转写与 LLM 同一把 Key、同一 host（如 MiMo 两边都 api.xiaomimimo.com）。
-function schemeIsOneKey(profile) {
-  if (!profile || !profile.asr) return false;
-  const asrKey = String(profile.asr.apiKey || "").trim();
-  const llmKey = String(profile.apiKey || "").trim();
-  if (!asrKey || asrKey !== llmKey) return false;
-  try {
-    const asrHost = new URL(normalizeLlmEndpoint(profile.asr.endpoint || "")).hostname.toLowerCase();
-    const llmHost = new URL(normalizeLlmEndpoint(profile.endpoint || "")).hostname.toLowerCase();
-    return !!asrHost && asrHost === llmHost;
-  } catch { return false; }
-}
 
 
 // 把工作字段（llmEndpoint/llmApiKey/llmModel）的当前值回写到指定配置
 
 // 抓当前激活转写 provider 的配置成快照（用于存进 API 方案的 asr）。
-function snapshotActiveAsr(settings) {
-  const providerId = String((settings && settings.activeTranscribeProvider) || "").trim();
-  if (!providerId) return undefined;
-  const p = (settings.transcribeProviders || {})[providerId] || {};
-  return {
-    providerId,
-    apiKey: String(p.apiKey || ""),
-    endpoint: String(p.endpoint || "").trim(),
-    model: String(p.model || "").trim(),
-    language: String(p.language || "").trim(),
-  };
-}
 
 // 转写字段变更时，把当前激活转写 provider 快照回写进**已激活且本就带转写快照**的方案。
 // 只更新已是「完整方案（含 asr）」的激活方案，不给「仅 LLM 旧方案」凭空塞 asr。
-function syncWorkingAsrToActiveScheme(settings) {
-  const profile = findLlmProfile(settings, settings && settings.activeLlmProfile);
-  if (!profile || !profile.asr) return;
-  const snap = snapshotActiveAsr(settings);
-  if (snap) profile.asr = snap;
-}
 
 // 把指定配置灌进工作字段；若方案带转写快照，同时切换转写服务。
 
@@ -687,18 +639,6 @@ async function fetchUpdateTextFromSources(rawBases, fileName) {
   throw new Error("所有更新源都不可用：" + errors.join(" | "));
 }
 
-function compareVersions(a, b) {
-  const pa = String(a || "0").split(/[^\d]+/).filter(Boolean).map(Number);
-  const pb = String(b || "0").split(/[^\d]+/).filter(Boolean).map(Number);
-  const len = Math.max(pa.length, pb.length, 3);
-  for (let i = 0; i < len; i++) {
-    const da = pa[i] || 0;
-    const db = pb[i] || 0;
-    if (da > db) return 1;
-    if (da < db) return -1;
-  }
-  return 0;
-}
 
 function pluginBasePath(plugin) {
   const configDir = plugin.app.vault.configDir || ".obsidian";
@@ -730,83 +670,17 @@ async function ensureAdapterFolder(adapter, folderPath) {
 // huddle 是 meeting 的子风格，不再单列在新建录音下拉，但老 huddle 笔记仍能被识别和打开。
 
 // 新建录音下拉里出现的公开意图 + 1 个彩蛋；huddle 不出现（仅旧笔记兜底使用）
-const STANDARD_POLISH_MODES = ["meeting", "seminar", "interview", "monologue", "learning"];
-const ALL_POLISH_MODES = ["meeting", "seminar", "interview", "monologue", "learning", "recruit", "recruit-needs"];
 
 
-function isCustomPromptModeTemplate(t) {
-  return !!(t && t.customMode === true && typeof t.id === "string" && typeof t.mode === "string" && t.id === t.mode);
-}
 
-function makeCustomPromptModeId(seed) {
-  const slug = String(seed || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 28);
-  return "custom-" + (slug || Date.now().toString(36)) + "-" + Math.random().toString(36).slice(2, 6);
-}
 
-function getCustomPromptModeTemplates(settings) {
-  const tpls = settings && settings.promptTemplates && typeof settings.promptTemplates === "object" ? settings.promptTemplates : {};
-  return Object.values(tpls)
-    .filter(isCustomPromptModeTemplate)
-    .sort((a, b) => (a.name || "").localeCompare(b.name || "", "zh"));
-}
 
-function getCustomPromptModeTemplate(settings, mode) {
-  const tpls = settings && settings.promptTemplates && typeof settings.promptTemplates === "object" ? settings.promptTemplates : {};
-  const t = tpls[mode];
-  return isCustomPromptModeTemplate(t) ? t : null;
-}
 
-function getBuiltInVisiblePolishModeKeys(settings) {
-  return isRecruitFeatureUnlocked(settings) ? ALL_POLISH_MODES.slice() : STANDARD_POLISH_MODES.slice();
-}
 
-function getVisiblePolishModeKeys(settings) {
-  const custom = getCustomPromptModeTemplates(settings).map((t) => t.id);
-  return [...getBuiltInVisiblePolishModeKeys(settings), ...custom];
-}
 
-function getModeMeta(settings, mode) {
-  if (MODE_META[mode]) return MODE_META[mode];
-  const custom = getCustomPromptModeTemplate(settings, mode);
-  if (custom) {
-    const name = custom.name || "自定义提示词";
-    return { prefix: name, emoji: "🧩", icon: "puzzle", label: "自定义提示词：" + name, goal: custom.description || "用户自定义提示词。", baseMode: custom.baseMode || "learning", custom: true };
-  }
-  return MODE_META.meeting;
-}
 
-function setLexVoiceModePillIcon(el, meta, fallbackMeta) {
-  const source = meta || fallbackMeta || {};
-  const fallback = fallbackMeta || {};
-  const icon = source.icon || fallback.icon || "file-text";
-  el.empty();
-  el.addClass("is-lucide");
-  try {
-    obsidian.setIcon(el, icon);
-  } catch {
-    const label = source.prefix || source.label || fallback.prefix || fallback.label || "";
-    el.setText(label ? label.trim().slice(0, 1) : "L");
-  }
-}
 
-function isKnownPolishMode(settings, mode) {
-  if (mode === "off") return true;
-  if (mode === "recruit" && !isRecruitFeatureUnlocked(settings)) return false;
-  return !!(MODE_META[mode] || getCustomPromptModeTemplate(settings, mode));
-}
 
-function getEffectivePolishMode(settings, requested, fallback) {
-  const fb = fallback == null ? "meeting" : fallback;
-  const mode = requested || (settings && settings.polishMode) || fb;
-  if (mode === "off") return mode;
-  if (isKnownPolishMode(settings, mode)) return mode;
-  return fb;
-}
 
 function legacyPromptFieldForMode(mode) {
   const map = {
@@ -821,10 +695,6 @@ function legacyPromptFieldForMode(mode) {
   return map[mode] || "";
 }
 
-function getVisibleModeEntries(settings, includeOff) {
-  const entries = getVisiblePolishModeKeys(settings).map((key) => [key, getModeMeta(settings, key).prefix]);
-  return includeOff ? [["off", "关闭，仅转写"], ...entries] : entries;
-}
 
 
 
@@ -1922,9 +1792,6 @@ function isMeetingWorkbenchMode(mode) {
   return mode === "meeting" || mode === "seminar" || mode === "huddle";
 }
 
-function isLexVoiceMobileRuntime() {
-  return !!(obsidian.Platform && (obsidian.Platform.isMobile || obsidian.Platform.isMobileApp));
-}
 
 function normalizeMeetingMaterials(materials, limit = 30) {
   const normalized = [];
@@ -5765,23 +5632,6 @@ function mergeLeadingFrontmatterIntoDocument(documentText, generatedMarkdown) {
   };
 }
 
-function sanitizePromptTemplate(tpl, fallbackBaseMode) {
-  const now = new Date().toISOString();
-  const clean = Object.assign({}, tpl || {});
-  const rawId = String(clean.id || "").trim();
-  clean.id = rawId || makeCustomPromptModeId(clean.name || "scene");
-  clean.mode = clean.id;
-  clean.name = String(clean.name || "自定义提示词").trim().slice(0, 80) || "自定义提示词";
-  clean.description = String(clean.description || "").trim().slice(0, 240);
-  const fallback = MODE_META[fallbackBaseMode] ? fallbackBaseMode : "learning";
-  clean.baseMode = MODE_META[clean.baseMode] ? clean.baseMode : fallback;
-  clean.prompt = String(clean.prompt || "").trim();
-  clean.isBuiltin = false;
-  clean.customMode = true;
-  clean.createdAt = clean.createdAt || now;
-  clean.updatedAt = now;
-  return clean;
-}
 
 // 解析 LLM 输出末尾的标签建议注释 <!-- lexvoice-tags: 主题/招聘流程, 项目/晋升提名 -->
 function parseSuggestedTagsFromOutput(text) {
@@ -19904,29 +19754,6 @@ class VirtualCableSetupModal extends obsidian.Modal {
 // JD 文件判据：md 且 文件名（去扩展名）== 父文件夹名。不依赖额外字段，重命名免维护。
 
 // 扫 JD 库根下每个子文件夹 = 一个招聘项目；取同名 .md 作 JD 文件，读 frontmatter 状态/职位名/序列。
-function listJDProjects(app, jdFolderPath) {
-  const root = app.vault.getAbstractFileByPath(obsidian.normalizePath(jdFolderPath || "JD"));
-  if (!(root instanceof obsidian.TFolder)) return [];
-  const out = [];
-  for (const child of (root.children || [])) {
-    if (!(child instanceof obsidian.TFolder)) continue;
-    const jdFile = (child.children || []).find(f => f instanceof obsidian.TFile && f.extension === "md" && f.basename === child.name) || null;
-    const fm = jdFile ? ((app.metadataCache.getFileCache(jdFile) || {}).frontmatter || {}) : {};
-    out.push({
-      folderPath: child.path,
-      name: child.name,
-      jdFilePath: jdFile ? jdFile.path : "",
-      hasJd: !!jdFile,
-      status: jdFile ? String(fm.状态 || "招聘中").trim() : "缺 JD 文件",
-      position: String((jdFile && (fm.职位名 || fm.职位)) || child.name).trim(),
-      sequence: jdFile ? String(fm.序列 || "").trim() : "",
-      interviewed: Number(fm.已面试数) || 0,
-    });
-  }
-  const rank = (s) => s === "招聘中" ? 0 : (s === "缺 JD 文件" ? 2 : 1);
-  out.sort((a, b) => rank(a.status) - rank(b.status) || a.name.localeCompare(b.name, "zh-CN"));
-  return out;
-}
 
 
 // 解析单个 JD 文件：岗位描述 / 综合素质（frontmatter 对象数组）/ 统一面试提纲。
