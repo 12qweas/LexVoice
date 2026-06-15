@@ -34,6 +34,9 @@ import {
   RECRUIT_REPORT_PROMPT,
   SEMINAR_REPORT_PROMPT,
 } from "./report-templates";
+import { getFrontmatterTags, readFileFrontmatter, upsertFrontmatterInMarkdown, LEARNING_CARD_TAG, CONCEPT_CARD_TAG, TODO_CARD_TAG, upsertLexVoiceObjectNote, getTodayDailyNoteInfo, ensureVaultFolder, ensureTodayDailyNoteFile, isLocalServiceEndpoint } from "./shared/util-note";
+import { PEOPLE_SUGGESTION_CACHE_LIMIT, normalizePeopleContextMode, splitPersonFieldValue, normalizePersonLookupText, getFrontmatterPeople, firstPersonField, personEntryFromFrontmatter, dedupePeopleEntries, loadPeopleDirectory, hasPeopleHotwordsConsent, getPeopleNameHotwordTerms, shouldUsePeopleHotwordsForCloud, shouldUsePeopleHotwordsForAsr, shouldUseFullPeopleContextForLlm, shouldUsePeopleHotwordsForLlm, buildPeopleHotwordsContext, buildLocalPeopleContext, buildPeopleContextForLlm, buildPeopleHotwordsForAsr, formatPersonRelatedBriefingsBase, ensurePeopleNoteRelatedBaseSection, formatPeopleBaseYaml, formatPeopleNoteMarkdown, normalizePeopleArray, mergeUniqueStrings, normalizePeopleSuggestion, normalizePeopleSuggestionsModel, getPeopleSuggestionIgnoreTerms, makeStoredPeopleSuggestionForIgnore, normalizePeopleSuggestionIgnoreRecord, normalizePeopleSuggestionIgnores, isPeopleSuggestionIgnored, addPeopleSuggestionIgnore, removePeopleSuggestionIgnores, getPeopleSuggestionCacheKey, normalizePeopleSuggestionCacheRecord, normalizePeopleSuggestionCache, makePeopleSuggestionCacheRecord, isPeopleSuggestionCacheRecordCurrent, peopleSuggestionRecordToSuggestion, peopleSuggestionIgnoreRecordToSuggestion, findMatchingPersonEntry, buildPeopleDirectorySuggestionPrompt, mergeSourceNoteRelatedPeopleFrontmatter, mergePersonFrontmatter, generatePeopleDirectorySuggestions, normalizePersonNameForEmail, parsePeopleFromOutput } from "./people";
+import { SEDIMENT_PREEXTRACT_BEGIN, SEDIMENT_PREEXTRACT_END, makeSedimentStableHash, makeSedimentStableId, getSedimentTodoId, getSedimentCardId, getSedimentHotwordId, getSedimentPersonId, withSedimentCandidateIds, removeSedimentGroupDone, sanitizeSedimentText, normalizeSedimentTextList, normalizeSedimentTodoSubtasks, getSedimentSourceDateLabel, normalizeSedimentExtractionModel, buildLexVoiceObjectTags, buildSedimentPreExtractionInstruction, appendSedimentPreExtractionInstruction, getSedimentPreExtractionBlockPatterns, stripSedimentPreExtractionBlocks, extractSedimentPreExtractionBlock, formatSedimentPreExtractionBlock, splitOutSedimentBlock, appendSedimentPreExtractionBlock, upsertSedimentPreExtractionBlockInFile, buildSedimentExtractionPrompt, generateSedimentObjects, formatSedimentLearningCardMarkdown, formatSedimentTodoCardMarkdown, writeSedimentObjectCards, buildSedimentTodoDailyEntry, upsertSedimentTodoInDailyNote } from "./sediment";
 import { createVocabularyGroups, detectVocabularySectionKey, normalizeVocabularyCorrectionSide, normalizeVocabularyCorrectionTerm, normalizeVocabularyTerm, addVocabularyTerm, parseVocabularyGroups, flattenVocabularyGroups, getVocabularyCorrectionPairs, applyVocabularyCorrections, countVocabularyGroups, summarizeVocabularyGroups, normalizeVocabularyInput, mergeVocabularyGroups, isStructuredVocabularyMarkdown, loadVocabularyGroups, loadVocabularyTerms, loadVocabularyPrompt, buildVocabularyPrompt, formatVocabularyMarkdown } from "./vocabulary";
 import { withPromiseTimeout, getHeaderValue, parseRetryAfterMs, parseRequestUrlJson, getRequestUrlText } from "./shared/util-http";
 import { LlmRequestQueue, LLM_REQUEST_QUEUE, DEFAULT_LLM_REQUEST_TIMEOUT_MS, resolveLlmRequestTimeoutMs, getLlmRetryAfterMsFromHeaders, decorateLlmHttpDetail, readLlmError, createLlmHttpError, pickLlmRequestError, countLlmMessageChars, logLlmRequestDiagnostic, requestLlmChatCompletionViaObsidian, getLlmRequestPriority, runQueuedLlmRequest, accumulateLlmSseDataLine, readLlmSseStream, finalizeLlmSseContent, requestLlmChatCompletion, testLlmConnection, isTransientLlmError, getLlmRetryDelayMs, fetchLlmModelList, getLlmConfigIssue, isLlmConfigError, isLlmServiceBlockedError, isNonRetryableLlmHttpFailure, isLlmNonRetryableError, formatLlmConfigIssue, formatLlmFailureIssue, isTruncatedFinishReason, extractLlmFinishReason, callLlmWithMeta, callLlm, callBriefingMergeLlm, stripModeSuggestionBlocks } from "./llm/core";
@@ -79,7 +82,6 @@ const SHORT_RECORDING_FILTER_MS = 3000;
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const UPDATE_PLUGIN_FILES = ["manifest.json", "main.js", "styles.css", "README.md"];
 const KNOWLEDGE_EXTRACTION_BATCH_LIMIT = 20;
-const PEOPLE_SUGGESTION_CACHE_LIMIT = 500;
 
 // 「一个 Key 通用」供应商：同一把 Key 同时支持语音转写 + 大模型对话。首页快速配置一处填 Key + 选供应商即可两边都配好。
 // asrProvider 对应 transcribeProviders 里的 id；llmPreset 对应 LLM_SERVICE_PRESETS 里的 id。
@@ -94,9 +96,6 @@ function normalizeAsrConcurrency(value) {
   return Math.max(1, Math.min(3, Math.floor(n)));
 }
 
-function normalizePeopleContextMode(value) {
-  return ["privacy", "hotwords", "localFull"].includes(value) ? value : "privacy";
-}
 
 function normalizeKnowledgeExtractionHistory(value) {
   const normalizeBucket = (bucket) => {
@@ -839,9 +838,6 @@ function getLexVoiceBasesFolder(settings) {
   return obsidian.normalizePath((settings && settings.lexVoiceBasesFolder) || DEFAULT_SETTINGS.lexVoiceBasesFolder || "LexVoice/视图");
 }
 
-const LEARNING_CARD_TAG = "lexvoice/learning-card";
-const CONCEPT_CARD_TAG = "lexvoice/concept";
-const TODO_CARD_TAG = "lexvoice/todo-card";
 const LEARNING_WALL_FILE = "学习卡片瀑布墙.md";
 const CONCEPT_WALL_FILE = "概念墙.md";
 const TODO_WALL_FILE = "待办墙.md";
@@ -2683,64 +2679,6 @@ function isSyncConflictName(name) {
 
 
 
-function makeSedimentStableHash(value) {
-  const source = String(value || "");
-  let hash = 2166136261;
-  for (let i = 0; i < source.length; i++) {
-    hash ^= source.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36);
-}
-
-function makeSedimentStableId(type, parts) {
-  return `lv-sed-${type}-${makeSedimentStableHash((parts || []).map(item => String(item || "").trim()).join("\u0001"))}`;
-}
-
-function getSedimentTodoId(item) {
-  if (item && item.id) return String(item.id);
-  return makeSedimentStableId("todo", [item && (item.task || item.title), item && item.owner, item && item.due, item && item.sourceTime, item && item.note]);
-}
-
-function getSedimentCardId(item) {
-  if (item && item.id) return String(item.id);
-  return makeSedimentStableId("card", [item && item.title, item && item.type, item && item.sourceTime, item && (item.summary || item.reusableLine)]);
-}
-
-function getSedimentHotwordId(sectionKey, term) {
-  return makeSedimentStableId("hotword", [sectionKey, term]);
-}
-
-function getSedimentPersonId(sourcePath, item) {
-  if (item && item.id) return String(item.id);
-  if (item && item.cacheKey) return String(item.cacheKey);
-  if (item && item.key) return String(item.key);
-  return getPeopleSuggestionCacheKey(sourcePath || (item && item.sourcePath) || "", item) || makeSedimentStableId("person", [sourcePath, item && item.name, item && item.role, item && item.organization]);
-}
-
-function withSedimentCandidateIds(objects, sourcePath, sourceBasename) {
-  const normalized = normalizeSedimentExtractionModel(objects);
-  return {
-    people: (normalized.people || []).map(item => {
-      const next = Object.assign({}, item, { sourcePath, sourceBasename });
-      const id = getSedimentPersonId(sourcePath, next);
-      return Object.assign(next, { id, key: next.key || id, cacheKey: next.cacheKey || id });
-    }),
-    todos: (normalized.todos || []).map(item => {
-      const next = Object.assign({}, item);
-      return Object.assign(next, { id: getSedimentTodoId(next) });
-    }),
-    learningCards: (normalized.learningCards || []).map(item => {
-      const next = Object.assign({}, item);
-      return Object.assign(next, { id: getSedimentCardId(next) });
-    }),
-    hotwords: normalized.hotwords || createVocabularyGroups(),
-  };
-}
-
-function removeSedimentGroupDone(doneGroups, groupKey) {
-  return (Array.isArray(doneGroups) ? doneGroups : []).filter(key => key !== groupKey);
-}
 
 
 
@@ -2753,1265 +2691,90 @@ function removeSedimentGroupDone(doneGroups, groupKey) {
 
 
 
-function splitPersonFieldValue(value) {
-  if (Array.isArray(value)) return value.flatMap(splitPersonFieldValue);
-  if (value && typeof value === "object") {
-    return Object.values(value).flatMap(splitPersonFieldValue);
-  }
-  const text = String(value || "").trim();
-  if (/^\[\[[\s\S]+?\]\]$/.test(text)) return [text];
-  return text
-    .split(/[，,、;；|]/)
-    .map(s => s.trim())
-    .filter(Boolean);
-}
 
-function normalizePersonLookupText(text) {
-  return String(text || "")
-    .replace(/\[\[|\]\]/g, "")
-    .replace(/#\S+/g, "")
-    .replace(/\s+/g, "")
-    .trim()
-    .toLowerCase();
-}
 
-function getFrontmatterTags(frontmatter) {
-  if (!frontmatter || typeof frontmatter !== "object") return [];
-  const raw = frontmatter.tags || frontmatter.tag;
-  if (Array.isArray(raw)) return raw.map(t => String(t).trim()).filter(Boolean);
-  return String(raw || "")
-    .split(/[,\s]+/)
-    .map(t => t.trim())
-    .filter(Boolean);
-}
+
+
+
+
+
+
+
 
 // 从源纪要 frontmatter 取"人物"维度的人名：同时认 ① 新独立属性 人物（people 别名兼容）
 // ② 旧笔记里 tags 的 人物/x 前缀。是"人物单列后"所有消费源纪要人物处的单一收口点。
-function getFrontmatterPeople(frontmatter) {
-  if (!frontmatter || typeof frontmatter !== "object") return [];
-  const direct = splitPersonFieldValue(frontmatter["人物"] || frontmatter.people || []);
-  const fromTags = getFrontmatterTags(frontmatter)
-    .filter(t => /^人物\//.test(t))
-    .map(t => t.replace(/^人物\//, "").trim())
-    .filter(Boolean);
-  const seen = new Set();
-  const out = [];
-  for (const n of [...direct, ...fromTags]) {
-    const k = normalizePersonLookupText(n);
-    if (k && !seen.has(k)) { seen.add(k); out.push(n); }
-  }
-  return out;
-}
-
-function firstPersonField(frontmatter, keys) {
-  for (const key of keys) {
-    const value = frontmatter && frontmatter[key];
-    if (Array.isArray(value)) {
-      const first = value.map(v => String(v || "").trim()).find(Boolean);
-      if (first) return first;
-    } else if (value != null && String(value).trim()) {
-      return String(value).trim();
-    }
-  }
-  return "";
-}
-
-function personEntryFromFrontmatter(frontmatter, file) {
-  if (!frontmatter || typeof frontmatter !== "object") return null;
-  const tags = getFrontmatterTags(frontmatter);
-  const type = String(frontmatter.type || frontmatter["类型"] || "").trim();
-  const inPersonSet = tags.includes(PEOPLE_DIRECTORY_TAG) || type === "lexvoice-person";
-  const explicitName = firstPersonField(frontmatter, ["姓名", "name", "人员", "person"]);
-  const name = explicitName || (inPersonSet && file && file.basename ? file.basename : "");
-  if (!name || (!inPersonSet && !explicitName)) return null;
-  return {
-    name,
-    role: firstPersonField(frontmatter, ["角色", "role", "岗位", "职能", "职位", "职称", "title"]),
-    organization: firstPersonField(frontmatter, ["组织", "organization", "公司", "团队", "部门", "机构", "institute"]),
-    aliases: splitPersonFieldValue(frontmatter["常用称呼"] || frontmatter["称呼"] || frontmatter.aliases || frontmatter.alias),
-    email: firstPersonField(frontmatter, ["邮箱", "邮箱地址", "邮件", "email", "mail", "e-mail"]),
-    note: firstPersonField(frontmatter, ["备注", "note", "说明", "简介", "abstract"]),
-    path: file && file.path ? file.path : "",
-  };
-}
-
-function dedupePeopleEntries(entries) {
-  const out = [];
-  const seen = new Set();
-  for (const item of entries || []) {
-    if (!item || !item.name) continue;
-    const key = normalizePersonLookupText(item.name);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(item);
-  }
-  return out;
-}
-
-async function readFileFrontmatter(plugin, file) {
-  try {
-    const cache = plugin.app.metadataCache.getFileCache(file);
-    if (cache && cache.frontmatter) return cache.frontmatter;
-  } catch {}
-  try {
-    const content = await plugin.app.vault.cachedRead(file);
-    const m = String(content || "").match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
-    if (!m) return null;
-    return obsidian.parseYaml(m[1]);
-  } catch {
-    return null;
-  }
-}
-
-async function loadPeopleDirectory(plugin, options = {}) {
-  const folder = obsidian.normalizePath(plugin.settings.peopleDirectoryFolder || DEFAULT_SETTINGS.peopleDirectoryFolder);
-  const files = plugin.app.vault.getMarkdownFiles()
-    .filter(file => {
-      const path = obsidian.normalizePath(file.path || "");
-      return path === folder || path.startsWith(folder + "/");
-    });
-  const stamp = files
-    .map(file => `${obsidian.normalizePath(file.path || "")}:${file.stat && file.stat.mtime || 0}:${file.stat && file.stat.size || 0}`)
-    .sort()
-    .join("|");
-  if (!options.force && plugin._peopleDirectoryCache
-    && plugin._peopleDirectoryCache.folder === folder
-    && plugin._peopleDirectoryCache.stamp === stamp) {
-    return plugin._peopleDirectoryCache.items || [];
-  }
-  const entries = [];
-  for (const file of files) {
-    const fm = await readFileFrontmatter(plugin, file);
-    const item = personEntryFromFrontmatter(fm, file);
-    if (item) entries.push(item);
-  }
-  const items = dedupePeopleEntries(entries);
-  plugin._peopleDirectoryCache = { folder, stamp, items, loadedAt: Date.now() };
-  return items;
-}
-
-function hasPeopleHotwordsConsent(settings) {
-  return !!(settings && settings.peopleHotwordsConsentAt && String(settings.peopleHotwordsConsentAt).trim());
-}
-
-function getPeopleNameHotwordTerms(people) {
-  const out = [];
-  const add = (value) => {
-    const text = String(value || "").trim();
-    if (!text || text.length > 40) return;
-    const key = normalizePersonLookupText(text);
-    if (!key || out.some(item => normalizePersonLookupText(item) === key)) return;
-    out.push(text);
-  };
-  for (const person of people || []) {
-    add(person && person.name);
-    for (const alias of (person && person.aliases) || []) add(alias);
-  }
-  return out;
-}
-
-function shouldUsePeopleHotwordsForCloud(settings) {
-  return normalizePeopleContextMode(settings && settings.peopleContextMode) === "hotwords" && hasPeopleHotwordsConsent(settings);
-}
-
-function shouldUsePeopleHotwordsForAsr(plugin, provider) {
-  const mode = normalizePeopleContextMode(plugin && plugin.settings && plugin.settings.peopleContextMode);
-  if (mode === "hotwords") return hasPeopleHotwordsConsent(plugin.settings);
-  if (mode === "localFull") return isLocalServiceEndpoint(provider && provider.endpoint);
-  return false;
-}
-
-function shouldUseFullPeopleContextForLlm(plugin) {
-  const mode = normalizePeopleContextMode(plugin && plugin.settings && plugin.settings.peopleContextMode);
-  return mode === "localFull" && isLocalLlmEndpoint(plugin && plugin.settings && plugin.settings.llmEndpoint);
-}
-
-function shouldUsePeopleHotwordsForLlm(plugin) {
-  if (shouldUseFullPeopleContextForLlm(plugin)) return false;
-  return shouldUsePeopleHotwordsForCloud(plugin && plugin.settings);
-}
-
-function buildPeopleHotwordsContext(people) {
-  const terms = getPeopleNameHotwordTerms(people).slice(0, 80);
-  if (!terms.length) return "";
-  return [
-    "## 人名热词（用户已授权，仅姓名与常用称呼）",
-    "",
-    "以下仅用于提升人名与称呼识别准确率，不包含角色、组织、备注或长期关系。不要因为列表存在而凭空添加未在转写中出现的人。",
-    "",
-    terms.join("、"),
-  ].join("\n");
-}
-
-function buildLocalPeopleContext(people) {
-  const list = (people || []).slice(0, 60);
-  if (!list.length) return "";
-  const lines = [
-    "## 本地人员上下文（仅本地模型使用）",
-    "",
-    "以下信息来自用户本地维护的 LexVoice 人员资料，仅在当前大模型服务为本地或局域网地址时提供。它不是声纹识别结果，只能作为整理纪要时的辅助上下文。",
-    "",
-  ];
-  for (const person of list) {
-    const parts = [`姓名：${person.name}`];
-    if (person.aliases && person.aliases.length) parts.push(`常用称呼：${person.aliases.join("、")}`);
-    if (person.role) parts.push(`角色：${person.role}`);
-    if (person.organization) parts.push(`组织：${person.organization}`);
-    if (person.note) parts.push(`备注：${person.note}`);
-    lines.push("- " + parts.join("；"));
-  }
-  return lines.join("\n");
-}
-
-async function buildPeopleContextForLlm(plugin) {
-  const people = await loadPeopleDirectory(plugin);
-  if (shouldUseFullPeopleContextForLlm(plugin)) return buildLocalPeopleContext(people);
-  if (shouldUsePeopleHotwordsForLlm(plugin)) return buildPeopleHotwordsContext(people);
-  return "";
-}
-
-async function buildPeopleHotwordsForAsr(plugin, provider) {
-  if (!shouldUsePeopleHotwordsForAsr(plugin, provider)) return "";
-  const terms = getPeopleNameHotwordTerms(await loadPeopleDirectory(plugin)).slice(0, 80);
-  return terms.length ? `人员称呼：${terms.join("、")}` : "";
-}
-
-
-
-
-function formatPersonRelatedBriefingsBase(mdFolder) {
-  const folder = escapeBaseString(obsidian.normalizePath(mdFolder || DEFAULT_SETTINGS.mdFolder));
-  return `## 相关纪要
-
-\`\`\`base
-filters:
-  and:
-    - file.inFolder("${folder}")
-    - file.hasLink(this.file)
-properties:
-  file.name:
-    displayName: 纪要
-  note.time:
-    displayName: 时间
-  note.mode:
-    displayName: 模式
-  note.录音主题:
-    displayName: 主题
-  note.状态:
-    displayName: 状态
-views:
-  - type: table
-    name: 相关纪要
-    order:
-      - file.name
-      - note.time
-      - note.mode
-      - note.录音主题
-      - note.状态
-    sort:
-      - property: file.mtime
-        direction: DESC
-\`\`\`
-
-上方视图由 Obsidian Bases 根据纪要里的「相关人员」链接自动聚合；LexVoice 只在用户确认人员建议后维护这些本地链接。
-`;
-}
-
-function ensurePeopleNoteRelatedBaseSection(markdown, mdFolder) {
-  const text = String(markdown || "");
-  if (/^##\s+相关纪要\s*$/m.test(text) || /file\.hasLink\(this\.file\)/.test(text)) return text;
-  const section = "\n\n" + formatPersonRelatedBriefingsBase(mdFolder).trim() + "\n";
-  const noteHeading = text.match(/^##\s+备注\s*$/m);
-  if (noteHeading) return text.slice(0, noteHeading.index).replace(/\s*$/, "") + section + "\n" + text.slice(noteHeading.index);
-  return text.replace(/\s*$/, "") + section;
-}
-
-function formatPeopleBaseYaml() {
-  return `filters:
-  and:
-    - file.hasTag("${PEOPLE_DIRECTORY_TAG}")
-properties:
-  file.name:
-    displayName: 人员笔记
-  note.姓名:
-    displayName: 姓名
-  note.角色:
-    displayName: 角色
-  note.常用称呼:
-    displayName: 常用称呼
-  note.组织:
-    displayName: 组织
-  note.邮箱:
-    displayName: 邮箱
-  note.来源:
-    displayName: 相关纪要
-  note.最近更新:
-    displayName: 最近更新
-  note.备注:
-    displayName: 备注
-views:
-  - type: table
-    name: 人员表
-    order:
-      - file.name
-      - note.姓名
-      - note.角色
-      - note.常用称呼
-      - note.组织
-      - note.邮箱
-      - note.来源
-      - note.最近更新
-      - note.备注
-    sort:
-      - property: note.姓名
-        direction: ASC
-  - type: cards
-    name: 人员卡片
-    order:
-      - file.name
-      - note.角色
-      - note.组织
-      - note.邮箱
-      - note.最近更新
-    cardSize: 170
-`;
-}
-
-function formatPeopleNoteMarkdown(name, mdFolder = DEFAULT_SETTINGS.mdFolder) {
-  const safeName = String(name || "").trim() || "未命名人员";
-  return `---
-type: lexvoice-person
-姓名: "${escapeYamlScalar(safeName)}"
-角色: ""
-常用称呼: []
-组织: ""
-邮箱: ""
-来源: []
-最近更新: ""
-备注: ""
-tags:
-  - ${PEOPLE_DIRECTORY_TAG}
----
-
-# ${safeName}
-
-## 基本信息
-
-- 角色：
-- 组织：
-- 常用称呼：
-- 邮箱：
-
-${formatPersonRelatedBriefingsBase(mdFolder).trim()}
-
-## 最新动态
-
-这里适合手动补充长期观察、合作背景、观点变化和需要回看的重要记录。
-
-## 备注
-
-`;
-}
-
-function normalizePeopleArray(value) {
-  return splitPersonFieldValue(value)
-    .map(s => s.replace(/^["'「『]|["'」』]$/g, "").trim())
-    .filter(Boolean);
-}
-
-function normalizePeopleSuggestion(item) {
-  if (!item || typeof item !== "object") return null;
-  const name = String(item.name || item["姓名"] || "").trim();
-  if (!name || name.length > 40) return null;
-  const aliases = normalizePeopleArray(item.aliases || item["常用称呼"] || item["称呼"]);
-  const evidence = normalizePeopleArray(item.evidence || item["依据"] || item["证据"]);
-  const role = String(item.role || item["角色"] || item.position || item["职能"] || "").trim().slice(0, 80);
-  const organization = String(item.organization || item["组织"] || item.company || item["部门"] || "").trim().slice(0, 80);
-  const note = String(item.note || item["备注"] || item.summary || "").trim().replace(/\s+/g, " ").slice(0, 180);
-  const confidenceRaw = String(item.confidence || item["置信度"] || "").trim();
-  const confidence = /high|高/i.test(confidenceRaw) ? "高" : (/low|低/i.test(confidenceRaw) ? "低" : "中");
-  return { name, aliases, role, organization, note, confidence, evidence };
-}
-
-function normalizePeopleSuggestionsModel(model) {
-  const raw = Array.isArray(model) ? model : (model && Array.isArray(model.people) ? model.people : []);
-  const out = [];
-  const seen = new Set();
-  for (const item of raw) {
-    const normalized = normalizePeopleSuggestion(item);
-    if (!normalized) continue;
-    const key = normalizePersonLookupText(normalized.name);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(normalized);
-  }
-  return out.slice(0, 20);
-}
-
-function getPeopleSuggestionIgnoreTerms(suggestion) {
-  const normalized = normalizePeopleSuggestion(suggestion);
-  if (!normalized) return [];
-  const terms = [normalized.name, ...(normalized.aliases || [])]
-    .map(normalizePersonLookupText)
-    .filter(t => t && t.length >= 2);
-  return Array.from(new Set(terms));
-}
-
-function makeStoredPeopleSuggestionForIgnore(raw, normalized) {
-  const base = normalized || normalizePeopleSuggestion(raw);
-  if (!base) return null;
-  const sourcePath = obsidian.normalizePath(raw && raw.sourcePath || "");
-  const sourceBasename = String(raw && raw.sourceBasename || (sourcePath.split("/").pop() || "").replace(/\.md$/i, "") || "").trim();
-  return Object.assign({}, base, {
-    sourcePath,
-    sourceBasename,
-    cacheKey: String(raw && (raw.cacheKey || raw.key) || ""),
-    matchPath: String(raw && raw.matchPath || (raw && raw.match && raw.match.path) || ""),
-  });
-}
-
-function normalizePeopleSuggestionIgnoreRecord(item) {
-  if (!item) return null;
-  const rawTerms = [];
-  let name = "";
-  let ignoredAt = "";
-  let rawSuggestion = null;
-  if (typeof item === "string") {
-    name = item.trim();
-    rawTerms.push(name);
-  } else if (typeof item === "object") {
-    name = String(item.name || item.label || item.key || "").trim();
-    ignoredAt = String(item.ignoredAt || "").trim();
-    rawSuggestion = item.suggestion && typeof item.suggestion === "object" ? item.suggestion : item;
-    if (Array.isArray(item.terms)) rawTerms.push(...item.terms);
-    rawTerms.push(item.key, item.name, item.label);
-    if (Array.isArray(item.aliases)) rawTerms.push(...item.aliases);
-    if (Array.isArray(item["常用称呼"])) rawTerms.push(...item["常用称呼"]);
-  }
-  const suggestion = makeStoredPeopleSuggestionForIgnore(rawSuggestion || { name }, normalizePeopleSuggestion(rawSuggestion || { name }));
-  if (suggestion) {
-    rawTerms.push(suggestion.name);
-    if (Array.isArray(suggestion.aliases)) rawTerms.push(...suggestion.aliases);
-  }
-  const terms = Array.from(new Set(rawTerms
-    .map(normalizePersonLookupText)
-    .filter(t => t && t.length >= 2)));
-  if (!terms.length) return null;
-  return {
-    key: terms[0],
-    terms,
-    name: name || (suggestion && suggestion.name) || terms[0],
-    ignoredAt,
-    suggestion,
-  };
-}
-
-function normalizePeopleSuggestionIgnores(value) {
-  if (!Array.isArray(value)) return [];
-  const out = [];
-  const seen = new Set();
-  for (const item of value) {
-    const record = normalizePeopleSuggestionIgnoreRecord(item);
-    if (!record) continue;
-    const key = record.key || record.terms[0];
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(record);
-  }
-  return out.slice(-300);
-}
-
-function isPeopleSuggestionIgnored(settings, suggestion) {
-  const terms = getPeopleSuggestionIgnoreTerms(suggestion);
-  if (!terms.length) return false;
-  const ignores = normalizePeopleSuggestionIgnores(settings && settings.peopleSuggestionIgnores);
-  return ignores.some(record => (record.terms || []).some(term => terms.includes(term)));
-}
-
-function addPeopleSuggestionIgnore(settings, suggestion) {
-  const normalized = normalizePeopleSuggestion(suggestion);
-  if (!settings || !normalized) return false;
-  const terms = getPeopleSuggestionIgnoreTerms(normalized);
-  if (!terms.length) return false;
-  const storedSuggestion = makeStoredPeopleSuggestionForIgnore(suggestion, normalized);
-  const current = normalizePeopleSuggestionIgnores(settings.peopleSuggestionIgnores);
-  const primaryKey = normalizePersonLookupText(normalized.name) || terms[0];
-  const existing = current.find(record => record.key === primaryKey || (record.terms || []).some(term => terms.includes(term)));
-  if (existing) {
-    existing.terms = Array.from(new Set([...(existing.terms || []), ...terms]));
-    existing.name = existing.name || normalized.name;
-    existing.ignoredAt = new Date().toISOString();
-    if (storedSuggestion) existing.suggestion = Object.assign({}, existing.suggestion || {}, storedSuggestion);
-  } else {
-    current.push({
-      key: primaryKey,
-      terms,
-      name: normalized.name,
-      ignoredAt: new Date().toISOString(),
-      suggestion: storedSuggestion,
-    });
-  }
-  settings.peopleSuggestionIgnores = current.slice(-300);
-  return true;
-}
-
-function removePeopleSuggestionIgnores(settings, suggestions) {
-  if (!settings) return 0;
-  const current = normalizePeopleSuggestionIgnores(settings.peopleSuggestionIgnores);
-  const keys = new Set();
-  const terms = new Set();
-  for (const item of suggestions || []) {
-    if (!item) continue;
-    if (item.ignoreKey) keys.add(String(item.ignoreKey));
-    if (item.key) keys.add(String(item.key));
-    for (const term of (item.ignoreTerms || [])) {
-      const normalized = normalizePersonLookupText(term);
-      if (normalized) terms.add(normalized);
-    }
-    for (const term of getPeopleSuggestionIgnoreTerms(item)) {
-      if (term) terms.add(term);
-    }
-  }
-  if (!keys.size && !terms.size) return 0;
-  const next = current.filter(record => {
-    if (keys.has(record.key)) return false;
-    return !(record.terms || []).some(term => terms.has(term));
-  });
-  settings.peopleSuggestionIgnores = next;
-  return current.length - next.length;
-}
-
-function getPeopleSuggestionCacheKey(sourcePath, suggestion) {
-  const normalized = normalizePeopleSuggestion(suggestion);
-  if (!normalized) return "";
-  const terms = getPeopleSuggestionIgnoreTerms(normalized);
-  const nameKey = normalizePersonLookupText(normalized.name) || terms[0] || "";
-  if (!nameKey) return "";
-  return `${obsidian.normalizePath(sourcePath || normalized.sourcePath || "")}::${nameKey}`;
-}
-
-function normalizePeopleSuggestionCacheRecord(item) {
-  if (!item || typeof item !== "object") return null;
-  const rawSuggestion = item.suggestion && typeof item.suggestion === "object" ? item.suggestion : item;
-  const normalized = normalizePeopleSuggestion(rawSuggestion);
-  if (!normalized) return null;
-  const sourcePath = obsidian.normalizePath(item.sourcePath || rawSuggestion.sourcePath || "");
-  const sourceBasename = String(item.sourceBasename || rawSuggestion.sourceBasename || (sourcePath.split("/").pop() || "").replace(/\.md$/i, "") || "").trim();
-  const key = String(item.key || item.id || rawSuggestion.cacheKey || getPeopleSuggestionCacheKey(sourcePath, normalized) || "").trim();
-  if (!key) return null;
-  const matchPath = String(item.matchPath || rawSuggestion.matchPath || "").trim();
-  const suggestion = Object.assign({}, normalized, {
-    sourcePath,
-    sourceBasename,
-    cacheKey: key,
-    matchPath,
-  });
-  return {
-    key,
-    sourcePath,
-    sourceBasename,
-    sourceMtime: Number(item.sourceMtime) || 0,
-    sourceSize: Number(item.sourceSize) || 0,
-    createdAt: String(item.createdAt || new Date().toISOString()),
-    updatedAt: String(item.updatedAt || item.createdAt || new Date().toISOString()),
-    suggestion,
-  };
-}
-
-function normalizePeopleSuggestionCache(value) {
-  const raw = Array.isArray(value)
-    ? value
-    : (value && Array.isArray(value.pending) ? value.pending : []);
-  const pending = [];
-  const seen = new Set();
-  for (const item of raw) {
-    const record = normalizePeopleSuggestionCacheRecord(item);
-    if (!record || seen.has(record.key)) continue;
-    seen.add(record.key);
-    pending.push(record);
-  }
-  return { pending: pending.slice(-PEOPLE_SUGGESTION_CACHE_LIMIT) };
-}
-
-function makePeopleSuggestionCacheRecord(file, suggestion) {
-  const normalized = normalizePeopleSuggestion(suggestion);
-  if (!normalized) return null;
-  const sourcePath = file instanceof obsidian.TFile ? obsidian.normalizePath(file.path || "") : obsidian.normalizePath(suggestion && suggestion.sourcePath || "");
-  const sourceBasename = file instanceof obsidian.TFile ? file.basename : String(suggestion && suggestion.sourceBasename || "").trim();
-  const key = getPeopleSuggestionCacheKey(sourcePath, normalized);
-  if (!key) return null;
-  return normalizePeopleSuggestionCacheRecord({
-    key,
-    sourcePath,
-    sourceBasename,
-    sourceMtime: file instanceof obsidian.TFile ? Number(file.stat && file.stat.mtime) || 0 : Number(suggestion && suggestion.sourceMtime) || 0,
-    sourceSize: file instanceof obsidian.TFile ? Number(file.stat && file.stat.size) || 0 : Number(suggestion && suggestion.sourceSize) || 0,
-    createdAt: suggestion && suggestion.createdAt || new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    suggestion: Object.assign({}, normalized, {
-      sourcePath,
-      sourceBasename,
-      matchPath: suggestion && suggestion.matchPath || "",
-    }),
-  });
-}
-
-function isPeopleSuggestionCacheRecordCurrent(plugin, record) {
-  if (!record || !record.sourcePath) return true;
-  const file = plugin && plugin.app && plugin.app.vault && plugin.app.vault.getAbstractFileByPath(record.sourcePath);
-  if (!(file instanceof obsidian.TFile)) return false;
-  const mtime = Number(file.stat && file.stat.mtime) || 0;
-  const size = Number(file.stat && file.stat.size) || 0;
-  if (record.sourceMtime && record.sourceMtime !== mtime) return false;
-  if (record.sourceSize && record.sourceSize !== size) return false;
-  return true;
-}
-
-function peopleSuggestionRecordToSuggestion(record) {
-  if (!record) return null;
-  const suggestion = normalizePeopleSuggestion(Object.assign({}, record.suggestion || {}, {
-    sourcePath: record.sourcePath,
-    sourceBasename: record.sourceBasename,
-  }));
-  if (!suggestion) return null;
-  suggestion.cacheKey = record.key;
-  suggestion.sourcePath = record.sourcePath;
-  suggestion.sourceBasename = record.sourceBasename;
-  suggestion.matchPath = record.suggestion && record.suggestion.matchPath || "";
-  suggestion.selected = true;
-  return suggestion;
-}
-
-function peopleSuggestionIgnoreRecordToSuggestion(record) {
-  const normalizedRecord = normalizePeopleSuggestionIgnoreRecord(record);
-  if (!normalizedRecord) return null;
-  const suggestion = normalizePeopleSuggestion(normalizedRecord.suggestion || { name: normalizedRecord.name });
-  if (!suggestion) return null;
-  const stored = normalizedRecord.suggestion || {};
-  suggestion.sourcePath = stored.sourcePath || "";
-  suggestion.sourceBasename = stored.sourceBasename || "";
-  suggestion.cacheKey = stored.cacheKey || "";
-  suggestion.matchPath = stored.matchPath || "";
-  suggestion.ignoreKey = normalizedRecord.key;
-  suggestion.ignoreTerms = normalizedRecord.terms || [];
-  suggestion.ignoredAt = normalizedRecord.ignoredAt || "";
-  suggestion.selected = false;
-  return suggestion;
-}
-
-function findMatchingPersonEntry(people, suggestion) {
-  const terms = [suggestion && suggestion.name, ...((suggestion && suggestion.aliases) || [])]
-    .map(normalizePersonLookupText)
-    .filter(Boolean);
-  if (!terms.length) return null;
-  return (people || []).find(person => {
-    const personTerms = [person.name, ...(person.aliases || [])]
-      .map(normalizePersonLookupText)
-      .filter(Boolean);
-    return personTerms.some(p => terms.some(t => p === t || p.includes(t) || t.includes(p)));
-  }) || null;
-}
-
-function buildPeopleDirectorySuggestionPrompt(fileName, markdown) {
-  const source = String(markdown || "").replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/m, "").slice(0, 16000);
-  return `请从下面这篇 LexVoice 纪要中，提取“适合维护为人员资料”的候选人员信息。
-
-文件名：${fileName}
-
-规则：
-- 只提取纪要中明确出现的人名、称呼、角色、组织关系或职责线索。
-- 不要编造真实姓名、组织、职位或关系；证据不足就不要输出。
-- “某负责人”“某工程师”“产品负责人”这类称呼可以作为 aliases 或 role，但不要把泛称当作姓名。
-- 输出用于给用户确认入库，所以要保守、短句、可编辑。
-- 只输出 JSON，不要 Markdown，不要代码块。
-
-JSON 结构：
-{
-  "people": [
-    {
-      "name": "姓名或最明确的人物称谓",
-      "aliases": ["常用称呼"],
-      "role": "角色/职责",
-      "organization": "组织/部门/公司",
-      "note": "为什么值得入库或需要补充什么",
-      "confidence": "高/中/低",
-      "evidence": ["纪要中支持该判断的短句"]
-    }
-  ]
-}
-
-纪要正文：
-${source}`;
-}
-
-function mergeUniqueStrings(base, extra) {
-  const out = [];
-  const add = (value) => {
-    const text = String(value || "").trim();
-    if (!text) return;
-    const key = normalizePersonLookupText(text);
-    if (!out.some(x => normalizePersonLookupText(x) === key)) out.push(text);
-  };
-  for (const item of normalizePeopleArray(base)) add(item);
-  for (const item of normalizePeopleArray(extra)) add(item);
-  return out;
-}
-
-function mergeSourceNoteRelatedPeopleFrontmatter(frontmatter, personFiles) {
-  const fm = Object.assign({}, frontmatter || {});
-  const links = (personFiles || [])
-    .filter(file => file instanceof obsidian.TFile)
-    .map(file => makeFileWikiLink(file))
-    .filter(Boolean);
-  const merged = mergeUniqueStrings(fm["相关人员"] || fm.relatedPeople || fm.people || [], links);
-  if (merged.length) fm["相关人员"] = merged;
-  delete fm.relatedPeople;
-  delete fm.people;
-  return fm;
-}
-
-function mergePersonFrontmatter(frontmatter, suggestion, sourceFile) {
-  const fm = Object.assign({}, frontmatter || {});
-  fm.type = "lexvoice-person";
-  if (!String(fm["姓名"] || "").trim()) fm["姓名"] = String(fm.name || "").trim() || suggestion.name;
-  if (!String(fm["角色"] || "").trim()) fm["角色"] = String(fm.role || "").trim() || suggestion.role || "";
-  if (!String(fm["组织"] || "").trim()) fm["组织"] = String(fm.organization || "").trim() || suggestion.organization || "";
-  const aliases = mergeUniqueStrings(fm["常用称呼"] || fm.aliases || [], suggestion.aliases || []);
-  if (aliases.length) fm["常用称呼"] = aliases;
-  const sourceLink = makeFileWikiLink(sourceFile);
-  const sources = mergeUniqueStrings(fm["来源"] || fm.sources || [], sourceLink ? [sourceLink] : []);
-  if (sources.length) fm["来源"] = sources;
-  fm["最近更新"] = new Date().toISOString().slice(0, 10);
-  const noteParts = [];
-  if (String(fm["备注"] || fm.note || "").trim()) noteParts.push(String(fm["备注"] || fm.note).trim());
-  const additions = [];
-  if (suggestion.note) additions.push(suggestion.note);
-  if (suggestion.evidence && suggestion.evidence.length) additions.push("依据：" + suggestion.evidence.slice(0, 2).join("；"));
-  if (additions.length) {
-    const line = (sourceLink ? `${sourceLink}：` : "") + additions.join("；");
-    if (!noteParts.some(n => n.includes(line))) noteParts.push(line);
-  }
-  if (noteParts.length) fm["备注"] = noteParts.join("\n");
-  const tags = mergeUniqueStrings(fm.tags || [], [PEOPLE_DIRECTORY_TAG]);
-  fm.tags = tags;
-  delete fm.name;
-  delete fm.role;
-  delete fm.organization;
-  delete fm.aliases;
-  delete fm.sources;
-  delete fm.note;
-  return fm;
-}
-
-function upsertFrontmatterInMarkdown(markdown, frontmatter) {
-  const yaml = obsidian.stringifyYaml(frontmatter || {});
-  const text = String(markdown || "");
-  const match = text.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/);
-  if (match) return "---\n" + yaml + "---\n\n" + text.slice(match[0].length).replace(/^\n+/, "");
-  return "---\n" + yaml + "---\n\n" + text;
-}
-
-async function generatePeopleDirectorySuggestions(plugin, file, markdown) {
-  const people = await loadPeopleDirectory(plugin);
-  const sys = "你是严谨的信息抽取助手，只根据用户提供的纪要提取人员资料建议。不要编造，不要输出非 JSON。";
-  const raw = await callLlm(plugin, sys, buildPeopleDirectorySuggestionPrompt(file && file.basename ? file.basename : "当前笔记", markdown), { timeoutMs: 60000 });
-  const suggestions = normalizePeopleSuggestionsModel(extractJsonObject(raw))
-    .filter(item => !isPeopleSuggestionIgnored(plugin.settings, item));
-  for (const item of suggestions) {
-    item.match = findMatchingPersonEntry(people, item);
-    item.sourcePath = file && file.path ? file.path : "";
-    item.sourceBasename = file && file.basename ? file.basename : "";
-  }
-  return suggestions;
-}
-
-function sanitizeSedimentText(value, limit) {
-  const text = String(value || "")
-    .replace(/\r\n/g, "\n")
-    .replace(/\s+/g, " ")
-    .trim();
-  return limit && text.length > limit ? text.slice(0, limit).trim() : text;
-}
-
-function normalizeSedimentTextList(value, limit) {
-  const source = Array.isArray(value) ? value : String(value || "").split(/[\n;；、,，]+/);
-  const out = [];
-  const seen = new Set();
-  for (const item of source) {
-    const text = sanitizeSedimentText(item, limit || 80);
-    if (!text) continue;
-    const key = text.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(text);
-  }
-  return out;
-}
-
-function normalizeSedimentTodoSubtasks(value) {
-  const source = Array.isArray(value) ? value : String(value || "").split(/\n+/);
-  const out = [];
-  const seen = new Set();
-  for (const item of source || []) {
-    const raw = item && typeof item === "object"
-      ? (item.task || item.title || item.text || item.name || item.content)
-      : item;
-    const text = sanitizeSedimentText(raw, 120)
-      .replace(/^[-*]\s*/, "")
-      .replace(/^\[[ xX]\]\s*/, "")
-      .trim();
-    if (!text) continue;
-    const key = text.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(text);
-    if (out.length >= 12) break;
-  }
-  return out;
-}
-
-function getSedimentSourceDateLabel(sourceFile) {
-  const basename = String(sourceFile && sourceFile.basename || "");
-  const m = basename.match(/^(\d{4}-\d{2}-\d{2})(?:\s+(\d{2})(\d{2}))?/);
-  if (!m) return "";
-  return m[2] ? `${m[1]} ${m[2]}:${m[3]}` : m[1];
-}
-
-function normalizeSedimentExtractionModel(model) {
-  const raw = model && typeof model === "object" ? model : {};
-  const out = {
-    people: normalizePeopleSuggestionsModel(raw.people || raw.persons || raw.peopleSuggestions || []),
-    hotwords: createVocabularyGroups(),
-    learningCards: [],
-    todos: [],
-  };
-  const hot = raw.hotwords || raw.vocabulary || raw.asrHotwords || {};
-  for (const def of VOCABULARY_SECTIONS) {
-    out.hotwords[def.key] = normalizeSedimentTextList(hot[def.key] || hot[def.title] || [], 80).slice(0, 18);
-  }
-  if (!out.hotwords.terms.length && Array.isArray(raw.terms)) {
-    out.hotwords.terms = normalizeSedimentTextList(raw.terms, 80).slice(0, 18);
-  }
-  const cards = Array.isArray(raw.learningCards) ? raw.learningCards : Array.isArray(raw.cards) ? raw.cards : Array.isArray(raw.concepts) ? raw.concepts : [];
-  for (const item of cards.slice(0, 12)) {
-    const title = sanitizeSedimentText(item && (item.title || item.name || item.concept || item.question), 80);
-    const summary = sanitizeSedimentText(item && (item.summary || item.description || item.answer), 600);
-    if (!title || !summary) continue;
-    const type = sanitizeSedimentText(item && (item.type || item.category || "概念"), 20) || "概念";
-    out.learningCards.push({
-      title,
-      type,
-      summary,
-      // 观点类卡片：标出是谁的观点（holder）；其它类型一般为空
-      holder: sanitizeSedimentText(item && (item.holder || item.speaker || item.owner || item.person || item.by), 40),
-      sourceTime: sanitizeSedimentText(item && (item.sourceTime || item.time || item.timestamp), 20),
-      tags: normalizeSedimentTextList(item && (item.tags || item.keywords), 24).slice(0, 8),
-      reusableLine: sanitizeSedimentText(item && (item.reusableLine || item.quote || item.sentence), 140),
-    });
-  }
-  const todos = Array.isArray(raw.todos) ? raw.todos : Array.isArray(raw.tasks) ? raw.tasks : [];
-  for (const item of todos.slice(0, 12)) {
-    const task = sanitizeSedimentText(item && (item.task || item.title || item.action), 140);
-    if (!task) continue;
-    const rawOwner = sanitizeSedimentText(item && (item.owner || item.assignee || item.person), 40);
-    const rawDue = sanitizeSedimentText(item && (item.due || item.deadline || item.date), 40);
-    out.todos.push({
-      task,
-      // 留空字符串，让 UI 端用"加责任人 / 加时间"虚线占位渲染；
-      // 同时把 LLM 误填的 "未指定" / "无" / "待定" / "TBD" 也视为空
-      owner: rawOwner && !/^(未指定|无|待定|TBD|N\/A|null|none)$/i.test(rawOwner) ? rawOwner : "",
-      due:   rawDue   && !/^(未指定|无|待定|TBD|N\/A|null|none)$/i.test(rawDue)   ? rawDue   : "",
-      sourceTime: sanitizeSedimentText(item && (item.sourceTime || item.time || item.timestamp), 20),
-      note: sanitizeSedimentText(item && (item.note || item.reason || item.evidence), 220),
-      subtasks: normalizeSedimentTodoSubtasks(item && (item.subtasks || item.children || item.steps || item.items)),
-    });
-  }
-  return out;
-}
-
-const SEDIMENT_PREEXTRACT_BEGIN = "LEXVOICE_SEDIMENT_BEGIN";
-const SEDIMENT_PREEXTRACT_END = "LEXVOICE_SEDIMENT_END";
-
-function buildSedimentPreExtractionInstruction() {
-  return `附加产物：沉淀预提取
-
-完成上面的纪要整理和标签注释后，请在本次回复最末尾额外输出一段“沉淀预提取 JSON”。这段 JSON 只给 LexVoice 插件解析，不属于正文。
-
-严格格式：
-<!--${SEDIMENT_PREEXTRACT_BEGIN}
-{
-  "people": [
-    {
-      "name": "姓名或最明确称呼",
-      "aliases": ["常用称呼"],
-      "role": "角色/职责",
-      "organization": "组织/部门/公司",
-      "note": "为什么值得入库或需要补充什么",
-      "confidence": "高/中/低",
-      "evidence": ["纪要中的依据短句"]
-    }
-  ],
-  "todos": [
-    {
-      "task": "具体行动",
-      "owner": "责任人；无法判断留空字符串",
-      "due": "截止时间；无法判断留空字符串",
-      "sourceTime": "如 12:34；没有则空",
-      "note": "依据或补充说明",
-      "subtasks": ["可勾选的拆分子动作；按执行顺序；至少 2 条，除非任务本身是原子动作"]
-    }
-  ],
-  "learningCards": [
-    {
-      "type": "概念/机制/案例/QA/追问/观点",
-      "title": "卡片标题",
-      "summary": "可独立复用的解释或摘要",
-      "holder": "仅 type=观点 时填：用纪要里真实出现的姓名/称呼标出该观点是谁主张的（占位示例仅说明格式：张三/李四，切勿照抄）；无法判断是谁说的、或非观点类，一律留空",
-      "sourceTime": "如 12:34；没有则空",
-      "tags": ["标签"],
-      "reusableLine": "可复用句；没有则空"
-    }
-  ],
-  "hotwords": {
-    "people": ["人名或称呼"],
-    "brands": ["品牌/机构"],
-    "projects": ["项目/产品/模型/系统"],
-    "terms": ["行业术语"],
-    "corrections": ["错误写法 => 标准写法"],
-    "other": ["其他专有名词"]
-  }
-}
-${SEDIMENT_PREEXTRACT_END}-->
-
-规则：
-- 只根据本次纪要内容提取，不要编造。
-- 四组字段必须都存在；没有内容时输出空数组或空对象字段。
-- 每组最多 8 条，宁缺毋滥。
-- 必须是合法 JSON，不要尾随逗号，不要 Markdown 代码块，不要解释文字。
-- 这段必须放在整篇回复最后。
-
-待办 subtasks 拆分（固定生效）：
-- 每个 task 都尝试拆出 2-5 条 subtasks；任务本身是单一原子动作（如"发邮件给张三"）才允许空数组。
-- 每条 subtask 是**具体可勾选完成**的小动作（动词开头，短句，≤ 20 字），不要写成抽象描述。
-- 必须来自纪要原文里能找到依据的拆分；不要凭空发明工序。
-- 按执行先后排列；前置/准备工作在前，验收/收尾在后。
-- 不要在 subtask 里重复 owner / due / sourceTime；只写动作本身。`;
-}
-
-function appendSedimentPreExtractionInstruction(prompt) {
-  return `${String(prompt || "").trimEnd()}\n\n---\n\n${buildSedimentPreExtractionInstruction()}`;
-}
-
-function getSedimentPreExtractionBlockPatterns(global) {
-  const flags = global ? "gi" : "i";
-  return [
-    new RegExp(`<!--\\s*${SEDIMENT_PREEXTRACT_BEGIN}\\s*([\\s\\S]*?)\\s*${SEDIMENT_PREEXTRACT_END}\\s*-->`, flags),
-    new RegExp(`<!--\\s*${SEDIMENT_PREEXTRACT_BEGIN}\\s*-->\\s*(?:\`\`\`json\\s*)?([\\s\\S]*?)(?:\\s*\`\`\`)?\\s*<!--\\s*${SEDIMENT_PREEXTRACT_END}\\s*-->`, flags),
-    /<!--\s*LEXVOICE_CARDS_BEGIN\s*-->\s*(?:```json\s*)?([\s\S]*?)(?:\s*```)?\s*<!--\s*LEXVOICE_CARDS_END\s*-->/gi,
-  ];
-}
-
-function stripSedimentPreExtractionBlocks(markdown) {
-  let text = String(markdown || "");
-  for (const pattern of getSedimentPreExtractionBlockPatterns(true)) {
-    text = text.replace(pattern, "");
-  }
-  return text.trimEnd();
-}
-
-function extractSedimentPreExtractionBlock(markdown) {
-  const text = String(markdown || "");
-  for (const pattern of getSedimentPreExtractionBlockPatterns(false)) {
-    const match = pattern.exec(text);
-    if (!match) continue;
-    const rawJson = String(match[1] || "").trim();
-    const parsed = extractJsonObject(rawJson);
-    if (!parsed) return { found: true, objects: null, cleaned: stripSedimentPreExtractionBlocks(text) };
-    return {
-      found: true,
-      objects: normalizeSedimentExtractionModel(parsed),
-      cleaned: stripSedimentPreExtractionBlocks(text),
-    };
-  }
-  return { found: false, objects: null, cleaned: text };
-}
-
-function formatSedimentPreExtractionBlock(objects) {
-  const normalized = normalizeSedimentExtractionModel(objects);
-  return [
-    `<!--${SEDIMENT_PREEXTRACT_BEGIN}`,
-    JSON.stringify(normalized),
-    `${SEDIMENT_PREEXTRACT_END}-->`,
-  ].join("\n");
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // 把正文里那段沉淀元数据 HTML 注释「原样」拆出来，返回 { body, block }。
 // 用途：写最终纪要时，把这坨机器可读 JSON 从"正文与原始材料之间"挪到笔记最末尾，
 // 编辑模式下不再夹在中间难看（阅读视图本就因 HTML 注释而隐藏）。保留原始匹配文本不重排，
 // 避免 JSON 轻微不规范时反序列化丢数据。
-function splitOutSedimentBlock(markdown) {
-  const text = String(markdown || "");
-  for (const pattern of getSedimentPreExtractionBlockPatterns(false)) {
-    const m = pattern.exec(text);
-    if (m && m[0]) {
-      return { body: stripSedimentPreExtractionBlocks(text), block: String(m[0]).trim() };
-    }
-  }
-  return { body: text, block: "" };
-}
 
-function appendSedimentPreExtractionBlock(markdown, objects) {
-  if (!objects) return stripSedimentPreExtractionBlocks(markdown);
-  const cleaned = stripSedimentPreExtractionBlocks(markdown);
-  return `${cleaned}\n\n${formatSedimentPreExtractionBlock(objects)}\n`;
-}
 
-async function upsertSedimentPreExtractionBlockInFile(plugin, file, objects) {
-  if (!plugin || !file || !(file instanceof obsidian.TFile) || !objects) return false;
-  const content = await plugin.app.vault.cachedRead(file);
-  const next = appendSedimentPreExtractionBlock(content, objects);
-  if (next === content) return false;
-  await plugin.app.vault.modify(file, next);
-  return true;
-}
 
-function buildSedimentExtractionPrompt(fileName, markdown) {
-  const source = String(markdown || "")
-    .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/m, "")
-    .slice(0, 24000);
-  return `请从下面这篇 LexVoice 纪要中一次性提炼可沉淀信息。
 
-文件名：${fileName}
 
-总规则：
-- 只根据纪要原文提取，不要编造。
-- 同一篇纪要只做一次综合提炼：人员建议、待办、学习卡片、ASR 热词都在一个 JSON 里输出。
-- 没有明确依据的内容不要输出；闲聊、寒暄、无意义口头禅不要沉淀。
-- 人员建议只输出适合维护为人员资料的姓名、称呼、角色、组织或职责线索。
-- 待办只输出明确可执行事项。没有动作、责任或后续处理含义的句子不要写成待办。
-- 学习卡片只输出可复用的概念、机制、案例、QA、追问或观点；不要把普通段落摘要拆成卡片。
-- 当卡片 type 为「观点」时，必须在 holder 字段标出这是谁的观点（用纪要里出现的姓名或称呼）；观点是带有立场/主张的判断，归属到人才有复用价值。无法判断是谁说的就不要标成观点，可改成概念或机制。
-- ASR 热词只输出后续录音里可能复现、且容易转写错的专名、术语或标准写法。
-- 不要输出 Markdown、代码块或解释文字，只输出合法 JSON。
 
-待办子任务拆分规则（subtasks 字段固定生效，不要省略）：
-- 每个 task 都尝试拆出 2-5 条 subtasks；只有任务本身是单一原子动作（如"发邮件给张三"）时才允许空数组。
-- 每条 subtask 必须是**具体可勾选完成**的小动作（动词开头，短句，≤ 20 字），不要写成抽象描述或重复 task 本身。
-- subtasks 应来自纪要原文里能找到依据的拆分（讨论里出现的步骤、子条件、依赖项、子环节），不要凭空发明工序。
-- 顺序按执行先后排列；前置/准备工作放前面，验收/收尾放后面。
-- 不要在 subtask 里重复 owner / due / sourceTime 信息——只写动作本身。
 
-JSON 结构：
-{
-  "people": [
-    {
-      "name": "姓名或最明确称呼",
-      "aliases": ["常用称呼"],
-      "role": "角色/职责",
-      "organization": "组织/部门/公司",
-      "note": "为什么值得入库或需要补充什么",
-      "confidence": "高/中/低",
-      "evidence": ["纪要中的依据短句"]
-    }
-  ],
-  "todos": [
-    {
-      "task": "具体行动",
-      "owner": "责任人；无法判断留空字符串",
-      "due": "截止时间；无法判断留空字符串",
-      "sourceTime": "如 12:34；没有则空",
-      "note": "依据或补充说明",
-      "subtasks": ["可勾选的拆分子动作；按执行顺序；至少 2 条，除非任务本身是原子动作"]
-    }
-  ],
-  "learningCards": [
-    {
-      "type": "概念/机制/案例/QA/追问/观点",
-      "title": "卡片标题",
-      "summary": "可独立复用的解释或摘要",
-      "holder": "仅 type=观点 时填：用纪要里真实出现的姓名/称呼标出该观点是谁主张的（占位示例仅说明格式：张三/李四，切勿照抄）；无法判断是谁说的、或非观点类，一律留空",
-      "sourceTime": "如 12:34；没有则空",
-      "tags": ["标签"],
-      "reusableLine": "可复用句；没有则空"
-    }
-  ],
-  "hotwords": {
-    "people": ["人名或称呼"],
-    "brands": ["品牌/机构"],
-    "projects": ["项目/产品/模型/系统"],
-    "terms": ["行业术语"],
-    "corrections": ["错误写法 => 标准写法"],
-    "other": ["其他专有名词"]
-  }
-}
 
-纪要正文：
-${source}`;
-}
 
-async function generateSedimentObjects(plugin, file, markdown) {
-  if (!plugin.settings.llmApiKey && !isLocalLlmEndpoint(plugin.settings.llmEndpoint)) throw new Error("请先在 API 页配置大模型服务");
-  const sys = "你是 LexVoice 的纪要沉淀助手。你只根据当前纪要提炼结构化信息对象，输出合法 JSON，不编造，不泄露或要求任何配置。";
-  const raw = await callLlm(plugin, sys, buildSedimentExtractionPrompt(file && file.basename ? file.basename : "当前笔记", markdown), { timeoutMs: 90000 });
-  const objects = normalizeSedimentExtractionModel(extractJsonObject(raw));
-  const people = await loadPeopleDirectory(plugin);
-  objects.people = objects.people
-    .filter(item => !isPeopleSuggestionIgnored(plugin.settings, item))
-    .map(item => Object.assign(item, {
-      match: findMatchingPersonEntry(people, item),
-      sourcePath: file && file.path ? file.path : "",
-      sourceBasename: file && file.basename ? file.basename : "",
-    }));
-  return objects;
-}
-
-function buildLexVoiceObjectTags(baseTag, extraTags) {
-  const tags = [baseTag, "lexvoice"];
-  for (const tag of normalizeSedimentTextList(extraTags || [], 28)) {
-    const clean = tag.replace(/^#/, "").replace(/\s+/g, "-");
-    if (clean && !tags.includes(clean)) tags.push(clean);
-  }
-  return tags;
-}
-
-function formatSedimentLearningCardMarkdown(sourceFile, card) {
-  const sourceLink = makeFileWikiLink(sourceFile);
-  const holder = sanitizeSedimentText(card && card.holder, 40);
-  const fm = {
-    type: "lexvoice-learning-card",
-    "卡片类型": card.type || "概念",
-    "标题": card.title,
-    "摘要": card.summary,
-    // 观点持有人：观点类卡片标出是谁的观点
-    "观点持有人": holder || "",
-    "来源笔记": sourceLink,
-    "来源时间": card.sourceTime || "",
-    tags: buildLexVoiceObjectTags(LEARNING_CARD_TAG, [CONCEPT_CARD_TAG, ...(card.tags || [])]),
-  };
-  const body = [
-    `# ${card.title}`,
-    "",
-    // 观点类：标题下方一行注明观点持有人
-    holder ? `> [!quote] 观点 · ${holder}` : "",
-    holder ? "" : null,
-    `> [!summary] 摘要`,
-    `> ${card.summary}`,
-    "",
-    card.reusableLine ? `## 可复用句\n\n${card.reusableLine}\n` : "",
-    "## 来源",
-    "",
-    sourceLink ? `- ${sourceLink}${card.sourceTime ? ` · ${card.sourceTime}` : ""}` : "",
-    "",
-  ].filter(v => v !== null && v !== "").join("\n");
-  return upsertFrontmatterInMarkdown(body, fm);
-}
-
-function formatSedimentTodoCardMarkdown(sourceFile, todo) {
-  const sourceLink = makeFileWikiLink(sourceFile);
-  const task = sanitizeSedimentText(todo && todo.task, 160) || "未命名待办";
-  const owner = sanitizeSedimentText(todo && todo.owner, 40) || "未指定";
-  const due = sanitizeSedimentText(todo && todo.due, 40) || "未指定";
-  const sourceTime = sanitizeSedimentText(todo && todo.sourceTime, 20);
-  const recordingDate = getSedimentSourceDateLabel(sourceFile);
-  const subtasks = normalizeSedimentTodoSubtasks(todo && (todo.subtasks || todo.children || todo.steps || todo.items));
-  const taskMeta = [
-    recordingDate ? `日期：${recordingDate}` : "",
-    `责任人：${owner}`,
-    sourceTime ? `时间：${sourceTime}` : "",
-    `事项：${task}`,
-    `截止：${due}`,
-  ].filter(Boolean).join(" ");
-  const taskLines = [`- [ ] ${taskMeta}`].concat(subtasks.map(item => `  - [ ] ${item}`));
-  const fm = {
-    type: "lexvoice-todo-card",
-    "事项": task,
-    "责任人": owner,
-    "截止": due,
-    "状态": "待办",
-    "录音日期": recordingDate,
-    "来源笔记": sourceLink,
-    "来源时间": sourceTime || "",
-    "子任务数": subtasks.length,
-    tags: buildLexVoiceObjectTags(TODO_CARD_TAG, []),
-  };
-  const body = [
-    `# ${task}`,
-    "",
-    taskLines.join("\n"),
-    "",
-    todo.note ? `## 依据\n\n${todo.note}\n` : "",
-    "## 来源",
-    "",
-    sourceLink ? `- ${sourceLink}${sourceTime ? ` · ${sourceTime}` : ""}` : "",
-    "",
-  ].filter(Boolean).join("\n");
-  return upsertFrontmatterInMarkdown(body, fm);
-}
-
-async function upsertLexVoiceObjectNote(plugin, folder, name, content) {
-  await plugin.ensureFolder(folder);
-  const path = obsidian.normalizePath(`${folder}/${sanitizeFilename(name) || "未命名"}.md`);
-  const file = plugin.app.vault.getAbstractFileByPath(path);
-  if (file instanceof obsidian.TFile) {
-    const previousContent = await plugin.app.vault.read(file);
-    await plugin.app.vault.modify(file, content);
-    return { file, path: file.path, created: false, previousContent };
-  }
-  const target = plugin.getAvailableVaultPath(path);
-  if (!target) throw new Error("无法生成可用的对象文件路径");
-  const createdFile = await plugin.app.vault.create(target, content);
-  return { file: createdFile, path: createdFile.path, created: true, previousContent: "" };
-}
-
-async function writeSedimentObjectCards(plugin, sourceFile, objects) {
-  const result = { learning: 0, todos: 0, entries: [] };
-  const baseStem = sanitizeFilename(sourceFile && sourceFile.basename || "LexVoice");
-  const learningFolder = obsidian.normalizePath(plugin.settings.learningCardsFolder || DEFAULT_SETTINGS.learningCardsFolder);
-  for (const card of objects.learningCards || []) {
-    const name = `${baseStem}-${sanitizeFilename(card.title) || "学习卡片"}`;
-    const entry = await upsertLexVoiceObjectNote(plugin, learningFolder, name, formatSedimentLearningCardMarkdown(sourceFile, card));
-    result.entries.push(Object.assign({ kind: "card" }, entry));
-    result.learning++;
-  }
-  // 待办：优先写入当日日记的"## 待办"段（Tasks / Dataview 双兼容），不再每条建新 MD。
-  // 兜底：若 Daily Notes 插件未启用，回退到旧的卡片文件方式。
-  const todos = objects.todos || [];
-  if (todos.length) {
-    const dailyFile = await ensureTodayDailyNoteFile(plugin.app);
-    if (dailyFile instanceof obsidian.TFile) {
-      let dailyContent = "";
-      try { dailyContent = await plugin.app.vault.read(dailyFile); } catch {}
-      for (const todo of todos) {
-        const todoId = getSedimentTodoId(todo);
-        const entry = buildSedimentTodoDailyEntry(todo, sourceFile, todoId);
-        const updated = upsertSedimentTodoInDailyNote(dailyContent, todoId, entry, plugin.settings);
-        const created = !dailyContent.includes(`<!-- lexvoice-todo:${todoId} -->`);
-        dailyContent = updated;
-        result.entries.push({
-          kind: "todo",
-          file: dailyFile,
-          path: dailyFile.path,
-          created,
-          previousContent: "",
-          todoId,
-          target: "daily",
-        });
-        result.todos++;
-      }
-      await plugin.app.vault.modify(dailyFile, dailyContent);
-    } else {
-      // 兜底：Daily Notes 插件未启用，回退到旧的卡片文件路径
-      const todoFolder = obsidian.normalizePath(plugin.settings.todoCardsFolder || DEFAULT_SETTINGS.todoCardsFolder);
-      for (const todo of todos) {
-        const name = `${baseStem}-${sanitizeFilename(todo.task) || "待办"}`;
-        const entry = await upsertLexVoiceObjectNote(plugin, todoFolder, name, formatSedimentTodoCardMarkdown(sourceFile, todo));
-        result.entries.push(Object.assign({ kind: "todo", target: "card" }, entry));
-        result.todos++;
-      }
-    }
-  }
-  return result;
-}
 
 
 
@@ -5747,14 +4510,6 @@ function buildTranscribeHttpError(res, body, provider, blob, mime) {
 }
 
 
-function isLocalServiceEndpoint(endpoint) {
-  try {
-    const host = new URL(String(endpoint || "")).hostname.toLowerCase();
-    return isPrivateNetworkHost(host);
-  } catch {
-    return false;
-  }
-}
 
 function getErrorMessage(error) {
   if (!error) return "";
@@ -6461,26 +5216,6 @@ function normalizeEmailAddressList(value) {
   return Array.from(new Set(emails.map(e => e.toLowerCase())));
 }
 
-function normalizePersonNameForEmail(value) {
-  let text = String(value || "").trim();
-  if (!text) return "";
-  text = text
-    .replace(/^\[\[|\]\]$/g, "")
-    .replace(/\|.*$/g, "")
-    .replace(/^@+/, "")
-    .replace(/^[姓名人员：:\s]+/, "")
-    .replace(/[（(][^）)]*[）)]/g, "")
-    .replace(/【[^】]*】/g, "")
-    .trim();
-  const arrow = text.split(/\s*(?:->|=>|→|➡|：|:)\s*/).filter(Boolean);
-  if (arrow.length > 1) text = arrow[arrow.length - 1].trim();
-  const dash = text.split(/\s+(?:-|—|–)\s+|\s*--\s*/).filter(Boolean);
-  if (dash.length > 1) text = dash[0].trim();
-  text = text.replace(/\s+/g, " ").trim();
-  if (!text || text.length > 30) return "";
-  if (/^(未提及|未知|待补充|无|暂无|不详|发言人\d*|说话人\d*|参会人|参与者|人员|业务需求方|技术负责人|负责人|某负责人|某同学)$/i.test(text)) return "";
-  return text;
-}
 
 function extractMeetingAttendeeNames(frontmatter) {
   if (!frontmatter || typeof frontmatter !== "object") return [];
@@ -8966,75 +7701,13 @@ function rewriteFrontmatterRoleMappings(frontmatterText, mapping) {
   return next;
 }
 
-function getTodayDailyNoteInfo(app) {
-  const internal = app && app.internalPlugins;
-  const plugin = internal && (
-    (typeof internal.getPluginById === "function" && internal.getPluginById("daily-notes"))
-    || (internal.plugins && internal.plugins["daily-notes"])
-  );
-  if (!plugin || plugin.enabled === false) return null;
-  const instance = plugin.instance || plugin._loadedPlugin || plugin.plugin || null;
-  const options = Object.assign({}, plugin.options || {}, (instance && instance.options) || {});
-  const format = options.format || "YYYY-MM-DD";
-  let folder = obsidian.normalizePath(String(options.folder || "").trim()).replace(/\/$/, "");
-  if (folder === "." || folder === "/") folder = "";
-  const templateRaw = String(options.template || "").trim();
-  const template = templateRaw ? obsidian.normalizePath(templateRaw).replace(/\.md$/i, "") + ".md" : "";
-  const moment = window.moment;
-  if (!moment) return null;
-  const name = moment().format(format);
-  const fileName = /\.md$/i.test(name) ? name : `${name}.md`;
-  const dailyPath = obsidian.normalizePath(folder ? `${folder}/${fileName}` : fileName);
-  const file = app.vault.getAbstractFileByPath(dailyPath);
-  return { path: dailyPath, folder, template, file: file instanceof obsidian.TFile ? file : null };
-}
 
 function findTodayDailyNoteFile(app) {
   const info = getTodayDailyNoteInfo(app);
   return info ? info.file : null;
 }
 
-async function ensureVaultFolder(app, folderPath) {
-  const norm = obsidian.normalizePath(String(folderPath || "").trim());
-  if (!norm || norm === "." || norm === "/") return;
-  const parts = norm.split("/").filter(Boolean);
-  let cur = "";
-  for (const part of parts) {
-    cur = cur ? `${cur}/${part}` : part;
-    const existing = app.vault.getAbstractFileByPath(cur);
-    if (!existing) {
-      try { await app.vault.createFolder(cur); } catch {}
-    }
-  }
-}
 
-async function ensureTodayDailyNoteFile(app) {
-  const info = getTodayDailyNoteInfo(app);
-  if (!info) return null;
-  if (info.file) return info.file;
-  const parentFolder = info.path.split("/").slice(0, -1).join("/");
-  await ensureVaultFolder(app, parentFolder);
-  let initial = "";
-  if (info.template) {
-    const tplFile = app.vault.getAbstractFileByPath(info.template);
-    if (tplFile instanceof obsidian.TFile) {
-      try {
-        const tplBody = await app.vault.read(tplFile);
-        const moment = window.moment;
-        initial = String(tplBody || "")
-          .replace(/\{\{\s*date\s*(?::([^}]+))?\}\}/g, (_, fmt) => moment().format(fmt || "YYYY-MM-DD"))
-          .replace(/\{\{\s*time\s*(?::([^}]+))?\}\}/g, (_, fmt) => moment().format(fmt || "HH:mm"))
-          .replace(/\{\{\s*title\s*\}\}/g, info.path.split("/").pop().replace(/\.md$/, ""));
-      } catch {}
-    }
-  }
-  try {
-    return await app.vault.create(info.path, initial);
-  } catch (e) {
-    const existing = app.vault.getAbstractFileByPath(info.path);
-    return existing instanceof obsidian.TFile ? existing : null;
-  }
-}
 
 function extractLexVoiceSessionId(content, fallback) {
   const match = String(content || "").match(/<!--\s*lexvoice-session:([^>\s]+)\s*-->/);
@@ -9192,95 +7865,10 @@ function buildDailyMeetingOverviewEntry(session, polished, settings) {
 //   - 否则用 Dataview inline 字段 [截止:: {due}]
 //   - 👤 owner 作为视觉标记（Tasks 插件没有 owner 约定）；同时给 Dataview 友好的 [责任人:: owner]
 //   - HTML 注释里的 id 用于幂等 upsert（同 id 待办只插入一次）
-function buildSedimentTodoDailyEntry(todo, sourceFile, todoId) {
-  const task = sanitizeSedimentText(todo && todo.task, 200) || "未命名待办";
-  const owner = sanitizeSedimentText(todo && todo.owner, 40) || "";
-  const dueRaw = sanitizeSedimentText(todo && todo.due, 40) || "";
-  const sourceTime = sanitizeSedimentText(todo && todo.sourceTime, 20);
-  const sourceLink = makeFileWikiLink(sourceFile);
-  const subtasks = normalizeSedimentTodoSubtasks(todo && (todo.subtasks || todo.children || todo.steps || todo.items));
-
-  const parts = [`- [ ] ${task}`];
-
-  // 截止：尝试解析成 ISO 日期，命中则用 Tasks 插件能识别的 📅；否则降级到 Dataview inline 字段
-  if (dueRaw && !/^(未指定|无|待定|TBD|N\/A|null|none)$/i.test(dueRaw)) {
-    const moment = window.moment;
-    const parsed = moment ? moment(dueRaw, [
-      "YYYY-MM-DD", "YYYY/M/D", "YYYY/MM/DD", "YYYY.M.D", "YYYY.MM.DD",
-      "M月D日", "MM月DD日", "M-D", "MM-DD",
-    ], true) : null;
-    if (parsed && parsed.isValid && parsed.isValid()) {
-      parts.push(`📅 ${parsed.format("YYYY-MM-DD")}`);
-    } else {
-      parts.push(`[截止:: ${dueRaw}]`);
-    }
-  }
-
-  if (owner && !/^(未指定|无|待定|TBD|N\/A|null|none)$/i.test(owner)) {
-    parts.push(`👤 ${owner}`);
-  }
-
-  // 来源回链 + 录音时间，方便从日记跳回纪要原文
-  if (sourceLink) {
-    const sourceText = sourceTime ? `${sourceLink} · ${sourceTime}` : sourceLink;
-    parts.push(`(来源: ${sourceText})`);
-  }
-
-  // 隐藏的 id 注释，用于 upsert
-  parts.push(`<!-- lexvoice-todo:${todoId} -->`);
-
-  const lines = [parts.join(" ")];
-  for (const sub of subtasks) {
-    if (sub) lines.push(`  - [ ] ${sub}`);
-  }
-  return lines.join("\n");
-}
 
 // 把待办插入 / 更新到日记的指定标题下（默认 "## 待办"）。
 // 同 id 的待办存在时整段（含子任务缩进行）替换；不存在时追加到 ## 待办 列表末尾；
 // 标题都不存在时在文末新建 ## 待办 段。
-function upsertSedimentTodoInDailyNote(content, todoId, entry, settings) {
-  const text = String(content || "");
-  const marker = `<!-- lexvoice-todo:${todoId} -->`;
-  const markerIdx = text.indexOf(marker);
-  if (markerIdx >= 0) {
-    const lineStart = text.lastIndexOf("\n", markerIdx) + 1;
-    let lineEnd = text.indexOf("\n", markerIdx);
-    if (lineEnd < 0) lineEnd = text.length;
-    // 把后续缩进的子任务行（^  - …）也算进去一起替换
-    while (lineEnd < text.length) {
-      const nextStart = lineEnd + 1;
-      const nextNL = text.indexOf("\n", nextStart);
-      const actualEnd = nextNL < 0 ? text.length : nextNL;
-      const nextLine = text.slice(nextStart, actualEnd);
-      if (/^\s{2,}-\s/.test(nextLine)) lineEnd = actualEnd;
-      else break;
-    }
-    return text.slice(0, lineStart) + entry + text.slice(lineEnd);
-  }
-
-  const heading = String((settings && settings.dailyTodoHeading) || "待办").replace(/^#+\s*/, "").trim() || "待办";
-  const headingRe = new RegExp("^##\\s+" + escapeRegExp(heading) + "\\s*$", "m");
-  const match = headingRe.exec(text);
-  if (!match) {
-    const sep = text.trim() ? "\n\n" : "";
-    return text.replace(/\s*$/, "") + sep + `## ${heading}\n\n` + entry + "\n";
-  }
-
-  const afterHeading = text.indexOf("\n", match.index) + 1;
-  const rest = text.slice(afterHeading);
-  // 跨过已有的待办行 + 子任务缩进行 + 空行，把新待办追加到现有列表末尾
-  let consumed = 0;
-  for (const line of rest.split("\n")) {
-    if (/^\s*-\s\[[ xX/-]\]/.test(line) || /^\s{2,}-\s/.test(line) || /^\s*$/.test(line)) {
-      consumed += line.length + 1;
-    } else break;
-  }
-  const insertAt = afterHeading + consumed;
-  const before = text.slice(0, insertAt).replace(/\s*$/, "\n");
-  const after = text.slice(insertAt).replace(/^\n*/, "\n");
-  return before + entry + after;
-}
 
 function upsertDailyMeetingOverview(content, sessionId, entry, settings) {
   const start = `<!-- lexvoice-daily-overview:${sessionId} -->`;
@@ -9874,22 +8462,6 @@ function parseSuggestedTagsFromOutput(text) {
 
 // 解析 LLM 输出末尾的人员机器块 <!-- lexvoice-people: 张三, 李四 -->（纯人名，不带前缀）。
 // 与 tags 物理分离：人物单列成独立 frontmatter 属性，不再挤进 tags。
-function parsePeopleFromOutput(text) {
-  if (!text) return { people: [], cleaned: text || "" };
-  const re = /<!--\s*lexvoice-people\s*:\s*([\s\S]*?)\s*-->/i;
-  const m = text.match(re);
-  if (!m) return { people: [], cleaned: text };
-  const raw = m[1]
-    .split(/[,，;；、\n]+/)
-    .map(s => s.replace(/^#+/, "").replace(/^人物\//, "").trim())
-    .filter(Boolean)
-    .filter(s => s.length <= 24);
-  const seen = new Set();
-  const people = [];
-  for (const p of raw) { const k = normalizePersonLookupText(p); if (k && !seen.has(k)) { seen.add(k); people.push(p); } }
-  const cleaned = text.replace(re, "").replace(/\n{3,}$/, "\n\n").trimEnd() + "\n";
-  return { people, cleaned };
-}
 
 // F4.2：解析招聘素质三态机器块 <!-- lexvoice-recruit: {"素质":{"聪明":"达到",...}} -->，
 // 映射成 frontmatter 的 素质_<名> 字段（取值仅 达到/未达/本场未验证）。解析失败安全降级为空对象。

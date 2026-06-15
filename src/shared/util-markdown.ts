@@ -9,7 +9,7 @@ export function escapeBaseString(value) {
   return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-export function makeFileWikiLink(file, label) {
+export function makeFileWikiLink(file, label = "") {
   if (!(file instanceof obsidian.TFile)) return "";
   const target = obsidian.normalizePath(file.path || "").replace(/\.md$/i, "");
   const text = String(label || file.basename || "").trim();
