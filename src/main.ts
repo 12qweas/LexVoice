@@ -34,6 +34,10 @@ import {
   RECRUIT_REPORT_PROMPT,
   SEMINAR_REPORT_PROMPT,
 } from "./report-templates";
+import { MODE_BODIES } from "./prompts/mode-bodies";
+import { SHARED_DISCIPLINE, STRUCTURE_LEVEL_INSTRUCTIONS } from "./prompts/discipline";
+import { INDUSTRY_META_PROMPT } from "./prompts/industry-meta";
+import { JOBPORTRAIT_SYSTEM_PROMPT, JOBPORTRAIT_FOLLOWUP_RULES } from "./prompts/recruit-hrbp";
 
 const DEFAULT_DAILY_MEETING_OVERVIEW_HEADING = "今日会议概要";
 const DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE = [
@@ -1402,49 +1406,7 @@ function getVisibleModeEntries(settings, includeOff) {
   return includeOff ? [["off", "关闭，仅转写"], ...entries] : entries;
 }
 
-const SHARED_DISCIPLINE = `## §3 写作纪律
-- **信息密度门槛**：每条 bullet 必须含 [事实 / 判断 / 动作 / 风险] 之一。仅描述对话过程的句子（"双方就 X 进行了讨论"）一律删除。
-- **直接引用**：每节最多 1–2 句加引号，其余转述。
-- **第三人称客观叙述**：用角色名或职位，避免"你/我"（独白模式除外）。
-- **时效标记拿不准就降级**（保守优于乐观）。
-- **不出现**：值得注意的是 / 总的来说 / 综上所述 / 综合考虑 / 显而易见 / 不难发现 / 一方面…另一方面 / 破折号。
 
-## §4 反幻觉与反遗漏（一体两面，都是底线）
-- 对话中**没出现**的人名、公司名、时间、数字一律不写；依据不足时写「未提及」或「不确定」，不要用猜测填满字段。
-- 转写质量差或语义不清的段落 → 写"**此段转写质量不足，信息略**"，不硬凑。
-- **任何条件性章节**（共识 / 分歧 / 话术预演 等）对话里没真实出现 → **整块跳过**，不为结构完整性编造。
-- **反向同样成立**：对话中确实出现的事实、数字、判断、立场、待办、风险一律保留，不得以"概括/精炼/结构化"为名删除——**漏写和编造一样都是失真**。
-
-## §5 严禁
-- ❌ 在转写空白处补"经讨论"等填充语
-- ❌ 编造未出现的角色名 / 数字 / 引用
-- ❌ 把 LLM 自己的总结当作受访者/参会者的观点写入
-
-## §6 可视化元素（按需触发，仅在对话真实出现时使用）
-
-- **对比表**：当对话比较 2+ 选项（方案 A vs B、人选 A vs B、新旧机制对比），用 Markdown 表格——**行=维度，列=选项**。
-
-| 维度 | 选项 A | 选项 B |
-|---|---|---|
-| <要素> | … | … |
-
-- **Mermaid 流程图**：当对话含条件/流程逻辑（"如果 X 则 Y 否则 Z"、按顺序触发的多步骤决策），用 \`mermaid\` 代码块嵌入：
-
-\`\`\`mermaid
-flowchart TD
-  A[起点] -->|条件1| B[结果1]
-  A -->|条件2| C[结果2]
-\`\`\`
-
-- **Mermaid 饼图**：当对话出现明确占比/分配数字（如 25/25/25/15、贡献率 30%、X 占 Y%），用 \`mermaid\` 代码块嵌入：
-
-\`\`\`mermaid
-pie title <名称>
-  "A" : 25
-  "B" : 25
-\`\`\`
-
-**不为美观硬塞**——对话里没有真实对比/流程/占比时，**不要编造图表**。`;
 
 // 结构化程度三档 —— 控制主体内容的层级深度
 // LexVoice 视图（.base 文件）—— 默认创建到 LexVoice/视图/{按模式,场景}/ 目录下，可在设置里修改。
@@ -1878,35 +1840,7 @@ views:
   },
 ];
 
-const STRUCTURE_LEVEL_INSTRUCTIONS = {
-  loose: `**结构化程度：宽松**
-- 以散文段落叙述为主，每个自然话题写成一段连贯的叙述
-- 仅在原文本身就在分点（"第一是… 第二是…"）时才用列表
-- 列表层级最多 1 级，列表项保持简洁
-- 关键判断或原话用 \`> \` blockquote 引用
-- 适合：闲谈、个人独白、非正式访谈`,
 
-  balanced: `**结构化程度：均衡（默认）**
-- 每个自然话题以一句话主论点起头（短散文或加粗短语）
-- 主要支撑信息用列表展开，**列表层级 1–2 级**
-- 列表项先写成可扫读的短句；需要展开的事实、例子和判断单独成段散文，不因篇幅压缩删减关键信息
-- 关键判断或原话用 \`> \` blockquote 引用
-- 议题间存在归并关系时，用一句话 cross-reference
-- **不是逐字转录**：合并相邻同主题碎片，去口头禅，但保留事实和判断
-- 适合：常规会议、访谈、产品评审、工作复盘`,
-
-  strict: `**结构化程度：严谨**
-- 每个话题用主论点（一句话总结）开头，可加粗
-- 用嵌套列表呈现完整逻辑层级：
-  - 一级要点：核心子论点
-    - 二级支撑：具体事实 / 案例 / 数据 / 异议
-      - 三级细节：仅必要时使用，关键事实点
-- **列表层级最多 3 级**，每级要点都简洁可扫读
-- 关键判断或决议另起 \`> \` blockquote 引用
-- 议题间的关联用一句话点明
-- **强结构化提炼**：把口语化叙述转化为论点—支撑—证据的逻辑层级，不要逐字转录
-- 适合：深度复盘、战略讨论、复杂决策会议`,
-};
 
 function buildStructureLevelInstruction(level) {
   return STRUCTURE_LEVEL_INSTRUCTIONS[level] || STRUCTURE_LEVEL_INSTRUCTIONS.balanced;
@@ -2077,694 +2011,7 @@ function applyBriefingLanguageInstruction(prompt, settings) {
   return instruction ? prompt + "\n\n---\n\n" + instruction : prompt;
 }
 
-const MODE_BODIES = {
-  learning: `## §0 适用判断
-本模式用于把视频、播客、课程、讲座、公开课、直播回放或电脑音频监听内容整理成学习笔记。重点不是复刻字幕，而是提炼知识、保留论证、沉淀可复用条目。
 
-适合：
-- B 站 / YouTube 上的信息密度较高的视频
-- 学术讲座、课程、论文解读、技术分享
-- 外语音频，需要边理解边翻译关键内容
-- 用户后续会通过 Paste、剪藏或知识库收纳进行二次整理的材料
-
-不适合：
-- 纯会议决策纪要（应使用会议纪要）
-- 面向候选人评价的招聘面试（应使用招聘面试）
-- 单人自言自语的灵感记录（应使用个人手记）
-
-## §1 输出结构
-请按以下顺序输出，但不要机械填充空模块。没有信息就跳过。
-
-> [!info] 学习材料
-> 主题：<一句话主题>
-> 来源：<平台/视频/课程/讲座；未知写未提及>
-> 语言：<中文/英文/多语种/未提及>
-> 内容类型：<课程/讲座/访谈/论文解读/技术分享/纪录片/其他>
-
-> [!abstract] 核心摘要
-> 先用 5–8 句话作为常规起点说明这段内容真正讲了什么、解决什么问题、最重要的结论是什么；如果是长课程、长视频或多文件合并材料，可以扩展为更完整的核心摘要，确保覆盖全部主要章节。不要写成宣传语。
-
-### 一、学习要点
-按知识点组织，而不是按转写顺序逐句复述。每个要点包含：
-- 核心观点：一句话说明
-- 论据或例子：来自音频/视频中的事实、数据、案例、类比
-- 为什么重要：它改变了什么理解，或能用于什么判断
-
-### 二、概念与术语
-列出值得收纳的术语、概念、模型、方法。格式：
-- **术语/概念**：解释。必要时补充原文表达或英文原词。
-
-### 三、可收纳卡片
-把内容拆成适合后续 Paste / 剪藏 / 知识库复用的原子卡片。每张卡片尽量短，避免大段复制。
-
-#### 卡片：<卡片标题>
-- 摘要：<通常 2–4 句话；复杂概念或长课程卡片可适当展开，但不要堆砌原文>
-- 适合放入：<主题/项目/课程/人物/概念>
-- 标签建议：#学习 #视频笔记 #<具体主题>
-- 可复用句：<可以直接复制到笔记里的高密度表达>
-
-### 四、翻译与跨语言理解
-如果转写中存在外语内容：
-- 先用中文概括关键含义，不逐句双语对照。
-- 保留人名、机构名、产品名、论文名、模型名、专业术语原文。
-- 对关键术语给出「原文 → 中文解释」。
-- 如果原文表达本身很重要，可以引用短句并给出中文解释。
-如果没有明显外语内容，本节跳过。
-
-### 五、值得追问的问题
-通常列出 3–6 个进一步学习问题；如果材料很长、概念很多或存在多条研究线索，可以适当增加，帮助用户继续查资料、写笔记或形成自己的判断。
-
-### 六、行动建议
-如果内容包含方法、工具、论文、书单、实验或实践步骤，请整理成可执行清单。没有就跳过。
-
-## §2 写作要求
-- 优先提炼观点、证据、概念和关系，不要把字幕改写成流水账。
-- 明确区分“视频中明确说了什么”和“整理者推断出的含义”。
-- 重要结论要说明依据；没有依据时标注“转写中未提供充分依据”。
-- 适合收纳的内容要短、清晰、有标题，方便用户后续通过 Paste 进入知识库。
-- 对外语内容做理解型翻译，不要生成冗长逐句译文。
-`,
-  interview: `## §0 适用判断
-本模式典型适用于：1 位访问者 + 1–3 位受访者，明确 Q&A 结构，对外传播或归档。
-
-**重要**：即使当前对话不完全契合本模式特征（如出现内部小会、独白），**也按本骨架完整生成内容**，不要拒绝。
-仅当**明显**不契合时（如纯独白），在文档**最末尾**追加：
-
-> [!tip] 模式建议
-> 本对话更像【<更契合的模式>】。理由：<一句>。下次可改用对应模式重新整理。
-
-## §1 角色识别
-- 标签：【访问者】/【受访者】（多人时【受访者A】【受访者B】），全篇一致。
-- 推断依据：提问 vs 回答的结构、语气、内容角色。不确定标「（推断）」。
-
-## §2 输出结构
-
-### 顶部速览（结构化分析，使用 callout）
-
-> [!info] 访谈信息
-> 受访者：<推断；未提及写「未提及」> · 主题：<一句话> · 时长：<MM:SS>
-
-> [!abstract] 摘要
-> 写一段第三人称散文综述：访谈背景与主题 → 受访者核心立场 → 最重要的观点 → 最值得注意的发现或悬而未决之处。常规访谈保持简洁；长访谈或信息密度高时可以扩展为 2 段，不摘抄原话。
-
-### 主要内容（贴近原文展开，散文叙述）
-
-按访谈实际推进顺序展开。每个自然话题用三级标题（6–12 字概括话题主旨）。
-
-每个话题正文：
-- **散文段落叙述**为主：第三人称叙述受访者怎么展开这个话题、提了哪些事实和观点、举了什么例子。去口头禅，保留语感与判断
-- **关键判断引用 1–2 句**：用普通 blockquote（即一个大于号加一个空格开头的行）突出确实有信号量的句子；不是 callout，是普通 blockquote
-- **不强加** 「讨论要点 / 分歧 / 待澄清」 等模板段
-- **保留信息密度**：每段含事实/判断/动作/风险之一，不写空话凑字数
-- **不为结构完整性凑话题**：原文没展开的就不写
-
-#### <话题 1>
-<散文叙述。>
-
-> 「<有信号量的原话>」 — <受访者>
-
-<继续叙述。>
-
-#### <话题 2>
-…
-
-### 悬而未问（仅当受访者闪避或访问者未追问时写）
-
-普通无序列表：
-- <具体闪避点或未追问点>
-
-### 值得保留的原话（仅当真有 1–3 句强信息量原话时单列）
-
-> 「<原话>」 — <受访者>
-
-补充严禁：
-- ❌ 把每个话题硬塞成「讨论要点 / 反驳 / 暂行结论」四件套
-- ❌ 为结构完整性凑话题
-- ❌ 把访问者引导词当作受访者观点
-- ❌ 在主体内容里嵌套 callout（仅顶部速览用 callout）`,
-
-  meeting: `## §0 适用判断
-本模式典型适用于：≥3 人正式会议，有议程或明确决议/待办。
-
-**重要**：即使当前对话不完全契合（如 2 人对话、无明确议程），**也按本骨架完整生成内容**，不要拒绝。
-仅当**明显**不契合时（如纯独白），在文档**最末尾**追加：
-
-> [!tip] 模式建议
-> 本对话更像【<更契合的模式>】。理由：<一句>。下次可改用对应模式重新整理。
-
-## §1 角色识别
-- 只用**转写里确实出现**的真实姓名 / 岗位代号，不要用【发言人 N】；**转写里没出现的名字一律不要编造、更不要套用本提示里出现过的任何示例人名**
-- 没有明确依据时，用中性角色（如【相关方】【业务需求方】【主讲人】）或写「未提及」，不要强行逐句绑定发言人，更不要给参与者凭空安名字
-- 把人名绑定到结构角色（谁是上级 / 一号位 / 负责人 / 老板）同样要有**多处、非假设语境**的明确依据；只凭一两句（尤其"假如""比如说"这类假设句）不要断言，必要时在名字后标注（推断），全场只零星出现的称呼不要提升为贯穿全文的核心人物
-- 正文重点写讨论内容本身；除关键决策、待办和关键原话确有必要外，不强制标注是谁说的
-
-## §2 输出结构
-
-### 顶部速览（结构化分析，使用 callout）
-
-> [!abstract] 摘要
-> 写一段第三人称散文综述：会议背景与目的 → 主要议题脉络 → 关键决议（保留/否决/新启动）→ 重要待办与时限 → 仍未解决的争议或风险。常规会议保持简洁；长会或多议题会议可以扩展为 2–3 段，不摘抄原话。
-
-> [!success] 决策与待办（仅在出现时写）
->
-> 三类决策（无内容则跳过该子项）：
-> - **保留**：<继续做的事项 — 原因>
-> - **新启动**：<本次决定开干的事项 — 牵头人>
-> - **否决**：<明确排除的选项 — 理由>
->
-> 待办（无则跳过，必须使用 Markdown todo 任务语法；不要写成表格或普通列表）：
-> - [ ] 责任人：<责任人> 事项：<具体动作> 截止：<何时之前> 优先级：<高/中/低>
->
-> 截止时间避免「待定」，写「本周内/两周内/Q2 末/X 月 X 日前」等可锚定形式；无法判断责任人或截止时间时写「未提及」，不要编造。
-
-### 主要议题（贴近原文展开，散文叙述）
-
-按会议实际推进顺序展开（不预设议程）。每个议题用三级标题（6–12 字）。
-
-每个议题正文：
-- **散文叙述**：会议从什么前提推进到什么结论，谁在哪个节点提了什么观点，怎么形成共识或分歧
-- **关键判断引用 1–2 句**：用普通 blockquote 突出有锚定意义的判断；情绪表达不引用
-- **不强加** 「讨论要点 / 分歧 / 暂行结论」 三段式 —— 让议题真实形态决定写法
-- 议题间存在归并关系时（A 议题谈到的事在 B 议题又提到），用一句话点 cross-reference，不重复叙述
-- 适度概括：去口头禅、合并冗余表达，但**保留判断的原貌**
-
-#### <议题 1>
-<散文叙述讨论脉络与各方观点。>
-
-> 「<有锚定意义的原话>」 — <明确发言人；无法确认可省略署名>
-
-<继续叙述与暂行结论。>
-
-#### <议题 2>
-…
-
-### 悬而未决（仅在出现时写）
-
-普通无序列表：
-- <未决条目>
-
-补充严禁：
-- ❌ 为每个议题硬套「讨论要点 / 分歧 / 暂行结论」三段式
-- ❌ 在主体议题里大量嵌套 callout（仅顶部用 callout）
-- ❌ 把「讨论了」当作「决定了」
-- ❌ 没出现的待办为对称感凑出来
-- ❌ 议题机械按发言时序排（要按主题归并）`,
-
-  seminar: `## §0 适用判断
-本模式适用于学术研讨、读书会、主题沙龙、专业论坛、圆桌研讨、课程讨论和跨团队方法论讨论。它的重点不是记录谁安排了什么，而是把围绕同一主题展开的观点、争议、证据、案例、概念框架和后续问题整理清楚。
-
-适合：
-- 多人围绕一个理论、文本、案例、议题或研究问题进行讨论
-- 内容中存在不同立场、解释路径、方法分歧或概念辨析
-- 用户希望后续形成研究笔记、课程笔记、议题综述或写作素材
-- 讨论中穿插 PPT、论文、报告、案例材料或现场补充信息
-
-不适合：
-- 纯执行同步、明确待办推进（应使用工作纪要）
-- 一问一答式外部访谈（应使用访谈）
-- 单人学习视频或课程听讲（应使用学习笔记）
-- 单人自我整理（应使用个人笔记）
-
-## §1 角色与观点识别
-- 优先识别发言人的观点功能，而不是强行逐句分配姓名：提出问题者 / 补充案例者 / 反驳者 / 总结者 / 方法论提供者 / 主持推进者。
-- 如果出现明确姓名或称呼，可以保留；不确定时写「某位发言人」或中性角色，不要编造身份。
-- 重点是观点之间的关系：支持、补充、反驳、转向、概念澄清、方法限制。
-- 不做声纹识别声明，不在正文反复标注「推断」；不确定的身份直接弱化为角色。
-
-## §2 输出结构
-
-### 顶部速览
-
-> [!abstract] 研讨摘要
-> 说明本次研讨围绕什么对象展开、核心问题是什么、主要观点谱系是什么、最有价值的争议或启发是什么、还有哪些问题没有闭合。常规研讨保持一段清晰摘要；长研讨、跨材料研讨或多主题研讨可以扩展为 2–3 段。不要写成会议流水账。
-
-> [!important] 核心判断
-> 用 1–3 条写出本次研讨最值得带走的判断。每条都要有内容，不要写「大家进行了深入讨论」这类空话。
-
-### 一、问题意识
-说明这场研讨真正想处理的问题是什么。不是复述标题，而是提炼背后的问题张力：
-- 为什么这个议题值得讨论
-- 讨论对象本身有什么难点
-- 参与者隐含的共同关切是什么
-
-### 二、观点谱系
-按观点之间的关系组织，而不是按发言顺序组织。每个观点用三级标题。
-
-#### <观点或立场>
-用散文段落说明：
-- 这个观点主张什么
-- 它依赖什么前提
-- 它用什么案例、事实、文本、数据或经验支撑
-- 它和其他观点的关系：支持 / 补充 / 修正 / 反驳 / 转向
-
-如果出现有信号量的原话，用普通引用：
-
-> 「<关键原话>」
-
-### 三、争议与分歧
-只写真实出现的分歧。不要为了完整性编造争议。
-
-每个分歧写成：
-- **争议点**：双方到底在争什么
-- **分歧根源**：概念定义不同 / 证据标准不同 / 价值排序不同 / 方法路径不同 / 经验样本不同
-- **当前状态**：已经形成共识 / 暂时悬置 / 需要更多材料 / 需要下一轮讨论
-
-### 四、概念、方法与案例
-整理值得沉淀的概念、方法框架、案例和材料线索。
-
-- **概念 / 术语**：解释其在本次讨论中的具体含义，不要只写词典定义
-- **方法 / 框架**：说明能用来分析什么问题，边界在哪里
-- **案例 / 材料**：说明它被用来支撑哪个观点
-
-### 五、后续问题
-列出真正值得继续追问的问题。常规研讨 3–8 个即可；长研讨或多学科材料可适当增加。问题要能推动下一次研讨、阅读或写作，不要写泛泛的「继续研究」。
-
-### 六、可转化为笔记的条目
-把适合沉淀到知识库的内容写成短条目：
-- **条目标题**：<概念 / 判断 / 案例 / 问题>
-- 摘要：<通常 2–4 句；复杂条目可适当展开，但不要照抄原文>
-- 可放入：<主题 / 项目 / 课程 / 论文 / 案例库>
-- 标签建议：#研讨 #观点谱系 #<具体主题>
-
-## §3 写作要求
-- 不要按「发言人 A 说、发言人 B 说」机械排列；除非身份对观点责任很关键。
-- 不把研讨会写成工作会议纪要；待办只在真实出现时写，且用 Markdown todo 语法。
-- 保留观点的锋利度：谁反驳了什么、哪里有张力、哪个概念被重新定义，都要写清楚。
-- 对不确定的材料来源写「转写中未充分说明」，不要补资料。
-- 允许有理论性，但必须落回转写中出现的具体表达、案例或材料。
-- 主体内容以散文段落为主，列表用于观点谱系、争议点和概念条目，不要大量堆 callout。`,
-
-  huddle: `## §0 适用判断
-本模式典型适用于：2–5 人内部小会，多方贡献观点，有现实推进目标（决策/谈判准备/复盘/选项权衡）。
-
-**重要**：即使当前对话不完全契合，**也按本骨架完整生成内容**，不要拒绝。
-仅当**明显**不契合时（如纯独白），在文档**最末尾**追加：
-
-> [!tip] 模式建议
-> 本对话更像【<更契合的模式>】。理由：<一句>。下次可改用对应模式重新整理。
-
-## §1 角色识别（生成前先判定，全篇一致）
-- **禁用**「访问者/受访者」「主持人/嘉宾」这类主从标签
-- 按发言内容判功能定位：决策当事人 / 参谋 / 执行者 / 合伙人 / 利益相关方
-- **当事人优先级**：用户上下文明确指明 → 按指明的来；否则推断（谁面临具体决策、谁的处境是议题中心）；仍无法判定 → 用 A/B/C 并在信息卡加备注
-
-## §2 输出结构
-
-### 顶部速览（结构化分析，使用 callout）
-
-> [!info] 对话信息
-> 时间：<推断> · 时长：<MM:SS> · 议题：<一句话>
-> 参会：<姓名/角色 — 功能定位>（例：某负责人（当事人） / 某参谋（辅助分析））
-
-> [!abstract] 摘要
-> 写一段第三人称散文综述：对话背景与诉求 → 当事人面临的核心抉择 → 主要议题与各方立场 → 关键结论或下一步行动 → 留待当事人继续思考的开放问题。内容复杂时可以扩展为 2 段。
-
-> [!important] 一句话定位
-> 本次对话**解决了什么 + 悬置了什么**，用一句两分句定调；以准确为先，不为压字数牺牲信息。
-
-### 主要内容（贴近原文展开，散文叙述）
-
-按对话实际推进的脉络组织（不预设议程）。每个议题用三级标题。
-
-每个议题正文：
-- **散文叙述**为主：当事人面临什么处境、参谋怎么戳破盲点、各方观点如何交锋
-- **保留参谋的关键判断** —— 这是小会的核心价值，参谋的「戳破」必须保留并清晰呈现
-- **关键引用**：用普通 blockquote 突出有信号的判断
-- **不强加** 「共识 / 立场 / 分歧 / 待办」 四件套
-
-#### <议题 1>
-<散文叙述。>
-
-> 「<参谋戳破的关键判断或当事人原话>」 — <角色>
-
-<继续叙述与暂行结论。>
-
-### 认知提醒（**本模式核心**，必有 1–3 条）
-
-参谋戳破的盲点 / 当事人未察觉的偏差 / 沉没成本陷阱 / 隐性假设。每条优先写短，但必要时可以展开到足以说明依据：
-
-> [!important] 提醒 N
-> **点题**：<一句话本质>
-> **展开**：<一句话为什么是盲点>
-
-### 自己要继续想的问题（主语是当事人，仅当出现时写）
-
-普通列表；只写真实值得继续想的问题，不为凑数量或压数量删减关键问题：
-- <当事人能自己回答的问题>
-
-### 话术预演（条件触发：仅当对话讨论了下一场谈话/沟通的应对策略时出现）
-
-> [!question] 对方可能反问
-> 「<可能的提问>」
-
-**回应思路**：<散文叙述要点，不嵌 callout>
-
-补充严禁：
-- ❌ Q-A 一问一答格式（访谈体）
-- ❌ 单列「值得保留的原话」金句墙（公开传播体）
-- ❌ 「主持人」「嘉宾」「访问者」「受访者」标签
-- ❌ 回避或转述参谋的提问（必须保留并归类）
-- ❌ 在主体议题里嵌套 callout（仅顶部速览和「认知提醒」用 callout）`,
-
-  monologue: `## §0 适用判断
-本模式典型适用于：单人语音笔记、口述、灵感记录、自我反思。
-
-**重要**：即使当前内容不完全契合（如出现多人对话），**也按本骨架完整生成内容**——多人对话场景按「主要发言人独白」处理。
-仅当**明显**不契合时，在文档**最末尾**追加：
-
-> [!tip] 模式建议
-> 本对话更像【<更契合的模式>】。理由：<一句>。下次可改用对应模式重新整理。
-
-## §1 视角
-保持**第一人称叙述**，不用【说话人】标签。**保留作者原语气与句式风格**（这是独白模式的核心价值）。
-
-## §2 输出结构
-
-### 顶部速览（结构化分析，使用 callout）
-
-> [!abstract] 摘要
-> 写一段第一人称散文综述：本段独白的核心命题 → 主要思路或观察 → 最值得保留的洞察或问题。常规独白保持简洁；长独白或多主题口述可以扩展为 2 段。保留作者语气，不摘抄原话。
-
-### 主要内容（贴近原文展开，保留作者语感）
-
-按独白实际涌现的思绪顺序展开。每个自然主题用三级标题。
-
-每个主题正文：
-- **保留作者原语气与句式**：去口头禅、去重复字，但**不要改写**作者的表达方式
-- 句式整理后保留判断的原貌
-- 不要把散思碎念硬套成议程
-- 适度概括：合并相邻的同主题碎片，但**保留每一个有信息量的判断**
-
-#### <主题 1>
-<整理后的独白段落，第一人称叙述，保留原语感。>
-
-#### <主题 2>
-…
-
-### 值得保留的表达（仅当出现 1–3 句特别好的表达时写）
-
-> 「<原话>」
-
-### 延伸思考（仅当独白中能推出待展开的点时写）
-
-普通列表：
-- <从独白中能推出的待展开方向>
-
-补充严禁：
-- ❌ 用【说话人】标签
-- ❌ 摘要式压缩观点（保留所有有信息量的表达）
-- ❌ 改写作者风格
-- ❌ 在主体内容里嵌套 callout（仅顶部摘要用 callout）`,
-
-  recruit: `## §0 适用判断
-本模式典型适用于：1 位面试官（或 1 个面试小组）+ 1 位候选人，目的是评估候选人是否适合某岗位。明确的「提问—回答—评估」结构。
-
-**重要**：即使转写不完全契合（如出现 2 名面试官、群面、电话非正式聊），**也按本骨架完整生成内容**。
-仅当**明显**不契合时（如纯访谈/独白/会议），在文档**最末尾**追加：
-
-> [!tip] 模式建议
-> 本对话更像【<访谈/会议/小会/独白>】。理由：<一句>。下次可改用对应模式重新整理。
-
-## §1 角色识别
-- 标签：【面试官】/【候选人】（多面试官时【面试官 A】【面试官 B】）
-- **音源映射（线上面试 · 优先于其他推断）**：当转写或大纲条目前出现 \`[麦克风]\` / \`[电脑音频]\` 来源标记时：
-  - \`[麦克风]\` = **面试官**（用户本机麦克风端，HR/招聘方）
-  - \`[电脑音频]\` = **候选人**（电脑音频输入端，即远端入会的对方）
-  - 这两条映射在线上面试场景中可视为事实标签，不要被语义重新覆盖；只有当某段内容明显与音源标签冲突（例如标记 \`[电脑音频]\` 但显然是面试官在追问）时，才回到内容推断。
-- 推断依据（无音源标记时回退到此）：发问的一方 = 面试官；陈述自身经历/技能/想法的一方 = 候选人
-- 识别候选人姓名、应聘岗位（若提及）；未提及标「未提及」
-
-## §0.5 评分校准纪律（**生成前先内化，每条都必须遵守**）
-
-候选人在面试中表现出以下行为属于 **基础职业素养（baseline）**，**不计入亮点**：
-- ❌ 诚实承认自己边界（「我没那么深」「我只做辅助」「主要由 PM 主导」）
-- ❌ 对未闭环结果保持保守（「还在试运行」「还没看到结果」「跟我们的预期还有差距」）
-- ❌ 不夸大自己贡献
-- ❌ 配合面试官追问（基础礼貌）
-- ❌ 能给出框架但缺少案例支撑
-
-### 【硬规则 · 必须列入红旗】
-- 项目结果未闭环、未量化、或仅为「试点/进行中」 → 红旗
-- 候选人在某项目的**独立主导范围**需面试官追问超过 2 次才能定位 → 红旗（边界本身就不清）
-- JD 要求行业/业务/技能与候选人背景有跨度，且无证据弥合 → 红旗
-- 关键能力领域只有「接触过/听说过/在了解」级别认知 → 红旗
-- 关键交付描述全靠模糊词（「提效了」「更准确」「帮助决策」）无量化 → 红旗
-- 候选人主动提问停留在「职责边界澄清」层面（senior 应问「业务/组织/战略」层面）→ 红旗
-
-**红旗前置条件（统辖以上全部红旗规则）**：每条红旗都必须基于转写中**真实出现的证据**——候选人确实这么说、这么答、或确实在回避。如果某个维度**本场根本没问到、没机会暴露**，不要据此判红旗，一律归入末尾「风险点与待澄清」的**待澄清**类（写明「本场未覆盖，offer 前需问清」）。一句话区分：红旗＝问了且暴露了问题；待澄清＝还没问 / 没机会暴露。
-
-### 【硬规则 · 追问数量当扣分信号】
-- 某题需要 ≥2 个 ⛏ 追问才能挖到事实层 → 候选人未自主展开 → 该题评分**至少扣半档**
-- 不要把「AI 生成大量追问建议」看作「题质量好」，而要看作「候选人没自主到位」
-
-### 【硬规则 · 录用建议必须明确】
-- 五档：【强烈推荐 / 推荐 / 倾向推荐（条件性）/ 倾向不推荐（条件性）/ 不推荐】
-- **禁止用「待定」逃避明确判断**——如果信息不足以定论，写「倾向不推荐（除非二面能证明 X）」
-- 倾向不推荐 ≠ 不推荐：前者留有「如果二面验证某具体点则可推进」的条件路径
-
-## §0.6 评价方法 · 反向期待法（**像面试官一样思考**）
-
-不要先看候选人说了什么再评价；先想 **达到 JD seniority 的标杆人应该长什么样**，再看候选人离标杆多远。
-
-### 五步判断流程
-1. **建立 reference**：列出 JD seniority 的标杆人在 3–5 个核心维度上应该有的表现
-2. **测 gap**：每条 reference 对照候选人的真实表现，给「达到 / 偏离 / 完全未达」三档判断
-3. **扫「潜在优势」**：候选人简历/陈述里所有「本可以加分」的资源（编程能力 / 跨界经验 / 行业资源 / 个人项目 / 开源贡献 / 特殊证书等），**逐项判断它在本场是否被激活**
-4. **找最重失分点**：在所有 gap 里，**「潜在但未激活的优势」** 权重最高 —— 因为候选人不是「没有」而是「有却没用」，是 senior 候选人最大原罪
-5. **一句话定调**：用「X，Y，**尤其是 Z**」句式，Z 放最重失分点
-
-### 判断句 vs 描述句（必须用判断句）
-- ❌ 描述句：「短板在于回答偏绕，抽象概念较多」/「经验匹配度较好」
-- ✅ 判断句：「是个纯基础执行者」/「停留在转译需求层」/「编程能力没发展为优势」
-
-### 失分排序（「尤其是」用哪个）
-1. **未激活的优势** —— 候选人有 X 但本场 X 没被激活成优势。优先入「尤其是」
-2. **硬不匹配** —— JD 明文要求 vs 候选人背景直接矛盾（行业、年限）
-3. **核心能力 gap** —— JD 软性核心要求未达 senior 深度
-4. 普通短板 —— 沟通、表达、临场
-
-### AI 使用程度的提炼纪律（仅当 JD 涉及 AI 维度时适用）
-- 「AI 使用画像」 章节是事实层，**先填该表再下评价结论**
-- 候选人提到的所有 AI 工具/项目/陈述都要在表中出现（去口头禅，但不主观删减）
-- 用 L0/L1/L2/L3 量表标定深度，不允许写空泛的「AI 敏锐度较好」
-- 「未激活的优势」判断必须以 AI 使用画像的事实为依据
-
-## §2 输出结构（**严格按此顺序：顶部结构化分析 + 主体贴近原文展开**）
-
-### 顶部 · 结构化分析（这部分用表格和 callout，承担「评估快报」角色）
-
-> [!summary] 面试评价
-> 根据面试整体情况，撰写一段可同步至人才档案的正式评价。不要复述填写说明，不要写成条目清单；写成完整段落。常规评价保持精炼；信息复杂、证据较多或风险较重时可以适当展开。若人选面试通过，必须覆盖或自然融入以下维度：1）整体优势与不足；2）专业能力判断；3）底层素质判断（成就欲、韧性、谦逊好学）；4）其他关键信息记录。若人选未通过，也需基于证据说明不适配原因、核心风险和后续是否建议保留人才池。
-> <面试评价正文>
-
-> [!info] 面试信息
-> 候选人：<姓名/未提及> · 应聘岗位：<推断> · 面试时长：<MM:SS> · 面试官：<姓名/角色>
-> 面试形式：<现场/线上/电话> · 轮次：<推断>
-
-> [!important] 结论
-> <一句话定调，判断句，建议用「X，Y，尤其是 Z」句式，Z 放最重失分点；以准确表达最重判断为先>
->
-> 写作约束：
-> - 必须是判断句
-> - 优先用「尤其是」句式突出最重失分点
-> - 「尤其是」 优先选「未激活的优势」
-> - 不许出现「综合来看」「整体表现」等过渡空话
-
-#### 候选人画像
-
-写一段第三人称散文，展开「结论」的判断依据：候选人背景 → 各能力维度的实际表现 vs JD seniority 标杆人的差距 → 主要风险点。常规面试保持精炼；长面试、证据较多或岗位复杂时可以扩展为多段。**不重复结论原文**，不再次溢美承认边界等基础职业素养。
-
-#### AI 使用画像（仅当 JD 涉及 AI / 自动化 / 工具效率维度时出现）
-
-候选人涉及 AI 的全部原话证据（按出现顺序，去口头禅保留原意）：
-
-| # | 涉及内容 | 候选人原话/精炼 | 题号 |
-|---|---|---|---|
-| 1 | 提到的 AI 工具 | <列举> | 第 X 题 |
-| 2 | 编程能力实际用法 | <精炼> | 第 X 题 |
-| 3 | AI 项目角色 | <主导/辅助/接需求> | 第 X 题 |
-| 4 | 对 AI 的认知判断 | <候选人主动表达的观点> | 第 X 题 |
-| 5 | 对自己 AI 能力的边界陈述 | <候选人原话> | 第 X 题 |
-| 6 | 个人 AI 项目 / 社区参与 | <证据/未提及> | — |
-
-深度量表（4 维度独立标定）：
-
-| 维度 | 等级 | 判断依据 |
-|---|---|---|
-| 工具使用层级 | L<0/1/2/3> | <从原话证据推导> |
-| 思维定位 | L<0/1/2/3> | <被动接需求 / 主动找场景 / 能设计 AI 嵌入路径> |
-| 编程能力激活度 | L<0/1/2/3> | <未激活 / 部分激活 / 完全转成优势> |
-| 个人 AI 项目 / 社区参与 | L<0/1/2/3> | <未提及为 L0；浅提为 L1；有实质产出为 L2+> |
-
-等级定义：L0 听过/有概念 · L1 工具型使用 · L2 日常嵌入 · L3 主导级（个人 AI 项目/二次开发/开源贡献）
-
-vs JD 期望：JD 要求 L<x> · 候选人实际 L<y> · 差距：<一句客观>
-
-#### 潜在优势核验
-
-| 潜在加分点 | JD 是否需要 | 本场是否激活 | 判断 |
-|---|---|---|---|
-| <例：Python 编程> | ✓ | ✗ 仅做数据整理 | 未激活（关键失分） |
-| <例：3 年晋升体系搭建> | ✓ | ✓ | 已激活 |
-| <例：跨制造业到游戏> | ✗ | — | 反成劣势 |
-
-若候选人无任何潜在加分点，写「未识别到候选人特有的潜在优势」，不留空表。
-
-#### 必要素质核验（**仅当本场上下文含【必要素质清单】时出现；没有就整节跳过**）
-
-【必要素质清单】是这个岗位**事先定义**的必备素质（与上面「潜在优势核验」相互独立，不要混为一表）。逐项对清单里每一条素质判定**三态**：
-
-| # | 必备素质 | 三态判定 | 间接证据（题号 + 引用原话片段） |
-|---|---|---|---|
-| 1 | <素质名> | 达到 / 未达 / 本场未验证 | <候选人在回答哪题时从侧面体现或暴露了它，引一句原话> |
-
-判定纪律：
-- **证据只认转写里的间接信号**——表达的组织方式、对追问的反应、是否主动澄清、举例的具体度等；不许凭印象空标，每条都附证据题号。
-- 某素质**全场找不到任何相关信号** → 判「本场未验证」，并写进末尾「待澄清」，**禁止据此计红旗或缺陷**（没问到 ≠ 不具备）。
-- 与 §0.5 不冲突：同一行为在 baseline 语境下不计亮点（§0.5 照旧），但可作为某素质三态判定的证据——两处口径互不影响。
-- 清单序号即本表行号，**逐条覆盖、不要跳项**。
-
-#### JD 匹配度
-
-**硬性要求**
-
-| JD 要求 | 评分 | 证据（题号） | 缺口 |
-|---|---|---|---|
-| <要求> | ⭐⭐⭐☆☆ | 第 X 题 | <未覆盖> |
-
-**加分项**
-
-| 加分项 | 是否验证 | 备注 |
-|---|---|---|
-| <加分项> | 未问及/已验证 | <备注> |
-
-#### 两头不接诊断（仅当 JD 是多极化岗位时出现，否则跳过）
-
-- A 端深度证据：<列举/未提供> → ⭐⭐⭐
-- B 端深度证据：<列举/未提供> → ⭐⭐
-- 诊断：<真双栖 / 偏科可考 / 两头不接>
-
-若诊断为「两头不接」，录用建议**必须**倾向不推荐。
-
-#### 通用素质
-
-| 维度 | 评分 | 简评 |
-|---|---|---|
-| 思维逻辑 | ⭐⭐⭐☆☆ | <一句> |
-| 沟通表达 | ⭐⭐⭐☆☆ | <一句> |
-| 学习成长性 | ⭐⭐⭐☆☆ | <一句> |
-
-候选人在 JD 锚点上未达 senior 深度时，通用素质中等不构成补分依据。
-
-#### 录用建议
-
-**建议**：<五档之一>
-
-**判定路径**：
-- 已明确证明达标的 JD 要求：<列举/无>
-- 完全未问到或无法提供证据的：<列举>
-- 综合：<一句>
-
-**二面验证条件**（仅当选条件性档位时填）：
-- 二面若能证明 <具体点 X> → 改推荐
-- 二面若 <具体点 Y> 仍无法验证 → 改不推荐
-
-#### 重点考核项核验（**仅当本场上下文标注了「特殊关注点」时出现；没有就整节跳过**）
-
-这是面试官**最在意**的考核点（常是软性素质，如「抗压」「主动性」「跨团队协作」「学习速度」）。**逐项核验它在本场面试中有没有被体现**——注意：
-
-- **不要只看面试官有没有直接问到它**。候选人很可能是在回答**别的问题**时，从侧面流露出（或暴露缺失）这项素质。你的职责是把这些**散落在各题里的间接证据**找出来、**引用原话**呈现给面试官回看。
-- 每个关注点写成一个「> [!check] 重点关注：…」callout：
-  > [!check] 重点关注：<关注点原文>
-  > **是否体现**：<已体现 / 侧面体现 / 未体现 / 反面信号>
-  > **证据**：引用候选人原话（标第几题/哪个话题），说明这句话如何体现（或反证）了该素质；可引用多处。
-  > **判断**：一句话——这项关注点在本场达到/未达期望，是否需要二面专项核查。
-- 若某关注点在**全场任何回答里都找不到**正反证据，如实写「本场未触及，建议二面专项考察」，不要为凑内容编造体现。
-
----
-
-### 主体 · 问答展开（**贴近原文，散文叙述，不再用 callout 套娃**）
-
-**详尽度（招聘评估默认要详）**：面试评估的价值在于可回溯，所以**尽量还原每一个面试问题与候选人的回答**，不要压成几条概括。同一主题下的多个追问可以**归类、串联成一个问题块**叙述，但**不要省略**任何实际问到的内容点。宁可详细，不要因为"看起来啰嗦"而砍掉面试中真实发生的问答——除非确属重复寒暄。
-
-按问题为单位组织。每个问题用四级标题（6–12 字概括）。**禁止**用「[!quote]」+「[!note]」+「[!ai-eval]」三个 callout 叠加。
-
-每个问题块固定写法：
-
-#### 问题 N：<主题>
-
-**面试官问了什么**：散文一句概括提问意图与具体问法。可用普通 blockquote 引用 1 句关键问法（不是 callout）。
-
-**候选人答了什么**：散文叙述候选人的回答展开过程。保留所有信息点，去口头禅。关键判断用普通 blockquote 引用 1–2 句。可用极简列表拆要点，但仅当候选人本身就在分点时。
-
-> [!ai-eval] AI 评价
-> 回答质量：⭐⭐⭐☆☆ — <一句话定调本质>
->
-> 维度（**仅写适用的，不强凑 4 项**）：<专业深度 / 逻辑结构 / 真实感 / 临场应变 中适用的几项，散文一句一项>
->
-> 可继续追问（必须能挖到事实层，不许「能不能再说说」这种泛问）：
-> - ⛏ <具体追问 1>
-> - ⛏ <具体追问 2>
->
-> 红旗或亮点（**单边可选，不强凑对称**，仅当真有时写）：
-> - <一句具体描述>
-
-#### 问题 N+1：…
-
-…
-
----
-
-### 末尾区块（按需出现）
-
-#### 候选人主动提问（仅当候选人主动提问时出现）
-
-| 提问 | 反映的关切点 / 专业判断力 |
-|---|---|
-| 「<问题>」 | <一句解读，含「是否符合该 seniority 应有的提问深度」判断> |
-
-#### 风险点与待澄清
-
-普通列表，不分桶：
-- <红旗类：简历自相矛盾 / 离职原因模糊 / 关键能力存疑 / ASR 不清需复核>
-- <待澄清类：本场没问到、但 offer 前必须问清的点>
-
-#### 后续行动
-
-- [ ] <推进/淘汰/二面 — 责任人 — 具体时限>
-- [ ] <若推进：背调重点询问的点>
-- [ ] <若录用：onboarding 要重点关注的能力短板>
-
-补充严禁：
-- ❌ 编造候选人没说的经历或数据
-- ❌ 「可继续追问」写成无效追问（「能不能再说说」）；必须是具体的、能挖到事实层的问题
-- ❌ 把面试官的引导提示当作候选人观点
-- ❌ AI 评价跳过 [!ai-eval] callout 用普通文本写——**仅 AI 评价用专属 callout**
-- ❌ **把 baseline 当 bonus**——诚实/不夸大/承认边界/对未闭环保持保守，这些不计入亮点
-- ❌ **默认及格**——某 JD 要求没问到就标「未验证」，不许默认 ⭐⭐⭐
-- ❌ **用通用素质给 JD 不匹配补分**——沟通好不抵消行业不匹配
-- ❌ **「待定」逃避**——必须给五档明确建议
-- ❌ **追问数量当中性输出**——某题需 ≥2 个 ⛏ 才能挖到事实 = 候选人未自主展开 = 扣分
-- ❌ **跨界岗位折中评分**——独立评 A 端和 B 端；两端都不达 senior 深度 = 两头不接 = 倾向不推荐
-- ❌ **把候选人的初级问题当专业关切**——senior 候选人若只问「职责边界澄清」反而是红旗
-- ❌ **在问答展开里给每个问题套 [!quote] + [!note] callout**——只有 AI 评价用 callout，其余散文叙述
-- ❌ 评分尺度漂移——⭐⭐⭐☆☆ 是默认及格线，不是默认锚点；⭐⭐⭐⭐☆ 必须有可量化证据
-
----
-
-### 机器注释（全文最末尾输出，供插件回写结构化字段，不会渲染显示）
-
-当本场上下文含【必要素质清单】时，在全文**最末尾**额外输出一行机器注释，把每条必备素质的三态判定以 JSON 写出（供插件写进 frontmatter 的 \`素质_<素质名>\` 字段）：
-
-\`\`\`html
-<!-- lexvoice-recruit: {"素质": {"<素质名1>": "达到", "<素质名2>": "本场未验证"}} -->
-\`\`\`
-
-规则：
-- JSON 里「素质」的键值对**逐条对应【必要素质清单】**：键名用清单里的素质原名，取值只能是 \`达到\` / \`未达\` / \`本场未验证\` 之一。
-- 上下文**没有**【必要素质清单】时，这行注释整行不要输出。
-- 它是机器注释（HTML 注释），照原样输出，不要翻译键名、不要加任何解释文字；与 lexvoice-people / lexvoice-tags 并列放在文末。`,
-};
 
 const POLISH_PROMPTS = {
   learning: buildPrompt(MODE_BODIES.learning, false, "learning"),
@@ -2776,48 +2023,7 @@ const POLISH_PROMPTS = {
   recruit: buildPrompt(MODE_BODIES.recruit, false, "recruit"),
 };
 
-const INDUSTRY_META_PROMPT = `你是提示词优化专家。请基于用户的角色、工作任务和参考提示词，生成一份可直接用于 LexVoice 录音整理的自定义提示词。
 
-【用户背景】
-角色 / 行业：{{INDUSTRY}}
-常见任务：
-{{SCENARIOS}}
-关注点：
-{{FOCUS}}
-输出偏好：
-{{OUTPUT_PREFERENCE}}
-
-【参考提示词】
-{{MODE}}
-
-参考提示词只用于确定大方向，不要照搬固定模板。请把 Prompt 写成适合用户真实工作的「自定义提示词」。
-
-【生成目标】
-- 只生成 1 份 Prompt，不要给多套方案。
-- 这份 Prompt 会直接保存为一个可调用的提示词，用户会在录音、导入音频、重新整理时选择它。
-- 输出应帮助大模型把转写内容整理成可读、可用、可复盘的 Markdown 笔记。
-- 前面可以有结构化摘要、结论、待办或风险；待办 / 行动项必须使用 Markdown todo 任务语法 \`- [ ]\`，不要写成表格或普通项目符号；后面的展开部分应贴近讨论脉络，不要机械套框。
-- 不要大量使用 Obsidian callout；除非非常必要，否则用普通标题、段落和列表。
-
-【必须包含】
-1. 角色定位：告诉模型它要扮演什么整理者。
-2. 使用场景：说明什么录音适合用这份提示词。
-3. 输出结构：给出稳定但不过度僵硬的 Markdown 结构。
-4. 信息取舍：说明如何处理事实、判断、行动项、风险、引用和不确定内容；行动项必须要求输出为 \`- [ ]\` todo 任务。
-5. 反幻觉要求：没有出现在转写里的内容不得编造；必要时标注不确定。
-6. 语言要求：如果出现多语种内容，按用户偏好翻译或保留关键原词。
-7. 最后一段必须包含原始转写占位符。
-
-【最后一段必须原样保留】
-
-原始转写：
-{{TRANSCRIPT}}
-
-【输出要求】
-- 直接输出完整 Prompt 文本，不要代码块。
-- 不要解释你为什么这样写。
-- 必须保留 {{TRANSCRIPT}} 占位符。
-- 不要输出“模式建议”“你可以切换到某模式”等给终端用户看的提示。`;
 
 
 const MERGE_PROMPTS = {
@@ -6529,7 +5735,7 @@ function isAsrNonRetryableError(error) {
 }
 
 function delayMs(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise(resolve => window.setTimeout(resolve, ms));
 }
 
 async function transcribeImportAudioChunk(plugin, blob, mime, concurrency) {
@@ -6932,9 +6138,9 @@ class DashScopeStreamingClient {
       }
     } catch {}
     return new Promise((resolve) => {
-      const t = setTimeout(() => { this._safeClose(); resolve(); }, 5000);
+      const t = window.setTimeout(() => { this._safeClose(); resolve(); }, 5000);
       const orig = this.onClosed;
-      this.onClosed = (info) => { clearTimeout(t); orig(info); resolve(); };
+      this.onClosed = (info) => { window.clearTimeout(t); orig(info); resolve(); };
     });
   }
   _safeClose() {
@@ -7095,9 +6301,9 @@ class OpenAIRealtimeTranscriptionClient {
       }
     } catch {}
     return new Promise((resolve) => {
-      const t = setTimeout(() => { this._safeClose(); resolve(); }, 5000);
+      const t = window.setTimeout(() => { this._safeClose(); resolve(); }, 5000);
       const orig = this.onClosed;
-      this.onClosed = (info) => { clearTimeout(t); orig(info); resolve(); };
+      this.onClosed = (info) => { window.clearTimeout(t); orig(info); resolve(); };
     });
   }
   _safeClose() { try { if (this.ws) this.ws.close(); } catch {} }
@@ -7252,9 +6458,9 @@ class OpenAIRealtimeTranslationClient {
     if (this.finishing || this.closed) return;
     this.finishing = true;
     return new Promise((resolve) => {
-      const t = setTimeout(() => { this._safeClose(); resolve(); }, 5000);
+      const t = window.setTimeout(() => { this._safeClose(); resolve(); }, 5000);
       const orig = this.onClosed;
-      this.onClosed = (info) => { clearTimeout(t); orig(info); resolve(); };
+      this.onClosed = (info) => { window.clearTimeout(t); orig(info); resolve(); };
     });
   }
   _safeClose() { try { if (this.ws) this.ws.close(); } catch {} }
@@ -7789,7 +6995,7 @@ class RecorderService {
       if (!rec) return finish(fallback);
       rec.onstop = () => finish(makeResult());
       try { rec.stop(); } catch { finish(fallback); }
-      setTimeout(() => finish(makeResult()), 4000);
+      window.setTimeout(() => finish(makeResult()), 4000);
     });
   }
   async cutSegment() {
@@ -7970,7 +7176,7 @@ class BubbleWidget {
   }
   unmount() {
     if (this.unsubscribe) { this.unsubscribe(); this.unsubscribe = null; }
-    if (this.hideTimer) { clearTimeout(this.hideTimer); this.hideTimer = null; }
+    if (this.hideTimer) { window.clearTimeout(this.hideTimer); this.hideTimer = null; }
     if (this._renderRaf) { cancelAnimationFrame(this._renderRaf); this._renderRaf = 0; }
     if (this.resizeHandler) { window.removeEventListener("resize", this.resizeHandler); this.resizeHandler = null; }
     this.unbindRibbon();
@@ -8011,7 +7217,7 @@ class BubbleWidget {
   show() {
     if (!this.wrapEl) return;
     this.wrapEl.addClass("is-visible");
-    if (this.hideTimer) { clearTimeout(this.hideTimer); this.hideTimer = null; }
+    if (this.hideTimer) { window.clearTimeout(this.hideTimer); this.hideTimer = null; }
   }
   hide() {
     // 停靠式悬浮窗常驻显示；关闭由设置项控制。
@@ -8020,7 +7226,7 @@ class BubbleWidget {
   }
   scheduleHide() {
     // 保持常驻，避免脱离侧边栏后找不到录音控制器。
-    if (this.hideTimer) { clearTimeout(this.hideTimer); this.hideTimer = null; }
+    if (this.hideTimer) { window.clearTimeout(this.hideTimer); this.hideTimer = null; }
   }
   attachHover() {
     this.wrapEl.addEventListener("mouseenter", () => this.show());
@@ -8370,7 +7576,7 @@ async function requestApimimoAsrChunk(provider, prepared, endpoint) {
   const audioDataUrl = `data:${prepared.mime};base64,${lexvoiceArrayBufferToBase64(ab)}`;
   const timeoutMs = getTranscribeRequestTimeoutMs(Object.assign({}, provider, { endpoint }));
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  const timer = controller ? window.setTimeout(() => controller.abort(), timeoutMs) : null;
   // asr_options.language：文档仅支持 auto / zh / en；其它值（含空 / 方言码）一律归一为 auto。
   // 明确语种能提升准确率，所以默认 auto，用户在设置里选 zh/en 时透传。
   const langRaw = String(provider.language || "").trim().toLowerCase();
@@ -8430,7 +7636,7 @@ async function requestApimimoAsrChunk(provider, prepared, endpoint) {
     }
     throw e;
   } finally {
-    if (timer) clearTimeout(timer);
+    if (timer) window.clearTimeout(timer);
   }
 }
 
@@ -8475,7 +7681,7 @@ async function transcribeAudio(plugin, blob, mime) {
   if (promptText) form.append("prompt", promptText);
   const timeoutMs = getTranscribeRequestTimeoutMs(p);
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  const timer = controller ? window.setTimeout(() => controller.abort(), timeoutMs) : null;
   let res;
   try {
     res = await fetch(p.endpoint, {
@@ -8485,7 +7691,7 @@ async function transcribeAudio(plugin, blob, mime) {
       signal: controller ? controller.signal : undefined,
     });
   } catch (e) {
-    if (timer) clearTimeout(timer);
+    if (timer) window.clearTimeout(timer);
     if (controller && controller.signal && controller.signal.aborted) {
       throw new Error(`转写请求超时：${Math.round(timeoutMs / 1000)} 秒内没有响应；录音文件已保留，可稍后重试或降低 ASR 并发数`);
     }
@@ -8511,7 +7717,7 @@ async function transcribeAudio(plugin, blob, mime) {
     const rawText = (data.text || data.transcript || data.result || "").trim();
     return applyVocabularyCorrections(rawText, vocabularyGroups).trim();
   } finally {
-    if (timer) clearTimeout(timer);
+    if (timer) window.clearTimeout(timer);
   }
 }
 
@@ -8553,7 +7759,7 @@ function resolveLlmRequestTimeoutMs(options) {
 function withPromiseTimeout(promise, timeoutMs, makeError) {
   if (!(timeoutMs > 0)) return promise;
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
+    const timer = window.setTimeout(() => {
       try {
         reject(makeError ? makeError() : new Error("请求超时"));
       } catch (e) {
@@ -8562,11 +7768,11 @@ function withPromiseTimeout(promise, timeoutMs, makeError) {
     }, timeoutMs);
     Promise.resolve(promise).then(
       (value) => {
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         resolve(value);
       },
       (error) => {
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         reject(error);
       }
     );
@@ -8936,8 +8142,8 @@ async function requestLlmChatCompletion(plugin, messages, options) {
     // 才视为真卡死并 abort。这样慢但在持续输出的响应不会被误杀、不会白白浪费已计费的生成。
     const armTimer = () => {
       if (!controller || !(timeoutMs > 0)) return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => controller.abort(), timeoutMs);
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(() => controller.abort(), timeoutMs);
     };
     armTimer();
     let res;
@@ -8949,7 +8155,7 @@ async function requestLlmChatCompletion(plugin, messages, options) {
         signal: controller ? controller.signal : undefined,
       });
     } catch (e) {
-      if (timer) clearTimeout(timer);
+      if (timer) window.clearTimeout(timer);
       if (controller && controller.signal && controller.signal.aborted) {
         const err = new Error(`LLM 调用超时：${Math.round(timeoutMs / 1000)} 秒内没有响应`);
         await logLlmRequestDiagnostic(plugin, "error", "llm.fetch_failed", "LLM 请求发送失败", {
@@ -9023,7 +8229,7 @@ async function requestLlmChatCompletion(plugin, messages, options) {
       }
       return await res.json();
     } finally {
-      if (timer) clearTimeout(timer);
+      if (timer) window.clearTimeout(timer);
     }
   });
 }
@@ -9099,7 +8305,7 @@ function openLexVoicePickListModal(app, title, items, onPick) {
     };
     render("");
     search.addEventListener("input", () => render(search.value));
-    setTimeout(() => search.focus(), 30);
+    window.setTimeout(() => search.focus(), 30);
   };
   modal.open();
 }
@@ -9424,7 +8630,7 @@ function injectHtmlReportExportScript(html) {
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1200);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1200);
   };
   async function exportReportAsPng() {
     const target = document.querySelector(".lv-panorama") || document.querySelector(".lv-page");
@@ -9499,7 +8705,7 @@ function injectHtmlReportExportScript(html) {
         console.error("[LexVoice] export report image failed", error);
         setStatus((error && error.message) || "保存失败");
       } finally {
-        setTimeout(() => {
+        window.setTimeout(() => {
           button.disabled = false;
           setStatus("");
         }, 1800);
@@ -10279,7 +9485,10 @@ async function generateStyledReportFromMarkdown(plugin, mode, markdown) {
   const brandName = String(plugin.settings.reportBrandName || "").trim();
   data.brand = { name: brandName || ((data.brand && data.brand.name) || ""), logo: "" };
   // 函数式替换：避免 JSON 里出现的 $（如 $1、$&）被 String.prototype.replace 当成替换模式特殊符号。
-  const payload = "const DATA = " + JSON.stringify(data, null, 2) + ";";
+  // 注入进固定模板的 <script id="lexvoice-data"> 块前，转义字符串字段里可能出现的字面 </script> 与 <!--，
+  // 否则 HTML 解析期会提前闭合数据块 → DATA 截断 → 报告白屏（甚至注入面）。JS 侧 <\/ 仍解析回 /，DATA 值不变。
+  const payload = ("const DATA = " + JSON.stringify(data, null, 2) + ";")
+    .replace(/<\/(script)/gi, "<\\/$1").replace(/<!--/g, "<\\!--");
   const filled = template.replace(/\/\*\s*▼▼▼[\s\S]*?▲▲▲\s*\*\//, () => payload);
   if (filled === template) throw new Error("报告模板注入失败：未找到 DATA 哨兵");
   if (!/<html[\s>]/i.test(filled) || !/<body[\s>]/i.test(filled)) throw new Error("报告模板异常：不是有效 HTML");
@@ -10965,7 +10174,7 @@ function injectHtmlDeckExportScript(html) {
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1200);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1200);
   };
   let current = 0;
   const visibleIndex = () => current;
@@ -11076,7 +10285,7 @@ function injectHtmlDeckExportScript(html) {
       updateFullscreenState();
     } catch (error) {
       setStatus("无法进入全屏");
-      setTimeout(() => setStatus(""), 1500);
+      window.setTimeout(() => setStatus(""), 1500);
     }
   });
   document.getElementById("lexvoice-save-current-slide")?.addEventListener("click", async (event) => {
@@ -11091,7 +10300,7 @@ function injectHtmlDeckExportScript(html) {
       console.error("[LexVoice] export slide failed", error);
       setStatus((error && error.message) || "保存失败");
     } finally {
-      setTimeout(() => { button.disabled = false; setStatus(""); }, 1600);
+      window.setTimeout(() => { button.disabled = false; setStatus(""); }, 1600);
     }
   });
   document.getElementById("lexvoice-save-all-slides")?.addEventListener("click", async (event) => {
@@ -11108,7 +10317,7 @@ function injectHtmlDeckExportScript(html) {
       setStatus((error && error.message) || "保存失败");
     } finally {
       if (stack) stack.remove();
-      setTimeout(() => { button.disabled = false; setStatus(""); }, 1600);
+      window.setTimeout(() => { button.disabled = false; setStatus(""); }, 1600);
     }
   });
   window.addEventListener("keydown", (event) => {
@@ -11990,7 +11199,7 @@ async function trashLexVoiceFile(app, file) {
   if (app.vault && typeof app.vault.trash === "function") {
     await app.vault.trash(file, true);
   } else {
-    await app.vault.delete(file);
+    await app.fileManager.trashFile(file);
   }
 }
 
@@ -13738,34 +12947,12 @@ const JOBPORTRAIT_COVERAGE_ICON = { covered: "check-circle-2", partial: "circle-
 
 // Phase 3 会中"追问建议"规则库：每维一条兜底话术（模型没给定制话术时回落）+ 优先级权重。
 // priority 越大越靠前，已隐含分组序 hard(5) > soft(4) > risk(3) > culture(2)，排序时不必再查 group。
-const JOBPORTRAIT_FOLLOWUP_RULES = {
-  years:                { fallback: "这个岗位希望几年经验起步？有没有硬性年限？", priority: 5 },
-  education:            { fallback: "学历是硬门槛还是参考项？最低到哪一档？", priority: 5 },
-  industry:             { fallback: "一定要同行业背景吗？哪些相邻行业也能接受？", priority: 5 },
-  must_have:            { fallback: "有没有一两条「没有就直接不要」的硬经验？", priority: 5 },
-  salary:               { fallback: "这个岗位的薪资区间大概多少？卡在哪个范围？", priority: 5 },
-  business_sense:       { fallback: "能举一个你心目中「业务感强」的人具体做对了什么的例子吗？", priority: 4 },
-  resilience:           { fallback: "去年有没有一个扛住压力 / 顶住挫折的具体场景，能描述下吗？", priority: 4 },
-  learning:             { fallback: "你说的学习能力，体现在哪件事上？多久上手算达标？", priority: 4 },
-  values:               { fallback: "什么样的价值观 / 做事风格是你绝对不能接受的？", priority: 4 },
-  communication:        { fallback: "跨部门协作时，你期待他怎么处理分歧？有反例吗？", priority: 4 },
-  job_hopping:          { fallback: "对跳槽频率有没有底线？几年一跳会让你犹豫？", priority: 3 },
-  education_suspicious: { fallback: "学历背景上有没有需要重点核实的点？", priority: 3 },
-  dept_style:           { fallback: "团队目前是什么节奏 / 风格？什么样的人会水土不服？", priority: 2 },
-  supervisor_pref:      { fallback: "作为直属上级，你更希望他主动汇报还是给结果就行？", priority: 2 },
-};
+
 // 会中同时最多显示的追问卡数（节奏控制，不刷屏）。初版保守取 2，观察真实使用后再调。
 const JOBPORTRAIT_FOLLOWUP_MAX_CARDS = 2;
 
 // 所有招聘需求挖掘 prompt 共享的 system 前缀（spec §5.1）。
-const JOBPORTRAIT_SYSTEM_PROMPT = `你是一位经验丰富的 HRBP 教练，刚陪同一位经验较少的 HRBP 开完一场"招聘需求沟通会"（HRBP 与业务方沟通某岗位的招人标准）。你的目标是把业务方真实的人才标准挖透，触达"冰山下"的隐性偏好（品质 / 价值观 / 驱动力 / 学习能力 / 软技能）。
 
-风格与边界：
-- 业务语言，不用技术黑话；忠实于对话、不臆造业务方没表达过的意思。
-- 判断尽量带业务方原话或具体场景支撑；但要把零散表达综合、提炼清楚，不因缺少一字不差的原话就丢掉一个真实浮现的要点。
-- 不评价业务方需求是否合理，不替业务方做决策。
-- 不引用候选人 / 简历内容（本场是"需求会"，不是面试）。
-- 人物指认是高风险区：把转写里出现的某个称呼/人名绑定到结构角色（业务方/一号位/上级/老板）属于断言，必须有转写中**多处、非假设语境**的明确依据；依据不足时只用角色词（"业务方""一号位"），不指名。凡属推断的指认，名字后必须标注（推断）。`;
 
 // 会后整合 prompt（叙述式自然生长，v2）：整场转写 → 依据实际讨论生长出来的 Markdown 岗位画像。
 // 刻意不再用固定 14 格 JSON 表单填空——那会逼模型抠片段硬套、产出稀薄；14 维只作模型内部的"挖全了没"查漏清单。
@@ -14391,15 +13578,15 @@ class OutlineView extends obsidian.ItemView {
         && this.plugin.session
         && this.plugin.session.segments.length > 0
         && !this.aiOutline) {
-      setTimeout(() => this.refreshAIOutline({ silent: true }), 400);
+      window.setTimeout(() => this.refreshAIOutline({ silent: true }), 400);
     }
   }
   async onClose() {
     if (this.unsubscribeRecorder) { this.unsubscribeRecorder(); this.unsubscribeRecorder = null; }
     if (this._renderRaf) { cancelAnimationFrame(this._renderRaf); this._renderRaf = 0; }
     if (this._outlineFollowRaf) { cancelAnimationFrame(this._outlineFollowRaf); this._outlineFollowRaf = 0; }
-    if (this.sedimentToastTimer) { clearTimeout(this.sedimentToastTimer); this.sedimentToastTimer = 0; }
-    if (this.sedimentAdvanceTimer) { clearTimeout(this.sedimentAdvanceTimer); this.sedimentAdvanceTimer = 0; }
+    if (this.sedimentToastTimer) { window.clearTimeout(this.sedimentToastTimer); this.sedimentToastTimer = 0; }
+    if (this.sedimentAdvanceTimer) { window.clearTimeout(this.sedimentAdvanceTimer); this.sedimentAdvanceTimer = 0; }
   }
   syncSessionOutline(session) {
     const id = session && session.id ? session.id : "";
@@ -15009,7 +14196,7 @@ class OutlineView extends obsidian.ItemView {
 
   scheduleSedimentAutoAdvance(file, completedKey) {
     if (!(file instanceof obsidian.TFile)) return;
-    if (this.sedimentAdvanceTimer) clearTimeout(this.sedimentAdvanceTimer);
+    if (this.sedimentAdvanceTimer) window.clearTimeout(this.sedimentAdvanceTimer);
     const path = obsidian.normalizePath(file.path || "");
     this.sedimentAdvanceTimer = window.setTimeout(() => {
       this.sedimentAdvanceTimer = 0;
@@ -16498,7 +15685,7 @@ class OutlineView extends obsidian.ItemView {
     const old = root.querySelector(".lexvoice-sediment-toast");
     if (old) old.remove();
     if (this.sedimentToastTimer) {
-      clearTimeout(this.sedimentToastTimer);
+      window.clearTimeout(this.sedimentToastTimer);
       this.sedimentToastTimer = 0;
     }
     const toast = root.createDiv({ cls: "lexvoice-sediment-toast" + (opts.variant ? ` is-${opts.variant}` : "") });
@@ -19179,7 +18366,7 @@ class OutlineView extends obsidian.ItemView {
         if (shouldRunRealtimeOutline(this.plugin.session, { silent: true, local })) {
           const nextAllowedAt = Number(this.plugin.session && this.plugin.session.realtimeOutlineNextAllowedAt) || 0;
           const wait = Math.max(1000, nextAllowedAt - Date.now());
-          setTimeout(() => this.refreshAIOutline({ silent: true }), wait);
+          window.setTimeout(() => this.refreshAIOutline({ silent: true }), wait);
         }
       }
     }
@@ -19534,7 +18721,7 @@ class LexVoicePlugin extends obsidian.Plugin {
 
     if (this.queue.tasks.length > 0) {
       new obsidian.Notice(`LexVoice：发现 ${this.queue.tasks.length} 个待处理任务，后台重试中…`);
-      setTimeout(() => this.retryQueue(), 2500);
+      window.setTimeout(() => this.retryQueue(), 2500);
     }
     this.app.workspace.onLayoutReady(() => this.checkForUpdatesOnStartup());
   }
@@ -20030,7 +19217,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     return () => {
       if (scheduled) return;
       scheduled = true;
-      setTimeout(flush, 1500);
+      window.setTimeout(flush, 1500);
     };
   }
 
@@ -20081,7 +19268,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       setting.openTabById(this.manifest.id);
     }
     if (this.settingTab) {
-      setTimeout(() => {
+      window.setTimeout(() => {
         this.settingTab.activeTab = tabId;
         this.settingTab.display();
       }, 0);
@@ -20101,7 +19288,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     if (!this.getUpdateRawBase()) return;
     const last = Date.parse(this.settings.lastUpdateCheckAt || "");
     if (last && Date.now() - last < UPDATE_CHECK_INTERVAL_MS) return;
-    setTimeout(() => {
+    window.setTimeout(() => {
       this.checkForUpdates({ silent: true }).catch(e => console.warn("[LexVoice] update check failed", e));
     }, 4000);
   }
@@ -20433,7 +19620,7 @@ class LexVoicePlugin extends obsidian.Plugin {
   }
 
   scheduleRealtimeOutline() {
-    if (this.outlineRefreshTimer) clearTimeout(this.outlineRefreshTimer);
+    if (this.outlineRefreshTimer) window.clearTimeout(this.outlineRefreshTimer);
     const delay = Math.max(2500, this.settings.realtimeOutlineDebounceMs || 1500);
     const local = isLocalLlmEndpoint(this.settings.llmEndpoint);
     this.outlineRefreshTimer = window.setTimeout(() => {
@@ -20499,7 +19686,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         if (shouldRunRealtimeOutline(this.session, { silent: true, local })) {
           const nextAllowedAt = Number(this.session && this.session.realtimeOutlineNextAllowedAt) || 0;
           const wait = Math.max(1000, nextAllowedAt - Date.now());
-          setTimeout(() => this.refreshRealtimeOutlineInBackground({ silent: true }), wait);
+          window.setTimeout(() => this.refreshRealtimeOutlineInBackground({ silent: true }), wait);
         }
       }
     }
@@ -20571,14 +19758,14 @@ class LexVoicePlugin extends obsidian.Plugin {
     session.pendingMeetingWorkbenchInteractions = queue;
     if (!this.canRunMeetingWorkbenchInteraction(session)) {
       this.refreshOutlineView();
-      if (this._meetingWorkbenchInteractionTimer) clearTimeout(this._meetingWorkbenchInteractionTimer);
+      if (this._meetingWorkbenchInteractionTimer) window.clearTimeout(this._meetingWorkbenchInteractionTimer);
       this._meetingWorkbenchInteractionTimer = window.setTimeout(() => {
         this._meetingWorkbenchInteractionTimer = 0;
         this.processPendingMeetingWorkbenchInteractions(session).catch(e => console.error("[LexVoice] meeting workbench queue retry failed", e));
       }, 3000);
       return;
     }
-    if (this._meetingWorkbenchInteractionTimer) clearTimeout(this._meetingWorkbenchInteractionTimer);
+    if (this._meetingWorkbenchInteractionTimer) window.clearTimeout(this._meetingWorkbenchInteractionTimer);
     this._meetingWorkbenchInteractionTimer = window.setTimeout(() => {
       this._meetingWorkbenchInteractionTimer = 0;
       this.processPendingMeetingWorkbenchInteractions(session).catch(e => console.error("[LexVoice] meeting workbench queue failed", e));
@@ -21256,7 +20443,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     const before = cur.slice(0, blockStart).replace(/\n+$/, "\n");
     const after = cur.slice(blockEnd).replace(/^\n+/, "");
     const next = before + (after ? "\n" + after : "");
-    if (!next.trim()) await this.app.vault.delete(file);
+    if (!next.trim()) await this.app.fileManager.trashFile(file);
     else if (next !== cur) await this.app.vault.modify(file, next);
   }
 
@@ -21382,7 +20569,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     if (this.isQueuedTranscribeAudioReferenced(path, excludeTaskId)) return;
     const file = this.app.vault.getAbstractFileByPath(obsidian.normalizePath(path));
     if (file instanceof obsidian.TFile) {
-      try { await this.app.vault.delete(file); }
+      try { await this.app.fileManager.trashFile(file); }
       catch (e) { console.error("[LexVoice] segment cache cleanup failed", path, e); }
     }
   }
@@ -21903,7 +21090,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       if (t > latestTime) { latestTime = t; latest = { cand, evalText: String(fm.一句话评价 || "").trim() }; }
     }
     // 缓存未就绪 → 稍后再重算一次（metadataCache 大概率已重建），避免统计长期偏小且无自纠正
-    if (staleCache && !retry) { setTimeout(() => { this.recalcRecruitProject(folderPath, true).catch(() => {}); }, 2000); }
+    if (staleCache && !retry) { window.setTimeout(() => { this.recalcRecruitProject(folderPath, true).catch(() => {}); }, 2000); }
     const latestText = latest ? (latest.evalText ? `${latest.cand}：${latest.evalText}` : latest.cand) : "";
     try {
       await this.app.fileManager.processFrontMatter(jdFile, (fm) => {
@@ -21916,7 +21103,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       return true;
     } catch (e) {
       console.error("[LexVoice] processFrontMatter recalc failed", e);
-      if (!retry) { setTimeout(() => { this.recalcRecruitProject(folderPath, true).catch(() => {}); }, 1500); }
+      if (!retry) { window.setTimeout(() => { this.recalcRecruitProject(folderPath, true).catch(() => {}); }, 1500); }
       else new obsidian.Notice("项目统计更新失败，可用命令「刷新当前招聘项目统计」手动刷新");
       return false;
     }
@@ -22372,11 +21559,11 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
     // 超时兜底：渲染进程崩溃/卡死时这些 await 可能永不 settle，不加超时会让用户卡在"正在渲染…"且无法取消。
     const withTimeout = (p, ms, label) => Promise.race([
       Promise.resolve(p),
-      new Promise((_, rej) => setTimeout(() => rej(new Error(`${label}超时（${ms / 1000}s）`)), ms)),
+      new Promise((_, rej) => window.setTimeout(() => rej(new Error(`${label}超时（${ms / 1000}s）`)), ms)),
     ]);
     try {
       await withTimeout(win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`), 30000, "PDF 页面加载");
-      await new Promise(r => setTimeout(r, 200));  // 等字体/布局稳定，量高才准
+      await new Promise(r => window.setTimeout(r, 200));  // 等字体/布局稳定，量高才准
       // 页宽量 .doc（内容定宽容器，纯白弥散模板为 960px）实际宽度，避免把溢出/留白算进页宽导致左右白边；无 .doc 退回文档滚动宽。
       const dims = await withTimeout(win.webContents.executeJavaScript(
         "(()=>{const d=document.documentElement,b=document.body,doc=document.querySelector('.doc');return{w:(doc&&doc.offsetWidth)||Math.max(b.scrollWidth,d.scrollWidth,640),h:Math.max(b.scrollHeight,d.scrollHeight,400)};})()"
@@ -23962,7 +23149,7 @@ ${source}`;
     const rawDelay = Number(this.settings.inboxStabilizeDelayMs);
     const delay = Number.isFinite(rawDelay) && rawDelay >= 0 ? rawDelay : 3000;
     this._inboxLock = (this._inboxLock || Promise.resolve()).then(async () => {
-      await new Promise((r) => setTimeout(r, delay));
+      await new Promise((r) => window.setTimeout(r, delay));
       const fresh = this.app.vault.getAbstractFileByPath(file.path);
       if (!(fresh instanceof obsidian.TFile)) return;
       new obsidian.Notice(`收件箱新增音频：${file.name}，处理中…`);
@@ -23981,7 +23168,7 @@ ${source}`;
         console.error("[LexVoice] inbox auto-import failed", e);
         new obsidian.Notice(`收件箱处理失败：${e.message || e}`);
       } finally {
-        setTimeout(() => this._inboxRecent && this._inboxRecent.delete(file.path), 60000);
+        window.setTimeout(() => this._inboxRecent && this._inboxRecent.delete(file.path), 60000);
       }
     }).catch((e) => { console.error("[LexVoice] inbox queue error", e); });
   }
@@ -25505,7 +24692,7 @@ class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       const rec = new MediaRecorder(dest.stream);
       const chunks = [];
       rec.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
-      await new Promise((resolve) => { rec.onstop = resolve; rec.start(); setTimeout(() => rec.stop(), 1000); });
+      await new Promise((resolve) => { rec.onstop = resolve; rec.start(); window.setTimeout(() => rec.stop(), 1000); });
       const blob = new Blob(chunks, { type: rec.mimeType });
       return await transcribeAudio(this.plugin, blob, blob.type);
     } finally {
@@ -27005,7 +26192,7 @@ class QueueModal extends obsidian.Modal {
   onOpen() {
     const { contentEl } = this;
     // 静态 Modal 默认停在打开瞬间；处理中时会定时重渲染让"当前步骤/进度"实时走动。先清旧定时器避免叠加。
-    if (this._activityTimer) { clearInterval(this._activityTimer); this._activityTimer = null; }
+    if (this._activityTimer) { window.clearInterval(this._activityTimer); this._activityTimer = null; }
     contentEl.empty();
     contentEl.createEl("h2", { text: "LexVoice 处理进度" });
 
@@ -27125,11 +26312,11 @@ class QueueModal extends obsidian.Modal {
 
     // 处理中时每 1.2s 重渲染，让步骤名/百分比实时更新；空闲（无活动、无运行任务）即停止刷新。
     if (activity || running.length) {
-      this._activityTimer = setInterval(() => { try { this.onOpen(); } catch {} }, 1200);
+      this._activityTimer = window.setInterval(() => { try { this.onOpen(); } catch {} }, 1200);
     }
   }
   onClose() {
-    if (this._activityTimer) { clearInterval(this._activityTimer); this._activityTimer = null; }
+    if (this._activityTimer) { window.clearInterval(this._activityTimer); this._activityTimer = null; }
     this.contentEl.empty();
   }
 }
@@ -27208,7 +26395,7 @@ class VirtualCableSetupModal extends obsidian.Modal {
     head.createSpan({ text: title, cls: "lexvoice-vcable-step-title" });
     const b = s.createDiv({ cls: "lexvoice-vcable-step-body" });
     if (typeof body === "function") body(b);
-    else b.innerHTML = body;
+    else b.appendChild(obsidian.sanitizeHTMLToDom(String(body == null ? "" : body)));
     return s;
   }
   renderMacContent(parent) {
