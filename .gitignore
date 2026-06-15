@@ -24,6 +24,10 @@ build/
 main.js
 *.zip
 
+# Refactor scratch (modularization tooling; never commit, keep out of source scan)
+_tmp_*
+*.bak
+
 # Logs and OS files
 *.log
 .DS_Store

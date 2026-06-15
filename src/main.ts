@@ -34,6 +34,15 @@ import {
   RECRUIT_REPORT_PROMPT,
   SEMINAR_REPORT_PROMPT,
 } from "./report-templates";
+import { MODE_META, FRONTMATTER_SCHEMA, MODE_PREFIX_TO_KEY } from "./shared/catalog-modes";
+import { SEDIMENT_GROUP_CONFIG, SEDIMENT_GROUP_ORDER, SEDIMENT_GROUP_STATUS_LABELS, VOCABULARY_SECTIONS, PEOPLE_DIRECTORY_TAG } from "./shared/catalog-sediment";
+import { AUDIO_EXT, TEXT_IMPORT_EXT, IMPORT_TEXT_CATEGORY_CONFIG, IMPORT_TEXT_CATEGORY_ORDER, VIRTUAL_CABLE_PATTERNS } from "./shared/catalog-import";
+import { isRecord, cloneJson, pickDefined, pickNonBlankString, genId, pad, formatElapsed, sanitizeFilename, escapeRegExp, stripHtmlText, safeDecodeUriText, normalizeAudioLinkTarget } from "./shared/util-common";
+import { escapeYamlScalar, escapeBaseString, makeFileWikiLink, escapeHtmlText } from "./shared/util-markdown";
+import { mimeFromExt, extFromMime, delayMs, isTransientAsrError, isAsrNonRetryableError, pickMimeType, assertAudioCaptureSupported } from "./shared/util-audio";
+import { normalizeLlmEndpoint, isLocalLlmEndpoint, isPoeLlmEndpoint, isMoonshotKimiModel, buildLlmHeaders, comparableLlmEndpoint, isPrivateNetworkHost } from "./shared/util-llm-endpoint";
+import { obfuscateApiKey, deobfuscateApiKey, LEXVOICE_KEY_OBFUSCATION_MARKER, LEXVOICE_KEY_OBFUSCATION_SALT, redactDiagnosticText, sanitizeDiagnosticData, lexvoiceXorTransform, diagnosticPathLabel, diagnosticError } from "./shared/util-key-diag";
+import { extractJsonObject, extractLlmContent } from "./shared/util-json";
 import { MODE_BODIES } from "./prompts/mode-bodies";
 import { SHARED_DISCIPLINE, STRUCTURE_LEVEL_INSTRUCTIONS } from "./prompts/discipline";
 import { INDUSTRY_META_PROMPT } from "./prompts/industry-meta";
@@ -486,29 +495,9 @@ const ONE_CARD_PROVIDERS = {
   },
 };
 
-function isRecord(value) {
-  return value && typeof value === "object" && !Array.isArray(value);
-}
 
-function cloneJson(value) {
-  return JSON.parse(JSON.stringify(value));
-}
 
-function pickDefined() {
-  for (const value of arguments) {
-    if (value !== undefined) return value;
-  }
-  return undefined;
-}
 
-function pickNonBlankString() {
-  for (const value of arguments) {
-    if (value === undefined || value === null) continue;
-    const text = String(value).trim();
-    if (text) return value;
-  }
-  return "";
-}
 
 function normalizeAsrConcurrency(value) {
   const n = Number(value);
@@ -568,58 +557,9 @@ function countKnowledgeExtractionHistory(settings, kind) {
   return Object.keys((history && history[kind]) || {}).length;
 }
 
-function redactDiagnosticText(value) {
-  return String(value == null ? "" : value)
-    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer <redacted>")
-    .replace(/(api[_-]?key|authorization|token|secret|password)\s*[:=]\s*['"]?[^'"\s,;]+/gi, "$1=<redacted>")
-    .replace(/\b(sk-[A-Za-z0-9_-]{12,}|ghp_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]+)\b/g, "<redacted-token>")
-    .replace(/C:\\Users\\[^\\\s]+/gi, "C:\\Users\\<user>")
-    .replace(/\/Users\/[^/\s]+/gi, "/Users/<user>")
-    .replace(/\/home\/[^/\s]+/gi, "/home/<user>")
-    .replace(/\b(?!C:\\Users\\<user>)[A-Z]:\\[^\\\r\n]+(?:\\[^\\\r\n\s]+){1,}/g, "<local-path>")
-    .slice(0, 1200);
-}
 
-function diagnosticPathLabel(path) {
-  const text = String(path || "").replace(/\\/g, "/");
-  return redactDiagnosticText(text.split("/").pop() || text);
-}
 
-function diagnosticError(error) {
-  const e = error || {};
-  const out = {
-    name: redactDiagnosticText(e.name || "Error"),
-    message: redactDiagnosticText(e.message || String(error || "")),
-    stack: e.stack ? redactDiagnosticText(String(e.stack).split("\n").slice(0, 4).join("\n")) : "",
-  };
-  if (e.status !== undefined) out.status = e.status;
-  if (e.statusDetail !== undefined) out.statusDetail = redactDiagnosticText(e.statusDetail);
-  if (e.nonRetryable !== undefined) out.nonRetryable = !!e.nonRetryable;
-  return out;
-}
 
-function sanitizeDiagnosticData(data, depth = 0) {
-  if (data == null) return data;
-  if (depth > 3) return "[depth-limit]";
-  if (typeof data === "string") return redactDiagnosticText(data);
-  if (typeof data === "number" || typeof data === "boolean") return data;
-  if (data instanceof Error) return diagnosticError(data);
-  if (Array.isArray(data)) return data.slice(0, 20).map(v => sanitizeDiagnosticData(v, depth + 1));
-  if (typeof data === "object") {
-    const out = {};
-    for (const key of Object.keys(data).slice(0, 40)) {
-      if (/apiKey|authorization|token|secret|password|prompt|transcript|text|content/i.test(key)) {
-        out[key] = "<redacted>";
-      } else if (/path$/i.test(key)) {
-        out[key] = diagnosticPathLabel(data[key]);
-      } else {
-        out[key] = sanitizeDiagnosticData(data[key], depth + 1);
-      }
-    }
-    return out;
-  }
-  return redactDiagnosticText(String(data));
-}
 
 function getLlmServicePreset(id) {
   return LLM_SERVICE_PRESETS.find(p => p.id === id) || null;
@@ -742,9 +682,6 @@ function applyLlmProfileToWorkingConfig(settings, id) {
   return true;
 }
 
-function comparableLlmEndpoint(endpoint) {
-  return normalizeLlmEndpoint(endpoint).replace(/\/+$/, "").toLowerCase();
-}
 
 function inferLlmServicePresetId(settings) {
   const current = comparableLlmEndpoint(settings && settings.llmEndpoint);
@@ -1294,17 +1231,6 @@ async function ensureAdapterFolder(adapter, folderPath) {
 
 // 用户面内置业务意图（recruit 走彩蛋解锁）。内部 key 保留旧字符串以避免迁移破坏老笔记 / tag / base 文件；
 // huddle 是 meeting 的子风格，不再单列在新建录音下拉，但老 huddle 笔记仍能被识别和打开。
-const MODE_META = {
-  meeting:   { prefix: "工作纪要", emoji: "📝", icon: "briefcase", label: "工作纪要", goal: "适合各种规模的工作会议：决议、待办、风险、同步同事进展。" },
-  interview: { prefix: "访谈", emoji: "🎙", icon: "message-square", label: "访谈", goal: "适合外部访谈、用户调研、专家访谈，把问答转成洞察。" },
-  monologue: { prefix: "个人笔记", emoji: "💭", icon: "notebook", label: "个人笔记", goal: "适合个人口述、灵感、复盘，把碎片表达整理成可用笔记。" },
-  learning:  { prefix: "学习笔记", emoji: "📚", icon: "book-open", label: "学习笔记", goal: "适合 B 站、YouTube、课程、讲座、播客等高信息密度内容。" },
-  seminar:   { prefix: "研讨会", emoji: "🧠", icon: "landmark", label: "研讨会", goal: "适合学术研讨、主题沙龙、圆桌论坛，把观点、争议、证据和后续问题整理清楚。" },
-  recruit:   { prefix: "招聘评估", emoji: "👔", icon: "user-check", label: "招聘评估" },
-  "recruit-needs": { prefix: "招聘需求挖掘", emoji: "", icon: "user-search", label: "招聘需求挖掘", goal: "HRBP 与业务方的招聘需求沟通会：会中按画像字段树辅助挖深，会后自动产出结构化岗位画像。" },
-  huddle:    { prefix: "圆桌讨论", emoji: "🤝", icon: "users", label: "圆桌讨论", goal: "保留以兼容旧笔记，新建录音请改用「工作纪要」。", legacy: true },
-  off:       { prefix: "录音", emoji: "🎙", icon: "mic", label: "关闭（仅转写）" },
-};
 
 // 新建录音下拉里出现的公开意图 + 1 个彩蛋；huddle 不出现（仅旧笔记兜底使用）
 const STANDARD_POLISH_MODES = ["meeting", "seminar", "interview", "monologue", "learning"];
@@ -1850,37 +1776,6 @@ function buildStructureLevelInstruction(level) {
 // Frontmatter schema —— 字段名优先用中文（除 mode 程序识别 / tags Obsidian 约定）
 // 角色相关字段（受访者 / 访问者 / 参会人 / 当事人 / 参谋 / 候选人 / 面试官）
 // 用户后期可手动改成"代号 → 真名"形式，触发"重新整理"时插件会按映射替换正文里的代号
-const FRONTMATTER_SCHEMA = {
-  learning: `主题: <一句话主题>
-来源: <B站 / YouTube / 播客 / 课程 / 讲座 / 未提及>
-语言: <中文 / 英文 / 日文 / 多语种 / 未提及>`,
-  interview: `主题: <一句话主题>
-受访者:
-  - <受访者姓名；推断不确定时写代号如 "受访者A（推断）">
-访问者: <访问者姓名；未提及写 "未提及">`,
-  meeting: `主题: <一句话主题>
-参会人:
-  - <姓名 1；不确定时用中性角色如 "业务需求方" 或写 "未提及">
-  - <姓名 2>`,
-  seminar: `主题: <一句话主题>
-研讨对象: <理论 / 议题 / 案例 / 文本 / 项目；未提及写 "未提及">
-参与者:
-  - <姓名或角色；不确定时用 "发言人A（推断）" 或写 "未提及">`,
-  huddle: `主题: <一句话主题>
-当事人: <决策当事人；未点明写 "未提及"，不要凭一两句假设句指认>
-参谋:
-  - <参谋姓名或角色；不确定写 "未提及">`,
-  monologue: `主题: <一句话主题>`,
-  recruit: `主题: <一句话主题>
-候选人: <候选人姓名；未提及写 "未提及">
-联系方式: <手机号 / 邮箱 / 微信等联系方式；未提及写 "未提及">
-应聘岗位: <应聘岗位；未提及写 "未提及">
-轮次: <初面 / 二面 / 终面 / 复试；未提及写 "未提及">
-录用建议: <强烈推荐 / 推荐 / 倾向推荐 / 倾向不推荐 / 不推荐>
-一句话评价: <40 字内定调句，含 录用倾向 + 最大亮点 + 最大顾虑 三要素；即 §0.6 第五步「X，Y，尤其是 Z」定调句的压缩版>
-待澄清:
-  - <本场未问到 / 未覆盖、offer 前需问清的点，一条一项；没有就写空数组 []>`,
-};
 
 function buildPrompt(modeBody, isMerged, modeKey) {
   const inputDesc = isMerged
@@ -3026,17 +2921,6 @@ function buildPlaybackTimelineDetails(session) {
   ].join("\n");
 }
 
-function stripHtmlText(text) {
-  return String(text || "")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .trim();
-}
 
 function extractLexVoiceDetailsBody(markdown, summaryPattern) {
   const text = String(markdown || "");
@@ -3096,14 +2980,6 @@ function buildRecordingInfoDetails(info) {
   ].join("\n");
 }
 
-function pad(n) { return n < 10 ? "0" + n : "" + n; }
-function formatElapsed(ms) {
-  const t = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(t / 3600);
-  const m = Math.floor((t % 3600) / 60);
-  const s = t % 60;
-  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
-}
 
 function getAudioTimeLink(audioName, ms) {
   const name = String(audioName || "").trim();
@@ -3165,26 +3041,7 @@ function isTimeLabel(text) {
   return new RegExp("^" + time + "(?:\\s*[–-]\\s*" + time + ")?$").test(String(text || "").trim());
 }
 
-function safeDecodeUriText(text) {
-  try { return decodeURIComponent(String(text || "")); }
-  catch { return String(text || ""); }
-}
 
-function normalizeAudioLinkTarget(linkPath) {
-  let target = String(linkPath || "").split("#")[0].split("|")[0].trim();
-  if (!target) return "";
-  try {
-    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(target)) {
-      const url = new URL(target);
-      target = url.searchParams.get("file")
-        || url.searchParams.get("path")
-        || url.searchParams.get("target")
-        || url.pathname;
-    }
-  } catch {}
-  target = safeDecodeUriText(target).replace(/^\/+/, "").trim();
-  return target;
-}
 
 function getAudioLinkCandidates(linkPath) {
   const target = normalizeAudioLinkTarget(linkPath);
@@ -3237,26 +3094,6 @@ function extractAudioSegmentOffsets(markdown) {
 // 虚拟声卡识别 · 跨平台 audioinput 设备检测
 // ============================================================
 
-const VIRTUAL_CABLE_PATTERNS = [
-  // Windows
-  /CABLE Output/i,             // VB-Cable
-  /VB-Audio Virtual Cable/i,
-  /Virtual Audio Cable/i,      // 商业版 VAC
-  /VoiceMeeter Output/i,       // VoiceMeeter Banana / Potato
-  /VoiceMeeter Aux Output/i,
-  /VoiceMeeter VAIO[3]? Output/i,
-  /立体声混音/i,
-  /Stereo Mix/i,
-  // macOS
-  /^BlackHole/i,               // BlackHole 2ch / 16ch
-  /Loopback Audio/i,           // Rogue Amoeba Loopback
-  /Soundflower/i,
-  /Existential Audio/i,
-  /SoundWire/i,                // Network audio bridge, not a local physical mic
-  // Linux
-  /Monitor of /i,              // PulseAudio loopback monitor sources
-  /pulse_monitor/i,
-];
 
 function isVirtualCableLabel(label) {
   if (!label) return false;
@@ -3292,53 +3129,9 @@ async function enumerateAudioDevices() {
 // 新哲学是"插件不替用户猜设备"——acquireStream 直接透传用户在设置里选的设备（没选则系统默认/明确提示），
 // 不再用名字启发式自动挑选。名字启发式（isVirtualCableLabel）仅保留给 UI 软提示，不参与任何选择。
 
-function pickMimeType(preferOpus) {
-  // 默认 mp4/AAC 优先：SiliconFlow 等云端 ASR 原生收 m4a，直接上传最稳；WebM 作为 Chromium 兜底。
-  // preferOpus（选 APIMiMo 时传入）：MiMo 服务端只收 wav/mp3（实测发 audio/mp4 直接 400 拒绝），
-  // 段落必须本机转码成 WAV 再发；而 Electron 的 decodeAudioData 解不了 AAC、能解 Opus——
-  // 所以此时必须录 WebM/Opus，否则每段都卡死在"无法解码"。
-  const candidates = preferOpus
-    ? ["audio/webm;codecs=opus","audio/webm","audio/ogg;codecs=opus","audio/mp4;codecs=mp4a.40.2","audio/mp4"]
-    : ["audio/mp4;codecs=mp4a.40.2","audio/mp4","audio/webm;codecs=opus","audio/webm","audio/ogg;codecs=opus"];
-  for (const c of candidates) if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(c)) return c;
-  return "";
-}
 
-function assertAudioCaptureSupported() {
-  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function") {
-    throw new Error("当前 Obsidian 环境不支持麦克风录音。请升级 Obsidian，或在桌面端使用 LexVoice。");
-  }
-  if (typeof MediaRecorder === "undefined") {
-    throw new Error("当前 Obsidian 环境不支持 MediaRecorder，暂时无法直接录音。可以先用系统录音后导入音频处理。");
-  }
-}
 
-function extFromMime(mime) {
-  if (!mime) return "webm";
-  if (mime.includes("wav")) return "wav";
-  if (mime.includes("webm")) return "webm";
-  if (mime.includes("mp4")) return "m4a";
-  if (mime.includes("aac")) return "aac";
-  if (mime.includes("ogg")) return "ogg";
-  if (mime.includes("mpeg")) return "mp3";
-  if (mime.includes("mp3")) return "mp3";
-  if (mime.includes("flac")) return "flac";
-  return "webm";
-}
-function sanitizeFilename(s) {
-  if (!s) return "";
-  return String(s)
-    .replace(/["“”‘’`]/g, "")
-    .replace(/[\\/:*?"<>|#^\[\]]/g, "")
-    .replace(/[｜：？＊＜＞＂＃＾「」『』【】、，。；！]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 50);
-}
 
-function escapeRegExp(s) {
-  return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 function stripLexVoiceAutoTitleSuffix(stem, settings) {
   const prefixes = Object.values(MODE_META)
@@ -3364,43 +3157,15 @@ function buildLexVoiceRenamedMarkdownPath(currentPath, mode, titleTag, settings)
   const nextName = `${stem} · ${modePrefix}-${tag}.md`;
   return obsidian.normalizePath(dir ? `${dir}/${nextName}` : nextName);
 }
-function genId() {
-  return "lv-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
-}
 
 // ===== API 密钥本地存储混淆 =====
 // 目标：data.json 里不出现可直接读取的明文密钥（满足"不是明文"承诺、防止截图/误分享 data.json 泄露）。
 // 诚实说明：这是「混淆」不是「加密」—— 因为本插件开源，变换算法公开，能拿到 data.json + 读源码的人仍可还原。
 // 但它消除了"密钥以 sk-xxx 明文躺在配置文件里"这一最常见的泄露面，且密钥从不离开本地（仅在调用 API 时发往对应服务端点）。
 // 内存中 settings 始终保存明文密钥，所有调用大模型/转写的代码无需改动；只有落盘的 data.json 是混淆态。
-const LEXVOICE_KEY_OBFUSCATION_MARKER = "lvk1:";
-const LEXVOICE_KEY_OBFUSCATION_SALT = "LexVoice/local-key-obfuscation/v1";
 
-function lexvoiceXorTransform(text) {
-  const salt = LEXVOICE_KEY_OBFUSCATION_SALT;
-  let out = "";
-  for (let i = 0; i < text.length; i++) {
-    out += String.fromCharCode(text.charCodeAt(i) ^ salt.charCodeAt(i % salt.length));
-  }
-  return out;
-}
 
-function obfuscateApiKey(plain) {
-  const s = String(plain == null ? "" : plain);
-  if (!s) return "";
-  if (s.startsWith(LEXVOICE_KEY_OBFUSCATION_MARKER)) return s; // 已混淆，幂等
-  try {
-    return LEXVOICE_KEY_OBFUSCATION_MARKER + btoa(unescape(encodeURIComponent(lexvoiceXorTransform(s))));
-  } catch { return s; }
-}
 
-function deobfuscateApiKey(stored) {
-  const s = String(stored == null ? "" : stored);
-  if (!s.startsWith(LEXVOICE_KEY_OBFUSCATION_MARKER)) return s; // 明文（旧数据迁移）→ 原样返回
-  try {
-    return lexvoiceXorTransform(decodeURIComponent(escape(atob(s.slice(LEXVOICE_KEY_OBFUSCATION_MARKER.length)))));
-  } catch { return s; }
-}
 
 // 深度遍历对象，对所有名字以 apiKey 结尾的字符串字段应用 fn（落盘混淆 / 读取还原），路径无关。
 // 覆盖：apiKey / llmApiKey / transcribeApiKey / compatApiKey 以及 providers[].apiKey、profiles[].apiKey 等嵌套。
@@ -3462,67 +3227,7 @@ function isSyncConflictName(name) {
   return /[\(（][^\)）]*?(冲突|conflict|conflicted\s*copy)[^\(（]*[\)）]/i.test(name);
 }
 
-const VOCABULARY_SECTIONS = [
-  { key: "people", title: "人名", desc: "仅放你明确愿意作为 ASR 提示发送的姓名或称呼；敏感人员关系请放到人员资料。", placeholder: "例如：某负责人、某专家、某候选人" },
-  { key: "brands", title: "品牌/机构", desc: "公司、学校、团队、客户、供应商、社区、品牌名。", placeholder: "例如：OpenAI、阿里云百炼、硅基流动" },
-  { key: "projects", title: "项目/产品", desc: "项目代号、产品名、模型名、系统名、插件名。", placeholder: "例如：LexVoice、SenseVoiceSmall、Paraformer" },
-  { key: "terms", title: "行业术语", desc: "专业概念、流程、缩写、技术词、业务词。", placeholder: "例如：ASR、履约保证金、灰度发布" },
-  { key: "corrections", title: "易错写法", desc: "明确写出 ASR 常见误写与标准写法。转写返回后，LexVoice 只会按这些显式规则做轻量替换。", placeholder: "例如：森斯 Voice Small => SenseVoiceSmall" },
-  { key: "other", title: "其他专有名词", desc: "暂时不好归类但希望 ASR 优先识别准确的词。", placeholder: "例如：会议室名、活动名、内部简称" },
-];
 
-const SEDIMENT_GROUP_CONFIG = {
-  person: {
-    label: "人员",
-    unit: "位",
-    dest: "人员库",
-    model: "judge",
-    decisionModel: "judge",
-    lead: "人",
-    primaryButtonText: (n) => `加入人员库（${n}）`,
-    secondaryButtonText: "全部忽略",
-  },
-  todo: {
-    label: "待办",
-    unit: "条",
-    dest: "待办",
-    model: "checkbox",
-    decisionModel: "checkbox",
-    defaultAllSelected: true,
-    lead: "事",
-    primaryButtonText: (n) => `加入待办（${n}）`,
-    secondaryButtonText: "忽略未选",
-  },
-  card: {
-    label: "学习",
-    unit: "张",
-    dest: "卡片库",
-    model: "checkbox",
-    decisionModel: "checkbox",
-    defaultAllSelected: true,
-    lead: "知",
-    primaryButtonText: (n) => `加入卡片库（${n}）`,
-    secondaryButtonText: "忽略未选",
-  },
-  hotword: {
-    label: "热词",
-    unit: "个",
-    dest: "热词库",
-    model: "checkbox",
-    decisionModel: "checkbox",
-    defaultAllSelected: true,
-    lead: "词",
-    primaryButtonText: (n) => `加入热词库（${n}）`,
-    secondaryButtonText: "忽略未选",
-  },
-};
-const SEDIMENT_GROUP_ORDER = ["person", "todo", "card", "hotword"];
-const SEDIMENT_GROUP_STATUS_LABELS = {
-  person: "人员建议",
-  todo: "待办候选",
-  card: "学习卡片",
-  hotword: "转写热词",
-};
 
 function makeSedimentStableHash(value) {
   const source = String(value || "");
@@ -3718,7 +3423,6 @@ function applyVocabularyCorrections(text, groups) {
   return output;
 }
 
-const PEOPLE_DIRECTORY_TAG = "lexvoice/person";
 
 function splitPersonFieldValue(value) {
   if (Array.isArray(value)) return value.flatMap(splitPersonFieldValue);
@@ -3943,20 +3647,8 @@ async function buildPeopleHotwordsForAsr(plugin, provider) {
   return terms.length ? `人员称呼：${terms.join("、")}` : "";
 }
 
-function escapeYamlScalar(value) {
-  return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
 
-function escapeBaseString(value) {
-  return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
 
-function makeFileWikiLink(file, label) {
-  if (!(file instanceof obsidian.TFile)) return "";
-  const target = obsidian.normalizePath(file.path || "").replace(/\.md$/i, "");
-  const text = String(label || file.basename || "").trim();
-  return text ? `[[${target}|${text}]]` : `[[${target}]]`;
-}
 
 function formatPersonRelatedBriefingsBase(mdFolder) {
   const folder = escapeBaseString(obsidian.normalizePath(mdFolder || DEFAULT_SETTINGS.mdFolder));
@@ -5120,28 +4812,6 @@ function formatVocabularyMarkdown(input, profile) {
   return lines.join("\n");
 }
 
-const MODE_PREFIX_TO_KEY = {
-  // 旧 prefix
-  "访谈": "interview",
-  "会议": "meeting",
-  "研讨会": "seminar",
-  "研讨": "seminar",
-  "沙龙": "seminar",
-  "小会": "huddle",
-  "手记": "monologue",
-  "学习": "learning",
-  "面试": "recruit",
-  "讨论": "huddle",
-  // 新 prefix
-  "工作纪要": "meeting",
-  "学术研讨": "seminar",
-  "主题沙龙": "seminar",
-  "访谈调研": "interview",
-  "个人笔记": "monologue",
-  "学习记录": "learning",
-  "招聘评估": "recruit",
-  "圆桌讨论": "huddle",
-};
 
 function normalizeModeFromLabel(settings, label) {
   const text = String(label || "").trim();
@@ -5719,24 +5389,11 @@ async function mapLimit(items, limit, worker) {
   return results;
 }
 
-function isTransientAsrError(error) {
-  if (isAsrNonRetryableError(error)) return false;
-  const msg = String((error && error.message) || error || "");
-  return /\b(429|500|502|503|504)\b|too many|rate\s*limit|timeout|timed?\s*out|network|temporarily|service unavailable/i.test(msg);
-}
 
 // 确定性 ASR 错误：格式不被服务端接受 / 本机无法解码 / 超过体积上限 / 4xx 拒绝（密钥、余额、审核）——
 // 重试同样必败，还会对大文件反复解码卡 UI、对服务端反复发必拒请求。队列对这类失败直接吃满重试退出自动重试。
 // 旗标 nonRetryable 由抛错处设置（apimimoPermanentError / HTTP 4xx 分支）；正则兜底匹配已落盘任务的 lastError。
-function isAsrNonRetryableError(error) {
-  if (error && error.nonRetryable) return true;
-  const msg = String((error && error.message) || error || "");
-  return /密钥未配置|模型名称未配置|服务地址未配置|无法解码|仅 wav\/mp3|不被 MiMo 服务端接受|base64 仍超过|单次最多自动切|mime type must be/i.test(msg);
-}
 
-function delayMs(ms) {
-  return new Promise(resolve => window.setTimeout(resolve, ms));
-}
 
 async function transcribeImportAudioChunk(plugin, blob, mime, concurrency) {
   try {
@@ -5749,19 +5406,6 @@ async function transcribeImportAudioChunk(plugin, blob, mime, concurrency) {
   }
 }
 
-const AUDIO_EXT = new Set(["webm", "mp3", "m4a", "aac", "acc", "wav", "ogg", "flac", "mp4", "mpeg", "mpga", "oga"]);
-const TEXT_IMPORT_EXT = new Set(["md", "txt"]);
-function mimeFromExt(ext) {
-  const e = (ext || "").toLowerCase();
-  if (e === "m4a" || e === "mp4") return "audio/mp4";
-  if (e === "aac" || e === "acc") return "audio/aac";
-  if (e === "mp3" || e === "mpga" || e === "mpeg") return "audio/mpeg";
-  if (e === "wav") return "audio/wav";
-  if (e === "ogg" || e === "oga") return "audio/ogg";
-  if (e === "flac") return "audio/flac";
-  if (e === "webm") return "audio/webm";
-  return "audio/" + e;
-}
 
 function shouldTranscodeImportedAudio(file, mime) {
   const ext = String((file && file.extension) || "").toLowerCase();
@@ -5840,25 +5484,7 @@ function stripImportedTextSource(text) {
   return cleanImportedTextForPrompt(withoutAppendices);
 }
 
-const IMPORT_TEXT_CATEGORY_CONFIG = {
-  "lexvoice-normal": {
-    label: "已整理 LexVoice 纪要",
-    shortLabel: "正常稿",
-    desc: "已经完成 AI 整理，可用于多篇合并、换模板重整或转成其他模式。",
-  },
-  "lexvoice-repair": {
-    label: "待修复 / 碎片 LexVoice 转写",
-    shortLabel: "待修复",
-    desc: "包含转写失败、整理失败、只有原始分段或零散内容，适合重新整理。",
-  },
-  external: {
-    label: "外部 MD / TXT 速录稿",
-    shortLabel: "外部稿",
-    desc: "用户手写速录、第三方纪要或普通 Markdown，不调用语音转写，直接交给 LLM 整理。",
-  },
-};
 
-const IMPORT_TEXT_CATEGORY_ORDER = ["lexvoice-normal", "lexvoice-repair", "external"];
 
 function getLexVoiceImportMarkerState(content) {
   const text = String(content || "");
@@ -7403,22 +7029,6 @@ function buildTranscribeHttpError(res, body, provider, blob, mime) {
   ].filter(Boolean).join("；");
 }
 
-function isPrivateNetworkHost(hostname) {
-  const host = String(hostname || "").toLowerCase().replace(/^\[|\]$/g, "");
-  if (!host) return false;
-  if (host === "localhost" || host === "127.0.0.1" || host === "::1") return true;
-  if (host.endsWith(".local")) return true;
-  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
-  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
-  const m = host.match(/^172\.(\d{1,2})\.\d{1,3}\.\d{1,3}$/);
-  if (m) {
-    const second = Number(m[1]);
-    if (second >= 16 && second <= 31) return true;
-  }
-  if (/^169\.254\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
-  if (/^(fc|fd)[0-9a-f]{2}:/i.test(host)) return true;
-  return false;
-}
 
 function isLocalServiceEndpoint(endpoint) {
   try {
@@ -7721,30 +7331,7 @@ async function transcribeAudio(plugin, blob, mime) {
   }
 }
 
-function normalizeLlmEndpoint(endpoint) {
-  const raw = String(endpoint || "").trim();
-  if (!raw) return "";
-  const noTrail = raw.replace(/\/+$/, "");
-  try {
-    const url = new URL(noTrail);
-    const path = (url.pathname || "").replace(/\/+$/, "");
-    if (/\/chat\/completions$/i.test(path)) return noTrail;
-    url.pathname = path + "/chat/completions";
-    return url.toString().replace(/\/+$/, "");
-  } catch {}
-  if (/\/chat\/completions$/i.test(noTrail)) return noTrail;
-  return noTrail;
-}
 
-function isLocalLlmEndpoint(endpoint) {
-  try {
-    const url = new URL(normalizeLlmEndpoint(endpoint));
-    const host = (url.hostname || "").toLowerCase();
-    return isPrivateNetworkHost(host);
-  } catch {
-    return false;
-  }
-}
 
 const DEFAULT_LLM_REQUEST_TIMEOUT_MS = 180 * 1000;
 
@@ -7779,38 +7366,8 @@ function withPromiseTimeout(promise, timeoutMs, makeError) {
   });
 }
 
-function isMoonshotKimiModel(endpoint, model) {
-  try {
-    const url = new URL(normalizeLlmEndpoint(endpoint));
-    const host = (url.hostname || "").toLowerCase();
-    return /(^|\.)moonshot\.(cn|ai)$/.test(host) && /^kimi-k2\./i.test(String(model || "").trim());
-  } catch {
-    return /^kimi-k2\./i.test(String(model || "").trim());
-  }
-}
 
-function isPoeLlmEndpoint(endpoint) {
-  try {
-    const url = new URL(normalizeLlmEndpoint(endpoint));
-    return (url.hostname || "").toLowerCase() === "api.poe.com";
-  } catch {
-    return /api\.poe\.com/i.test(String(endpoint || ""));
-  }
-}
 
-function buildLlmHeaders(apiKey, endpoint) {
-  const headers = { "Content-Type": "application/json" };
-  const key = String(apiKey || "").trim();
-  if (key) headers.Authorization = `Bearer ${key}`;
-  try {
-    const host = new URL(normalizeLlmEndpoint(endpoint)).hostname.toLowerCase();
-    if (/(^|\.)openrouter\.ai$/.test(host)) {
-      headers["HTTP-Referer"] = "https://github.com/Lynn-x/LexVoice";
-      headers["X-OpenRouter-Title"] = "LexVoice";
-    }
-  } catch {}
-  return headers;
-}
 
 function getHeaderValue(headers, name) {
   if (!headers || !name) return "";
@@ -7863,18 +7420,6 @@ function decorateLlmHttpDetail(status, detail, endpoint) {
   return base ? `${base}。${hint}` : hint;
 }
 
-function extractLlmContent(data) {
-  const msg = data && data.choices && data.choices[0] && data.choices[0].message;
-  const content = msg && msg.content;
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content.map(part => {
-      if (typeof part === "string") return part;
-      return (part && (part.text || part.content)) || "";
-    }).join("");
-  }
-  return "";
-}
 
 async function readLlmError(res) {
   const text = await res.text().catch(() => "");
@@ -8567,14 +8112,6 @@ function stripHtmlCodeFence(text) {
   return s;
 }
 
-function escapeHtmlText(text) {
-  return String(text || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
 
 function sanitizeGeneratedHtmlReport(html) {
   let s = stripHtmlCodeFence(html);
@@ -9073,19 +8610,6 @@ function buildMeetingEmailBody({ file, markdown, attendeeNames = [], attachments
   return body.join("\n");
 }
 
-function extractJsonObject(text) {
-  const raw = String(text || "").trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-  try { return JSON.parse(raw); } catch {}
-  const start = raw.indexOf("{");
-  const end = raw.lastIndexOf("}");
-  if (start >= 0 && end > start) {
-    try { return JSON.parse(raw.slice(start, end + 1)); } catch {}
-  }
-  return null;
-}
 
 function normalizeReportArray(value, limit) {
   const arr = Array.isArray(value) ? value : (value ? [value] : []);
