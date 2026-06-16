@@ -2757,7 +2757,7 @@ function getAudioDurationMs(blob) {
   return new Promise((resolve) => {
     try {
       const url = URL.createObjectURL(blob);
-      const audio = document.createElement("audio");
+      const audio = activeDocument.createElement("audio");
       audio.preload = "metadata";
       const cleanup = () => { try { URL.revokeObjectURL(url); } catch { /* intentionally empty */ } };
       audio.addEventListener("loadedmetadata", () => {
@@ -6131,7 +6131,7 @@ class OutlineView extends obsidian.ItemView {
   // 通过 rAF 合并连续 emit；如签名（结构性状态）未变只做轻量更新，否则全量 render
   scheduleUpdate() {
     if (this._renderRaf) return;
-    this._renderRaf = requestAnimationFrame(() => {
+    this._renderRaf = window.requestAnimationFrame(() => {
       this._renderRaf = 0;
       const sig = this.computeSignature();
       if (sig === this._lastSig) {
@@ -7090,7 +7090,7 @@ class OutlineView extends obsidian.ItemView {
     // 全选已有文本，方便直接覆盖
     const sel = window.getSelection();
     if (sel) {
-      const range = document.createRange();
+      const range = activeDocument.createRange();
       range.selectNodeContents(titleEl);
       sel.removeAllRanges();
       sel.addRange(range);
@@ -7131,7 +7131,7 @@ class OutlineView extends obsidian.ItemView {
     if (this.inlineTodoEditor && this.inlineTodoEditor._anchor === fieldEl) return;
     this.closeInlineTodoEditor();
     const todoId = getSedimentTodoId(raw);
-    const input = document.createElement("input");
+    const input = activeDocument.createElement("input");
     input.type = "text";
     input.className = "lexvoice-todo-inline-input is-owner";
     input.placeholder = "搜索或输入新名字";
@@ -7218,11 +7218,11 @@ class OutlineView extends obsidian.ItemView {
     const cleanup = () => {
       input.removeEventListener("input", onInput);
       input.removeEventListener("keydown", onKey);
-      document.removeEventListener("mousedown", onOutside, true);
+      activeDocument.removeEventListener("mousedown", onOutside, true);
     };
     input.addEventListener("input", onInput);
     input.addEventListener("keydown", onKey);
-    window.setTimeout(() => document.addEventListener("mousedown", onOutside, true), 0);
+    window.setTimeout(() => activeDocument.addEventListener("mousedown", onOutside, true), 0);
     input.focus();
     input.select();
     this.inlineTodoEditor = { _anchor: fieldEl, close: () => finish(input.value.trim() || (raw.owner || ""), null) };
@@ -7293,12 +7293,12 @@ class OutlineView extends obsidian.ItemView {
     };
     const onOutside = (e) => { if (!panel.contains(e.target) && e.target !== fieldEl) finish(raw.due || "", null); };
     const cleanup = () => {
-      document.removeEventListener("keydown", onKey, true);
-      document.removeEventListener("mousedown", onOutside, true);
+      activeDocument.removeEventListener("keydown", onKey, true);
+      activeDocument.removeEventListener("mousedown", onOutside, true);
     };
     window.setTimeout(() => {
-      document.addEventListener("keydown", onKey, true);
-      document.addEventListener("mousedown", onOutside, true);
+      activeDocument.addEventListener("keydown", onKey, true);
+      activeDocument.addEventListener("mousedown", onOutside, true);
     }, 0);
     this.inlineTodoEditor = { _anchor: fieldEl, close: () => finish(raw.due || "", null) };
   }
@@ -7402,10 +7402,10 @@ class OutlineView extends obsidian.ItemView {
     const onOutside = (e) => { if (!addPanel.contains(e.target) && e.target !== fieldEl) finish(); };
     const cleanup = () => {
       input.removeEventListener("keydown", onKey);
-      document.removeEventListener("mousedown", onOutside, true);
+      activeDocument.removeEventListener("mousedown", onOutside, true);
     };
     input.addEventListener("keydown", onKey);
-    window.setTimeout(() => document.addEventListener("mousedown", onOutside, true), 0);
+    window.setTimeout(() => activeDocument.addEventListener("mousedown", onOutside, true), 0);
     input.focus();
     this.inlineTodoEditor = { _anchor: fieldEl, close: finish };
   }
@@ -7501,10 +7501,10 @@ class OutlineView extends obsidian.ItemView {
     const onOutside = (e) => { if (!panel.contains(e.target) && e.target !== fieldEl) finish(null); };
     const cleanup = () => {
       addInput.removeEventListener("keydown", onAddKey);
-      document.removeEventListener("mousedown", onOutside, true);
+      activeDocument.removeEventListener("mousedown", onOutside, true);
     };
     addInput.addEventListener("keydown", onAddKey);
-    window.setTimeout(() => document.addEventListener("mousedown", onOutside, true), 0);
+    window.setTimeout(() => activeDocument.addEventListener("mousedown", onOutside, true), 0);
     addInput.focus();
     this.inlineTodoEditor = { _anchor: fieldEl, close: () => finish(null) };
   }
@@ -7546,7 +7546,7 @@ class OutlineView extends obsidian.ItemView {
     titleEl.focus();
     const sel = window.getSelection();
     if (sel) {
-      const range = document.createRange();
+      const range = activeDocument.createRange();
       range.selectNodeContents(titleEl);
       sel.removeAllRanges();
       sel.addRange(range);
@@ -7770,7 +7770,7 @@ class OutlineView extends obsidian.ItemView {
       try { this._activeTodoFieldPopover.remove(); } catch { /* intentionally empty */ }
       this._activeTodoFieldPopover = null;
     }
-    const pop = document.body.createDiv({ cls: `lexvoice-todo-popover is-${field}` });
+    const pop = activeDocument.body.createDiv({ cls: `lexvoice-todo-popover is-${field}` });
     this._activeTodoFieldPopover = pop;
 
     // 定位：贴近 anchor，向下展开，必要时翻转
@@ -7800,16 +7800,16 @@ class OutlineView extends obsidian.ItemView {
     const close = () => {
       try { pop.remove(); } catch { /* intentionally empty */ }
       if (this._activeTodoFieldPopover === pop) this._activeTodoFieldPopover = null;
-      document.removeEventListener("mousedown", onDocDown, true);
-      document.removeEventListener("keydown", onKeyDown, true);
+      activeDocument.removeEventListener("mousedown", onDocDown, true);
+      activeDocument.removeEventListener("keydown", onKeyDown, true);
     };
     const onDocDown = (e) => {
       if (!pop.contains(e.target) && e.target !== anchorEl && !anchorEl.contains(e.target)) close();
     };
     const onKeyDown = (e) => { if (e.key === "Escape") close(); };
     window.setTimeout(() => {
-      document.addEventListener("mousedown", onDocDown, true);
-      document.addEventListener("keydown", onKeyDown, true);
+      activeDocument.addEventListener("mousedown", onDocDown, true);
+      activeDocument.addEventListener("keydown", onKeyDown, true);
     }, 0);
     pop._lexvoiceClose = close;
   }
@@ -8879,13 +8879,13 @@ class OutlineView extends obsidian.ItemView {
     if (!li || !node) return null;
     const firstParagraph = Array.from(li.children || []).find((child) => child && child.tagName === "P");
     if (firstParagraph) {
-      firstParagraph.appendChild(document.createTextNode(" "));
+      firstParagraph.appendChild(activeDocument.createTextNode(" "));
       firstParagraph.appendChild(node);
       return node;
     }
     const firstNestedList = Array.from(li.children || [])
       .find((child) => child && /^(UL|OL)$/i.test(child.tagName || ""));
-    const spacer = document.createTextNode(" ");
+    const spacer = activeDocument.createTextNode(" ");
     if (firstNestedList) {
       li.insertBefore(spacer, firstNestedList);
       li.insertBefore(node, firstNestedList);
@@ -8898,12 +8898,12 @@ class OutlineView extends obsidian.ItemView {
 
   addOutlineMiniWave(parent, cls = "", titleLi = null) {
     if (!parent && !titleLi) return null;
-    const wave = document.createElement("span");
+    const wave = activeDocument.createElement("span");
     wave.className = `lexvoice-outline-mini-wave ${cls}`.trim();
     if (titleLi) this.appendOutlineTitleAdornment(titleLi, wave);
     else parent.appendChild(wave);
     for (let i = 0; i < 4; i++) {
-      const bar = document.createElement("span");
+      const bar = activeDocument.createElement("span");
       bar.className = "lexvoice-outline-mini-wave-bar";
       bar.style.animationDelay = `${i * 0.15}s`;
       wave.appendChild(bar);
@@ -8942,7 +8942,7 @@ class OutlineView extends obsidian.ItemView {
     if ((isRecording || isPaused) && current) {
       current.addClass("is-generating");
       if (!current.querySelector(".lexvoice-outline-live-badge")) {
-        const badge = document.createElement("span");
+        const badge = activeDocument.createElement("span");
         badge.className = "lexvoice-outline-live-badge";
         badge.textContent = isPaused ? "已暂停" : "正在生成";
         this.appendOutlineTitleAdornment(current, badge);
@@ -8951,7 +8951,7 @@ class OutlineView extends obsidian.ItemView {
     if (viewingItem) {
       viewingItem.addClass("is-viewing");
       if (!viewingItem.querySelector(".lexvoice-outline-viewing-icon")) {
-        const icon = document.createElement("span");
+        const icon = activeDocument.createElement("span");
         icon.className = "lexvoice-outline-viewing-icon";
         try { obsidian.setIcon(icon, "eye"); } catch { icon.textContent = "查看"; }
         this.appendOutlineTitleAdornment(viewingItem, icon);
@@ -8982,7 +8982,7 @@ class OutlineView extends obsidian.ItemView {
     if (key === this.lastLiveOutlineFocusKey) return;
     this.lastLiveOutlineFocusKey = key;
     if (this._outlineFollowRaf) cancelAnimationFrame(this._outlineFollowRaf);
-    this._outlineFollowRaf = requestAnimationFrame(() => {
+    this._outlineFollowRaf = window.requestAnimationFrame(() => {
       this._outlineFollowRaf = 0;
       try {
         if (!current || !current.isConnected) return;
@@ -10126,7 +10126,7 @@ class OutlineView extends obsidian.ItemView {
       "电脑音频": { cls: "is-computer", icon: "monitor-speaker", title: "电脑音频输入" },
     };
     const findFirstTextNode = (node) => {
-      const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+      const walker = activeDocument.createTreeWalker(node, NodeFilter.SHOW_TEXT);
       let current;
       while ((current = walker.nextNode())) {
         if ((current.nodeValue || "").trim()) return current;
@@ -10145,7 +10145,7 @@ class OutlineView extends obsidian.ItemView {
       if (!def) continue;
       textNode.nodeValue = raw.slice(match[0].length);
       if (match[2] === "麦克风") continue;
-      const chip = document.createElement("span");
+      const chip = activeDocument.createElement("span");
       chip.className = `lexvoice-outline-source-chip ${def.cls}`;
       chip.setAttribute("title", def.title);
       chip.setAttribute("aria-label", def.title);
@@ -13782,7 +13782,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     let contentHtml = "";
     const renderComponent = new obsidian.Component();
     try {
-      const el = document.createElement("article");
+      const el = activeDocument.createElement("article");
       if (obsidian.MarkdownRenderer && typeof obsidian.MarkdownRenderer.render === "function") {
         await obsidian.MarkdownRenderer.render(this.app, markdown, el, file.path, renderComponent);
       } else if (obsidian.MarkdownRenderer && typeof obsidian.MarkdownRenderer.renderMarkdown === "function") {

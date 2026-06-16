@@ -1967,7 +1967,7 @@ export class BubbleWidget {
   }
   scheduleUpdate() {
     if (this._renderRaf) return;
-    this._renderRaf = requestAnimationFrame(() => {
+    this._renderRaf = window.requestAnimationFrame(() => {
       this._renderRaf = 0;
       const info = this.plugin.recorder.getInfo();
       const queue = this.plugin.queue;
