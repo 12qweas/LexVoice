@@ -9,15 +9,15 @@ export function cloneJson(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-export function pickDefined() {
-  for (const value of arguments) {
+export function pickDefined(...args) {
+  for (const value of args) {
     if (value !== undefined) return value;
   }
   return undefined;
 }
 
-export function pickNonBlankString() {
-  for (const value of arguments) {
+export function pickNonBlankString(...args) {
+  for (const value of args) {
     if (value === undefined || value === null) continue;
     const text = String(value).trim();
     if (text) return value;
