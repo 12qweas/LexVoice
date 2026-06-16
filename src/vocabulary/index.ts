@@ -13,7 +13,7 @@ export function createVocabularyGroups() {
 export function detectVocabularySectionKey(text) {
   const title = String(text || "")
     .replace(/^#+\s*/, "")
-    .replace(/^[\d一二三四五六七八九十]+[\.、\s]*/, "")
+    .replace(/^[\d一二三四五六七八九十]+[.、\s]*/, "")
     .trim();
   if (!title) return "";
   if (/编辑规则|说明|使用方式|元信息|metadata/i.test(title)) return "__ignore";
@@ -41,7 +41,7 @@ export function normalizeVocabularyCorrectionTerm(line) {
   if (!text) return "";
   if (text.startsWith("<!--") || text.startsWith("//") || text.startsWith(">")) return "";
   if (text === "---" || /^\|?\s*-{3,}/.test(text)) return "";
-  text = text.replace(/^- \[[ x]\]\s+/i, "").replace(/^[-*+]\s+/, "").replace(/^\d+[\.)、]\s+/, "").trim();
+  text = text.replace(/^- \[[ x]\]\s+/i, "").replace(/^[-*+]\s+/, "").replace(/^\d+[.)、]\s+/, "").trim();
   text = text.replace(/^\*\*(.*?)\*\*$/, "$1").replace(/^__(.*?)__$/, "$1");
   const pair = text.match(/^(.+?)\s*(?:=>|->|→|=|：|:)\s*(.+)$/);
   if (!pair) return "";
@@ -57,7 +57,7 @@ export function normalizeVocabularyTerm(line) {
   if (!text) return "";
   if (text.startsWith("<!--") || text.startsWith("//") || text.startsWith(">")) return "";
   if (text === "---" || /^\|?\s*-{3,}/.test(text)) return "";
-  text = text.replace(/^[-*+]\s+/, "").replace(/^\d+[\.)、]\s+/, "").replace(/^- \[[ x]\]\s+/i, "");
+  text = text.replace(/^[-*+]\s+/, "").replace(/^\d+[.)、]\s+/, "").replace(/^- \[[ x]\]\s+/i, "");
   text = text.replace(/^\*\*(.*?)\*\*$/, "$1").replace(/^__(.*?)__$/, "$1");
   text = text.replace(/^[`"'「『]+/, "").replace(/[`"'」』]+$/, "").trim();
   const noteMatch = text.match(/^([^:：|｜]+)\s*[:：|｜]\s*.+$/);

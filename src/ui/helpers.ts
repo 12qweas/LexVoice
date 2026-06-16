@@ -16,8 +16,8 @@ export const SUPPORTED_AUDIO_INPUT_MODES = new Set(["mic", "mix-virtual", "virtu
 
 export function parseGithubRepoUrl(url) {
   const text = String(url || "").trim();
-  const match = text.match(/^https?:\/\/github\.com\/([^\/\s]+)\/([^\/\s#?]+)(?:[\/#?].*)?$/i)
-    || text.match(/^git@github\.com:([^\/\s]+)\/([^\/\s#?]+?)(?:\.git)?$/i);
+  const match = text.match(/^https?:\/\/github\.com\/([^/\s]+)\/([^/\s#?]+)(?:[/#?].*)?$/i)
+    || text.match(/^git@github\.com:([^/\s]+)\/([^/\s#?]+?)(?:\.git)?$/i);
   if (!match) return null;
   return { owner: match[1], repo: match[2].replace(/\.git$/i, "") };
 }

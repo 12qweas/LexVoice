@@ -114,7 +114,7 @@ export function realtimeOutlineDedupKey(text) {
   return cleaned
     .toLowerCase()
     .replace(/\s+/g, "")
-    .replace(/[，。、；：！？,.;:!?（）()「」【】《》""''·…—\-]/gu, "");
+    .replace(/[，。、；：！？,.;:!?（）()「」【】《》""''·…—-]/gu, "");
 }
 
 export function makeRealtimeOutlineNode(anchor, title, children, index) {

@@ -2280,7 +2280,7 @@ function transformApiKeyFieldsDeep(obj, fn, depth) {
 function isSyncConflictName(name) {
   if (!name) return false;
   // 全角/半角括号 + 冲突/conflict/conflicted copy 字样
-  return /[\(（][^\)）]*?(冲突|conflict|conflicted\s*copy)[^\(（]*[\)）]/i.test(name);
+  return /[(（][^)）]*?(冲突|conflict|conflicted\s*copy)[^(（]*[)）]/i.test(name);
 }
 
 
@@ -10139,7 +10139,7 @@ class OutlineView extends obsidian.ItemView {
       const textNode = findFirstTextNode(li);
       if (!textNode) continue;
       const raw = textNode.nodeValue || "";
-      const match = raw.match(/^(\s*)[\[【](麦克风|电脑音频)[\]】]\s*/);
+      const match = raw.match(/^(\s*)[[【](麦克风|电脑音频)[\]】]\s*/);
       if (!match) continue;
       const def = sourceDefs[match[2]];
       if (!def) continue;
@@ -14657,15 +14657,15 @@ ${customPromptBrief}
 - <词>`;
     const result = await callLlm(this, sys, user);
     const cleaned = result
-      .replace(/^\`\`\`\w*\s*/, "")
-      .replace(/\s*\`\`\`\s*$/, "")
+      .replace(/^```\w*\s*/, "")
+      .replace(/\s*```\s*$/, "")
       .replace(/^好的[，,].*?\n/, "")
       .trim();
     let newGroups = parseVocabularyGroups(cleaned);
     let newTerms = flattenVocabularyGroups(newGroups);
     if (!newTerms.length) {
       newGroups = normalizeVocabularyInput(cleaned.split(/\r?\n/)
-        .map((s) => s.replace(/^[\d\-*\.、]+\s*/, "").replace(/^[\"「『]|[\"」』]$/g, "").trim())
+        .map((s) => s.replace(/^[\d\-*.、]+\s*/, "").replace(/^["「『]|["」』]$/g, "").trim())
         .filter(Boolean));
       newTerms = flattenVocabularyGroups(newGroups);
     }
@@ -14722,15 +14722,15 @@ ${customPromptBrief}
 ${source}`;
     const result = await callLlm(this, sys, user, { timeoutMs: 60000 });
     const cleaned = result
-      .replace(/^\`\`\`\w*\s*/, "")
-      .replace(/\s*\`\`\`\s*$/, "")
+      .replace(/^```\w*\s*/, "")
+      .replace(/\s*```\s*$/, "")
       .replace(/^好的[，,].*?\n/, "")
       .trim();
     let newGroups = parseVocabularyGroups(cleaned);
     let newTerms = flattenVocabularyGroups(newGroups);
     if (!newTerms.length) {
       newGroups = normalizeVocabularyInput(cleaned.split(/\r?\n/)
-        .map((s) => s.replace(/^[\d\-*\.、]+\s*/, "").replace(/^[\"「『]|[\"」』]$/g, "").trim())
+        .map((s) => s.replace(/^[\d\-*.、]+\s*/, "").replace(/^["「『]|["」』]$/g, "").trim())
         .filter(Boolean));
       newTerms = flattenVocabularyGroups(newGroups);
     }

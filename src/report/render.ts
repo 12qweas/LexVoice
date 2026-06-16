@@ -165,7 +165,7 @@ export function extractMarkdownForHtmlReport(markdown) {
 export function sanitizeReportFileStem(name) {
   const stem = String(name || "LexVoice-HTML报告")
     .replace(/\.md$/i, "")
-    .replace(/[\\/:*?"<>|#\^\[\]]+/g, " ")
+    .replace(/[\\/:*?"<>|#^[\]]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   return stem || "LexVoice-HTML报告";

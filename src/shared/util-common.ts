@@ -43,7 +43,7 @@ export function sanitizeFilename(s) {
   if (!s) return "";
   return String(s)
     .replace(/["“”‘’`]/g, "")
-    .replace(/[\\/:*?"<>|#^\[\]]/g, "")
+    .replace(/[\\/:*?"<>|#^[\]]/g, "")
     .replace(/[｜：？＊＜＞＂＃＾「」『』【】、，。；！]/g, "")
     .replace(/\s+/g, " ")
     .trim()
