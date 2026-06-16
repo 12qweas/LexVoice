@@ -89,7 +89,7 @@ export async function readLlmError(res) {
     const json = JSON.parse(text);
     const detail = json && (json.error && json.error.message || json.message || json.detail);
     if (detail) return String(detail).slice(0, 500);
-  } catch {}
+  } catch { /* intentionally empty */ }
   return text.slice(0, 500);
 }
 
@@ -157,7 +157,7 @@ export async function requestLlmChatCompletionViaObsidian(endpoint, headers, pay
     try {
       const json = JSON.parse(text);
       detail = json && (json.error && json.error.message || json.message || json.detail) || text;
-    } catch {}
+    } catch { /* intentionally empty */ }
     throw createLlmHttpError(status, detail, endpoint, response && response.headers);
   }
   return parseRequestUrlJson(response);
@@ -229,7 +229,7 @@ export async function readLlmSseStream(res, onActivity) {
     throw e;
   } finally {
     // 释放 reader：abort / 提前 return / 异常时若不释放，底层流锁与句柄会泄漏（依赖 GC 不确定回收）。
-    try { reader.cancel().catch(() => {}); } catch {}
+    try { reader.cancel().catch(() => { /* intentionally empty */ }); } catch { /* intentionally empty */ }
   }
   return finalizeLlmSseContent(state, raw);
 }
@@ -243,7 +243,7 @@ export function finalizeLlmSseContent(state, raw) {
       const c = obj && obj.choices && obj.choices[0];
       const msg = c && ((c.message && c.message.content) || (c.delta && c.delta.content));
       if (msg) return { content: msg, finishReason: (c && c.finish_reason) ? String(c.finish_reason) : "" };
-    } catch {}
+    } catch { /* intentionally empty */ }
   }
   return { content: state.content, finishReason: state.finishReason || "" };
 }
@@ -519,7 +519,7 @@ export async function callBriefingMergeLlm(plugin, system, user, options, diagCt
       await logLlmRequestDiagnostic(plugin, "warn", "llm.merge_truncated", "最终纪要疑似被输出长度上限截断", Object.assign({
         finishReason, outputChars: text.length,
       }, diagCtx || {}));
-    } catch {}
+    } catch { /* intentionally empty */ }
   }
   return { text, truncated, finishReason };
 }

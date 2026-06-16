@@ -2759,7 +2759,7 @@ function getAudioDurationMs(blob) {
       const url = URL.createObjectURL(blob);
       const audio = document.createElement("audio");
       audio.preload = "metadata";
-      const cleanup = () => { try { URL.revokeObjectURL(url); } catch {} };
+      const cleanup = () => { try { URL.revokeObjectURL(url); } catch { /* intentionally empty */ } };
       audio.addEventListener("loadedmetadata", () => {
         const d = audio.duration;
         cleanup();
@@ -3070,7 +3070,7 @@ class RecorderService {
     this.attachStreamInterruptionHandlers(this.stream);
     // 选 APIMiMo 时录 Opus：它只收 wav/mp3，段落要本机解码转 WAV，而 Electron 解不了 AAC（解得了 Opus）。
     let preferOpus = false;
-    try { preferOpus = isApimimoAsrProvider(resolveTranscribeProvider(this.plugin)); } catch {}
+    try { preferOpus = isApimimoAsrProvider(resolveTranscribeProvider(this.plugin)); } catch { /* intentionally empty */ }
     this.mime = pickMimeType(preferOpus);
     this.segmentIndex = 0;
     this.segmentStartOffsetMs = 0;
@@ -3099,7 +3099,7 @@ class RecorderService {
   }
   attachStreamInterruptionHandlers(stream) {
     if (this.streamInterruptionCleanup) {
-      try { this.streamInterruptionCleanup(); } catch {}
+      try { this.streamInterruptionCleanup(); } catch { /* intentionally empty */ }
       this.streamInterruptionCleanup = null;
     }
     const tracks = stream && typeof stream.getTracks === "function" ? stream.getTracks() : [];
@@ -3113,10 +3113,10 @@ class RecorderService {
       }, 600);
     };
     for (const track of tracks) {
-      try { track.addEventListener("ended", onEnded); cleanups.push(() => track.removeEventListener("ended", onEnded)); } catch {}
-      try { track.addEventListener("mute", onMute); cleanups.push(() => track.removeEventListener("mute", onMute)); } catch {}
+      try { track.addEventListener("ended", onEnded); cleanups.push(() => track.removeEventListener("ended", onEnded)); } catch { /* intentionally empty */ }
+      try { track.addEventListener("mute", onMute); cleanups.push(() => track.removeEventListener("mute", onMute)); } catch { /* intentionally empty */ }
     }
-    this.streamInterruptionCleanup = () => cleanups.forEach((fn) => { try { fn(); } catch {} });
+    this.streamInterruptionCleanup = () => cleanups.forEach((fn) => { try { fn(); } catch { /* intentionally empty */ } });
   }
   handleStreamInterrupted(reason) {
     if (this.stopping || this.state === "idle" || (this.issue && this.issue.kind === "microphone")) return;
@@ -3132,7 +3132,7 @@ class RecorderService {
       if (this.plugin && typeof this.plugin.setRecordingIssue === "function") {
         this.plugin.setRecordingIssue("microphone", this.issue);
       }
-    } catch {}
+    } catch { /* intentionally empty */ }
     this.emit();
   }
   getStreamLabel(stream, fallback) {
@@ -3157,7 +3157,7 @@ class RecorderService {
       console.error(`[LexVoice][meter] ${kind} createMediaStreamSource 失败`, e, {
         tracks: stream.getAudioTracks().map(t => ({ label: t.label, enabled: t.enabled, muted: t.muted, readyState: t.readyState })),
       });
-      try { ctx.close(); } catch {}
+      try { ctx.close(); } catch { /* intentionally empty */ }
       return null;
     }
     const analyser = ctx.createAnalyser();
@@ -3220,9 +3220,9 @@ class RecorderService {
   }
   stopLevelMeter() {
     for (const meter of this.levelMeters || []) {
-      try { if (meter.source) meter.source.disconnect(); } catch {}
-      try { if (meter.analyser) meter.analyser.disconnect(); } catch {}
-      try { if (meter.context) meter.context.close(); } catch {}
+      try { if (meter.source) meter.source.disconnect(); } catch { /* intentionally empty */ }
+      try { if (meter.analyser) meter.analyser.disconnect(); } catch { /* intentionally empty */ }
+      try { if (meter.context) meter.context.close(); } catch { /* intentionally empty */ }
     }
     this.levelMeters = [];
     this.audioLevel = 0;
@@ -3242,7 +3242,7 @@ class RecorderService {
           if (meter._resumeAttempts <= 30 || meter._resumeAttempts % 60 === 0) {
             meter.context.resume().then(
               () => console.log(`[LexVoice][meter] ${meter.kind} 重新 resume 成功（尝试 ${meter._resumeAttempts}）`),
-              () => {}
+              () => { /* intentionally empty */ }
             );
           }
         }
@@ -3413,8 +3413,8 @@ class RecorderService {
         return dest.stream;
       } catch (e) {
         // 混流上下文构造失败：把已打开的 mic/virt 流全部停掉，避免 track 泄漏后再抛错。
-        try { if (this.audioContext) { this.audioContext.close(); this.audioContext = null; } } catch {}
-        for (const s of sources) { try { s.getTracks().forEach((t) => t.stop()); } catch {} }
+        try { if (this.audioContext) { this.audioContext.close(); this.audioContext = null; } } catch { /* intentionally empty */ }
+        for (const s of sources) { try { s.getTracks().forEach((t) => t.stop()); } catch { /* intentionally empty */ } }
         this.micStreamRef = null; this.virtStreamRef = null;
         throw e;
       }
@@ -3422,7 +3422,7 @@ class RecorderService {
     return sources[0] || null;
   }
   releaseStream() {
-    try { if (this.audioContext) { this.audioContext.close(); } } catch {}
+    try { if (this.audioContext) { this.audioContext.close(); } } catch { /* intentionally empty */ }
     this.audioContext = null;
     if (this.micStreamRef) this.micStreamRef.getTracks().forEach((t) => t.stop());
     if (this.sysStreamRef) this.sysStreamRef.getTracks().forEach((t) => t.stop());
@@ -3487,16 +3487,16 @@ class RecorderService {
   }
   pause() {
     if (this.state !== "recording") return;
-    try { this.recorder.pause(); } catch {}
-    try { if (this.masterRecorder && this.masterRecorder.state === "recording") this.masterRecorder.pause(); } catch {}
+    try { this.recorder.pause(); } catch { /* intentionally empty */ }
+    try { if (this.masterRecorder && this.masterRecorder.state === "recording") this.masterRecorder.pause(); } catch { /* intentionally empty */ }
     this.pausedAt = Date.now();
     this.state = "paused";
     this.emit();
   }
   resume() {
     if (this.state !== "paused") return;
-    try { this.recorder.resume(); } catch {}
-    try { if (this.masterRecorder && this.masterRecorder.state === "paused") this.masterRecorder.resume(); } catch {}
+    try { this.recorder.resume(); } catch { /* intentionally empty */ }
+    try { if (this.masterRecorder && this.masterRecorder.state === "paused") this.masterRecorder.resume(); } catch { /* intentionally empty */ }
     this.pausedFor += Date.now() - this.pausedAt;
     this.state = "recording";
     this.emit();
@@ -3515,7 +3515,7 @@ class RecorderService {
 
     this.stopLevelMeter();
     if (this.streamInterruptionCleanup) {
-      try { this.streamInterruptionCleanup(); } catch {}
+      try { this.streamInterruptionCleanup(); } catch { /* intentionally empty */ }
       this.streamInterruptionCleanup = null;
     }
     if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
@@ -3862,7 +3862,7 @@ function extractMeetingAttendeeNames(frontmatter) {
 function getEmailBuffer() {
   try {
     if (typeof Buffer !== "undefined") return Buffer;
-  } catch {}
+  } catch { /* intentionally empty */ }
   try {
     return require("buffer").Buffer;
   } catch {
@@ -5945,7 +5945,7 @@ class TaskQueue {
         status: task.status || existing.status || "pending",
       });
       await this.plugin.saveAll();
-      try { this.plugin.refreshOutlineView(); } catch {}
+      try { this.plugin.refreshOutlineView(); } catch { /* intentionally empty */ }
       return existing;
     }
     task.id = task.id || genId();
@@ -5955,20 +5955,20 @@ class TaskQueue {
     task.status = task.status || "pending";
     this.tasks.push(task);
     await this.plugin.saveAll();
-    try { this.plugin.refreshOutlineView(); } catch {}
+    try { this.plugin.refreshOutlineView(); } catch { /* intentionally empty */ }
     return task;
   }
   async remove(id) {
     this.tasks = this.tasks.filter(t => t.id !== id);
     await this.plugin.saveAll();
-    try { this.plugin.refreshOutlineView(); } catch {}
+    try { this.plugin.refreshOutlineView(); } catch { /* intentionally empty */ }
   }
   async update(id, patch) {
     const t = this.tasks.find(x => x.id === id);
     if (!t) return;
     Object.assign(t, patch, { updatedAt: new Date().toISOString() });
     await this.plugin.saveAll();
-    try { this.plugin.refreshOutlineView(); } catch {}
+    try { this.plugin.refreshOutlineView(); } catch { /* intentionally empty */ }
   }
   async processAll() {
     if (this.running) return;
@@ -5978,17 +5978,17 @@ class TaskQueue {
       // 批量进度游标：喂状态栏指示器，让"重试全部 / 多任务"跑到哪一目了然。
       this._batchTotal = pending.length;
       this._batchDone = 0;
-      try { this.plugin.updateBusyStatus(); } catch {}
+      try { this.plugin.updateBusyStatus(); } catch { /* intentionally empty */ }
       for (const t of pending) {
         await this.processOne(t).catch((e) => console.error("[LexVoice] queue task failed", e));
         this._batchDone++;
-        try { this.plugin.updateBusyStatus(); } catch {}
+        try { this.plugin.updateBusyStatus(); } catch { /* intentionally empty */ }
       }
     } finally {
       this.running = false;
       this._batchTotal = 0;
       this._batchDone = 0;
-      try { this.plugin.updateBusyStatus(); } catch {}
+      try { this.plugin.updateBusyStatus(); } catch { /* intentionally empty */ }
     }
   }
   async processOne(task) {
@@ -6011,7 +6011,7 @@ class TaskQueue {
           : task.type === "merge" ? "AI 整理完成"
           : task.type === "generate-prompt" ? "提示词生成完成" : "任务完成";
         this.plugin.logCompletedWork(doneLabel, task.mdPath || "");
-      } catch {}
+      } catch { /* intentionally empty */ }
     } catch (e) {
       const message = (e && e.message) || String(e);
       const isMissingAudio = task.type === "transcribe" && /音频不存在|临时切片不存在/.test(message);
@@ -6354,7 +6354,7 @@ class OutlineView extends obsidian.ItemView {
     const sec = root.createDiv({ cls: "lexvoice-outline-section lexvoice-outline-panel-empty lexvoice-empty-state-section" });
     const box = sec.createDiv({ cls: "lexvoice-empty-state" });
     const iconWrap = box.createDiv({ cls: "lexvoice-empty-state-icon" });
-    try { obsidian.setIcon(iconWrap, "file-text"); } catch {}
+    try { obsidian.setIcon(iconWrap, "file-text"); } catch { /* intentionally empty */ }
     box.createDiv({ cls: "lexvoice-empty-state-title", text: "还没有打开纪要" });
     const desc = box.createDiv({ cls: "lexvoice-empty-state-desc" });
     desc.createSpan({ text: "从纪要列表选一篇打开，" });
@@ -6364,7 +6364,7 @@ class OutlineView extends obsidian.ItemView {
       cls: "lexvoice-empty-state-action",
       attr: { type: "button" },
     });
-    try { obsidian.setIcon(btn.createSpan({ cls: "lexvoice-empty-state-action-icon" }), "list"); } catch {}
+    try { obsidian.setIcon(btn.createSpan({ cls: "lexvoice-empty-state-action-icon" }), "list"); } catch { /* intentionally empty */ }
     btn.createSpan({ text: "打开纪要列表" });
     btn.onclick = () => {
       this.showRecentHome = true;
@@ -6822,7 +6822,7 @@ class OutlineView extends obsidian.ItemView {
   renderSedimentRescanRow(parent, file) {
     const row = parent.createDiv({ cls: "lexvoice-sediment-rescan-row" });
     const btn = row.createEl("button", { cls: "lexvoice-sediment-rescan-button", attr: { type: "button" } });
-    try { obsidian.setIcon(btn.createSpan({ cls: "lexvoice-sediment-rescan-icon" }), "refresh-cw"); } catch {}
+    try { obsidian.setIcon(btn.createSpan({ cls: "lexvoice-sediment-rescan-icon" }), "refresh-cw"); } catch { /* intentionally empty */ }
     btn.createSpan({ text: "重扫" });
     btn.onclick = () => this.confirmSedimentRescan(file);
   }
@@ -6849,7 +6849,7 @@ class OutlineView extends obsidian.ItemView {
     const box = parent.createDiv({ cls: "lexvoice-sediment-prompt is-scanning" });
     const icon = box.createDiv({ cls: "lexvoice-sediment-prompt-icon" });
     // 不再用旋转 spinner（下方进度条已经表达"进行中"语义），换成静态扫描图标
-    try { obsidian.setIcon(icon, "scan-line"); } catch {}
+    try { obsidian.setIcon(icon, "scan-line"); } catch { /* intentionally empty */ }
     box.createDiv({ cls: "lexvoice-sediment-prompt-subtitle", text: this.formatSedimentNoteLabel(file) });
     box.createDiv({ cls: "lexvoice-sediment-prompt-title", text: "正在扫描本篇纪要" });
     const progress = box.createDiv({ cls: "lexvoice-sediment-scan-progress" });
@@ -6883,8 +6883,8 @@ class OutlineView extends obsidian.ItemView {
     this.renderSedimentEmptyList(parent);
     this.renderSedimentFooter(parent, state.groups.find(item => item.key === "person"), 0, {
       secondaryText: "全部忽略",
-      onSecondary: () => {},
-      onPrimary: () => {},
+      onSecondary: () => { /* intentionally empty */ },
+      onPrimary: () => { /* intentionally empty */ },
     });
   }
 
@@ -6942,7 +6942,7 @@ class OutlineView extends obsidian.ItemView {
       this.render();
     };
     const rescan = actions.createEl("button", { cls: "lexvoice-sediment-text-button lexvoice-sediment-rescan-inline", attr: { type: "button" } });
-    try { obsidian.setIcon(rescan.createSpan({ cls: "lexvoice-sediment-rescan-icon" }), "refresh-cw"); } catch {}
+    try { obsidian.setIcon(rescan.createSpan({ cls: "lexvoice-sediment-rescan-icon" }), "refresh-cw"); } catch { /* intentionally empty */ }
     rescan.createSpan({ text: "重扫" });
     rescan.onclick = () => this.confirmSedimentRescan(file);
   }
@@ -6989,7 +6989,7 @@ class OutlineView extends obsidian.ItemView {
       const holder = sanitizeSedimentText(raw.holder, 40);
       if (holder) {
         const holderEl = content.createDiv({ cls: "lexvoice-sediment-card-holder" });
-        try { obsidian.setIcon(holderEl.createSpan({ cls: "lexvoice-sediment-card-holder-icon" }), "quote"); } catch {}
+        try { obsidian.setIcon(holderEl.createSpan({ cls: "lexvoice-sediment-card-holder-icon" }), "quote"); } catch { /* intentionally empty */ }
         holderEl.createSpan({ text: holder });
       }
       const summary = raw.summary || raw.reusableLine || item.meta || "";
@@ -7050,7 +7050,7 @@ class OutlineView extends obsidian.ItemView {
 
   renderSedimentTypePill(parent, label, iconName) {
     const pill = parent.createSpan({ cls: "lexvoice-sediment-type-pill" });
-    try { obsidian.setIcon(pill.createSpan({ cls: "lexvoice-sediment-type-icon" }), iconName || "tag"); } catch {}
+    try { obsidian.setIcon(pill.createSpan({ cls: "lexvoice-sediment-type-icon" }), iconName || "tag"); } catch { /* intentionally empty */ }
     pill.createSpan({ text: label || "类型" });
     return pill;
   }
@@ -7059,7 +7059,7 @@ class OutlineView extends obsidian.ItemView {
     const field = parent.createSpan({ cls: `lexvoice-sediment-field ${cls}`.trim() });
     field.setAttr("role", "button");
     field.setAttr("tabindex", "0");
-    try { obsidian.setIcon(field.createSpan({ cls: "lexvoice-sediment-field-icon" }), iconName); } catch {}
+    try { obsidian.setIcon(field.createSpan({ cls: "lexvoice-sediment-field-icon" }), iconName); } catch { /* intentionally empty */ }
     field.createSpan({ text: text || "" });
     return field;
   }
@@ -7155,7 +7155,7 @@ class OutlineView extends obsidian.ItemView {
       });
       if (raw.owner) {
         const cur = list.createDiv({ cls: "lexvoice-todo-inline-item is-current" });
-        try { obsidian.setIcon(cur.createSpan({ cls: "lexvoice-todo-inline-item-icon" }), "user-check"); } catch {}
+        try { obsidian.setIcon(cur.createSpan({ cls: "lexvoice-todo-inline-item-icon" }), "user-check"); } catch { /* intentionally empty */ }
         cur.createSpan({ cls: "lexvoice-todo-inline-item-name", text: raw.owner });
         const clr = cur.createSpan({ cls: "lexvoice-todo-inline-item-clear", text: "清除" });
         clr.onclick = (e) => { e.stopPropagation(); finish("", null); };
@@ -7165,7 +7165,7 @@ class OutlineView extends obsidian.ItemView {
       }
       for (const p of filtered.slice(0, 8)) {
         const it = list.createDiv({ cls: "lexvoice-todo-inline-item" });
-        try { obsidian.setIcon(it.createSpan({ cls: "lexvoice-todo-inline-item-icon" }), "user"); } catch {}
+        try { obsidian.setIcon(it.createSpan({ cls: "lexvoice-todo-inline-item-icon" }), "user"); } catch { /* intentionally empty */ }
         it.createSpan({ cls: "lexvoice-todo-inline-item-name", text: p.name || "未命名" });
         if (p.role || p.org) it.createSpan({ cls: "lexvoice-todo-inline-item-meta", text: [p.role, p.org].filter(Boolean).join(" · ") });
         it.dataset.value = p.name || "";
@@ -7174,7 +7174,7 @@ class OutlineView extends obsidian.ItemView {
       }
       if (q && !filtered.some((p) => (p.name || "").toLowerCase() === q)) {
         const it = list.createDiv({ cls: "lexvoice-todo-inline-item is-new" });
-        try { obsidian.setIcon(it.createSpan({ cls: "lexvoice-todo-inline-item-icon" }), "user-plus"); } catch {}
+        try { obsidian.setIcon(it.createSpan({ cls: "lexvoice-todo-inline-item-icon" }), "user-plus"); } catch { /* intentionally empty */ }
         it.createSpan({ cls: "lexvoice-todo-inline-item-name", text: `+ 新建 "${query.trim()}"` });
         it.dataset.value = query.trim();
         it.onclick = () => finish(query.trim(), null);
@@ -7254,7 +7254,7 @@ class OutlineView extends obsidian.ItemView {
       btn.onclick = () => finish(p.value, null);
     }
     const customBtn = bar.createEl("button", { cls: "lexvoice-todo-inline-preset is-custom", attr: { type: "button", "data-key": "5" } });
-    try { obsidian.setIcon(customBtn.createSpan({ cls: "lexvoice-todo-inline-preset-icon" }), "calendar"); } catch {}
+    try { obsidian.setIcon(customBtn.createSpan({ cls: "lexvoice-todo-inline-preset-icon" }), "calendar"); } catch { /* intentionally empty */ }
     customBtn.createSpan({ text: "自定" });
     customBtn.onclick = () => showCustom();
     if (raw.due) {
@@ -7268,7 +7268,7 @@ class OutlineView extends obsidian.ItemView {
       dateInput.value = currentISO;
       dateInput.onchange = () => { if (dateInput.value) finish(dateInput.value, null); };
       dateInput.focus();
-      try { dateInput.click(); } catch {}
+      try { dateInput.click(); } catch { /* intentionally empty */ }
     };
     let done = false;
     const finish = async (newDue, nextField) => {
@@ -7359,13 +7359,13 @@ class OutlineView extends obsidian.ItemView {
     const MAX = 5;
     const existingSubs = normalizeSedimentTodoSubtasks(raw.subtasks || raw.children || []);
     if (existingSubs.length >= MAX) {
-      try { new obsidian.Notice("最多 5 个子任务"); } catch {}
+      try { new obsidian.Notice("最多 5 个子任务"); } catch { /* intentionally empty */ }
       return;
     }
     fieldEl.classList.add("is-editing");
     const addPanel = content.createDiv({ cls: "lexvoice-todo-inline-panel is-subtask-add" });
     const addRow = addPanel.createDiv({ cls: "lexvoice-todo-inline-subtask-add" });
-    try { obsidian.setIcon(addRow.createSpan({ cls: "lexvoice-todo-inline-subtask-add-icon" }), "plus"); } catch {}
+    try { obsidian.setIcon(addRow.createSpan({ cls: "lexvoice-todo-inline-subtask-add-icon" }), "plus"); } catch { /* intentionally empty */ }
     const input = addRow.createEl("input", {
       cls: "lexvoice-todo-inline-subtask-input",
       attr: { type: "text", placeholder: existingSubs.length ? `已 ${existingSubs.length}/${MAX}，继续添加` : "添加子任务，回车继续" },
@@ -7377,7 +7377,7 @@ class OutlineView extends obsidian.ItemView {
       cleanup();
       fieldEl.classList.remove("is-editing");
       this.inlineTodoEditor = null;
-      try { addPanel.remove(); } catch {}
+      try { addPanel.remove(); } catch { /* intentionally empty */ }
     };
     const onKey = async (e) => {
       if (e.key === "Enter") {
@@ -7385,7 +7385,7 @@ class OutlineView extends obsidian.ItemView {
         const val = input.value.trim();
         if (!val) return;
         const fresh = normalizeSedimentTodoSubtasks(raw.subtasks || raw.children || []).slice();
-        if (fresh.length >= MAX) { try { new obsidian.Notice("最多 5 个子任务"); } catch {}; return; }
+        if (fresh.length >= MAX) { try { new obsidian.Notice("最多 5 个子任务"); } catch { /* intentionally empty */ }; return; }
         fresh.push(val);
         // 即时保存：会触发 render；为了让用户能继续按 Enter 添加下一条，
         // 把 pending focus 设到 subtasks 字段，render 后会自动重开 add 输入框
@@ -7421,7 +7421,7 @@ class OutlineView extends obsidian.ItemView {
     const panel = content.createDiv({ cls: "lexvoice-todo-inline-panel is-subtasks" });
     const listEl = panel.createDiv({ cls: "lexvoice-todo-inline-subtask-list" });
     const addRow = panel.createDiv({ cls: "lexvoice-todo-inline-subtask-add" });
-    try { obsidian.setIcon(addRow.createSpan({ cls: "lexvoice-todo-inline-subtask-add-icon" }), "plus"); } catch {}
+    try { obsidian.setIcon(addRow.createSpan({ cls: "lexvoice-todo-inline-subtask-add-icon" }), "plus"); } catch { /* intentionally empty */ }
     const addInput = addRow.createEl("input", {
       cls: "lexvoice-todo-inline-subtask-input",
       attr: { type: "text", placeholder: "添加子任务，回车继续" },
@@ -7666,7 +7666,7 @@ class OutlineView extends obsidian.ItemView {
     for (const r of renames) next = next.split(r.from).join(r.to); // 纯字符串全局替换，含正文/YAML/沉淀块
     if (next !== content) {
       await this.app.vault.modify(file, next);
-      try { this.plugin.refreshOutlineView(); } catch {}
+      try { this.plugin.refreshOutlineView(); } catch { /* intentionally empty */ }
     }
     return renames;
   }
@@ -7695,7 +7695,7 @@ class OutlineView extends obsidian.ItemView {
     for (const r of renames) next = next.split(r.from).join(r.to); // 纯字符串全局替换，含正文/YAML/沉淀块
     if (next !== content) {
       await this.app.vault.modify(file, next);
-      try { this.plugin.refreshOutlineView(); } catch {}
+      try { this.plugin.refreshOutlineView(); } catch { /* intentionally empty */ }
     }
     // 已消费的映射清掉，避免下次提交对同一篇重复替换
     const remaining = Object.assign({}, renameMap);
@@ -7767,7 +7767,7 @@ class OutlineView extends obsidian.ItemView {
     if (!(file instanceof obsidian.TFile) || !todo || !anchorEl) return;
     // 关掉已有同类 popover
     if (this._activeTodoFieldPopover) {
-      try { this._activeTodoFieldPopover.remove(); } catch {}
+      try { this._activeTodoFieldPopover.remove(); } catch { /* intentionally empty */ }
       this._activeTodoFieldPopover = null;
     }
     const pop = document.body.createDiv({ cls: `lexvoice-todo-popover is-${field}` });
@@ -7798,7 +7798,7 @@ class OutlineView extends obsidian.ItemView {
 
     // 点外面 / Escape 关闭
     const close = () => {
-      try { pop.remove(); } catch {}
+      try { pop.remove(); } catch { /* intentionally empty */ }
       if (this._activeTodoFieldPopover === pop) this._activeTodoFieldPopover = null;
       document.removeEventListener("mousedown", onDocDown, true);
       document.removeEventListener("keydown", onKeyDown, true);
@@ -7825,7 +7825,7 @@ class OutlineView extends obsidian.ItemView {
     let people = [];
     try {
       people = await loadPeopleDirectory(this) || [];
-    } catch {}
+    } catch { /* intentionally empty */ }
 
     const renderRows = (filter) => {
       list.empty();
@@ -8092,7 +8092,7 @@ class OutlineView extends obsidian.ItemView {
   renderSedimentPrompt(parent, opts) {
     const box = parent.createDiv({ cls: "lexvoice-sediment-prompt" });
     const icon = box.createDiv({ cls: "lexvoice-sediment-prompt-icon" });
-    try { obsidian.setIcon(icon, opts.icon || "sparkles"); } catch {}
+    try { obsidian.setIcon(icon, opts.icon || "sparkles"); } catch { /* intentionally empty */ }
     if (opts.subtitle) box.createDiv({ cls: "lexvoice-sediment-prompt-subtitle", text: opts.subtitle });
     if (opts.title) box.createDiv({ cls: "lexvoice-sediment-prompt-title", text: opts.title });
     if (opts.desc) box.createDiv({ cls: "lexvoice-sediment-prompt-desc", text: opts.desc });
@@ -8173,7 +8173,7 @@ class OutlineView extends obsidian.ItemView {
       contentEl.addClass("lexvoice-sediment-rescan-modal");
       const head = contentEl.createDiv({ cls: "lexvoice-sediment-confirm-head" });
       const icon = head.createDiv({ cls: "lexvoice-sediment-confirm-icon" });
-      try { obsidian.setIcon(icon, "refresh-cw"); } catch {}
+      try { obsidian.setIcon(icon, "refresh-cw"); } catch { /* intentionally empty */ }
       head.createEl("h3", { text: "重新扫描本篇？" });
       const pendingCount = this.getSedimentPendingCandidateCount(file);
       const list = contentEl.createEl("ul", { cls: "lexvoice-sediment-confirm-list" });
@@ -8183,7 +8183,7 @@ class OutlineView extends obsidian.ItemView {
         ["alert-triangle", `当前 ${pendingCount} 条未确认候选会被覆盖`],
       ].forEach(([iconName, text]) => {
         const li = list.createEl("li");
-        try { obsidian.setIcon(li.createSpan({ cls: "lexvoice-sediment-confirm-list-icon" }), iconName); } catch {}
+        try { obsidian.setIcon(li.createSpan({ cls: "lexvoice-sediment-confirm-list-icon" }), iconName); } catch { /* intentionally empty */ }
         li.createSpan({ text });
       });
       const note = contentEl.createDiv({ cls: "lexvoice-sediment-confirm-note" });
@@ -8212,7 +8212,7 @@ class OutlineView extends obsidian.ItemView {
     }
     const toast = root.createDiv({ cls: "lexvoice-sediment-toast" + (opts.variant ? ` is-${opts.variant}` : "") });
     const icon = toast.createDiv({ cls: "lexvoice-sediment-toast-icon" });
-    try { obsidian.setIcon(icon, opts.icon || "check"); } catch {}
+    try { obsidian.setIcon(icon, opts.icon || "check"); } catch { /* intentionally empty */ }
     toast.createDiv({ cls: "lexvoice-sediment-toast-message", text: message || "" });
     const actions = Array.isArray(opts.actions) ? opts.actions : (opts.actionText && typeof opts.onAction === "function" ? [{ text: opts.actionText, action: opts.onAction }] : []);
     for (const item of actions) {
@@ -8489,7 +8489,7 @@ class OutlineView extends obsidian.ItemView {
       contentEl.addClass("lexvoice-sediment-rescan-modal");
       const head = contentEl.createDiv({ cls: "lexvoice-sediment-confirm-head" });
       const icon = head.createDiv({ cls: "lexvoice-sediment-confirm-icon" });
-      try { obsidian.setIcon(icon, "circle-minus"); } catch {}
+      try { obsidian.setIcon(icon, "circle-minus"); } catch { /* intentionally empty */ }
       head.createEl("h3", { text: "忽略未选内容？" });
       const note = contentEl.createDiv({ cls: "lexvoice-sediment-confirm-note" });
       note.setText(`未选的 ${count} 条会被标为忽略，无法恢复。继续后，已选内容会加入对应库。`);
@@ -8546,7 +8546,7 @@ class OutlineView extends obsidian.ItemView {
         const hotwordCount = selectedItems.length;
         if (!hotwordCount) return;
         // 热词改名回写会动笔记正文，先抓整篇快照供撤销（恢复时先整篇还原，再回写沉淀块）。
-        try { undo.sourceSnapshot = { path: filePath, content: await this.app.vault.read(file) }; } catch {}
+        try { undo.sourceSnapshot = { path: filePath, content: await this.app.vault.read(file) }; } catch { /* intentionally empty */ }
         const vocabPath = this.plugin.settings.vocabularyFile;
         if (vocabPath) {
           const norm = obsidian.normalizePath(vocabPath);
@@ -8645,7 +8645,7 @@ class OutlineView extends obsidian.ItemView {
     this.setSedimentGroup(groupKey);
     if (!hasRestore) {
       // 触发对当前纪要的整体重新扫描，把候选重新跑出来
-      try { new obsidian.Notice("本组无回滚数据，已触发重新扫描"); } catch {}
+      try { new obsidian.Notice("本组无回滚数据，已触发重新扫描"); } catch { /* intentionally empty */ }
       this.requestSedimentExtraction(file, true);
     }
   }
@@ -8835,7 +8835,7 @@ class OutlineView extends obsidian.ItemView {
       this.decoratePlaybackOutlineChapters(this.inlineOutlineBody);
     };
     playBtn.onclick = () => {
-      if (player.paused) player.play().catch(() => {});
+      if (player.paused) player.play().catch(() => { /* intentionally empty */ });
       else player.pause();
       update();
     };
@@ -8844,14 +8844,14 @@ class OutlineView extends obsidian.ItemView {
       const ratio = rect.width ? Math.max(0, Math.min(1, (evt.clientX - rect.left) / rect.width)) : 0;
       if (Number.isFinite(player.duration) && player.duration > 0) {
         player.currentTime = player.duration * ratio;
-        player.play().catch(() => {});
+        player.play().catch(() => { /* intentionally empty */ });
       }
       update();
     };
     volumeBtn.onclick = () => {
       player.muted = !player.muted;
       volumeBtn.empty();
-      try { obsidian.setIcon(volumeBtn, player.muted ? "volume-x" : "volume"); } catch {}
+      try { obsidian.setIcon(volumeBtn, player.muted ? "volume-x" : "volume"); } catch { /* intentionally empty */ }
     };
     moreBtn.onclick = () => this.app.workspace.getLeaf(false).openFile(audioFile);
     player.addEventListener("loadedmetadata", update);
@@ -8958,7 +8958,7 @@ class OutlineView extends obsidian.ItemView {
       }
       if (!body.querySelector(".lexvoice-back-to-current")) {
         const back = body.createEl("button", { cls: "lexvoice-back-to-current", attr: { type: "button" } });
-        try { obsidian.setIcon(back.createSpan({ cls: "lexvoice-back-to-current-icon" }), "arrow-down"); } catch {}
+        try { obsidian.setIcon(back.createSpan({ cls: "lexvoice-back-to-current-icon" }), "arrow-down"); } catch { /* intentionally empty */ }
         back.createSpan({ cls: "lexvoice-back-to-current-label", text: "回到当前" });
         back.onclick = () => {
           this.outlineViewingMs = null;
@@ -8988,7 +8988,7 @@ class OutlineView extends obsidian.ItemView {
         if (!current || !current.isConnected) return;
         current.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
       } catch (e) {
-        try { current.scrollIntoView(false); } catch {}
+        try { current.scrollIntoView(false); } catch { /* intentionally empty */ }
       }
     });
   }
@@ -9023,7 +9023,7 @@ class OutlineView extends obsidian.ItemView {
         const ms = times[i];
         if (!Number.isFinite(ms) || !this.inlineAudioEl) return;
         this.inlineAudioEl.currentTime = ms / 1000;
-        this.inlineAudioEl.play().catch(() => {});
+        this.inlineAudioEl.play().catch(() => { /* intentionally empty */ });
         this.decoratePlaybackOutlineChapters(body);
       };
     }
@@ -9042,7 +9042,7 @@ class OutlineView extends obsidian.ItemView {
       try {
         const target = Math.max(0, Math.min(Number.isFinite(audio.duration) ? audio.duration : Number.MAX_SAFE_INTEGER, (ms || 0) / 1000));
         audio.currentTime = target;
-        audio.play().catch(() => {});
+        audio.play().catch(() => { /* intentionally empty */ });
         audio.focus();
       } catch (e) {
         console.warn("[LexVoice] inline audio seek failed", e);
@@ -9097,7 +9097,7 @@ class OutlineView extends obsidian.ItemView {
       && Array.isArray(session.segments) && session.segments.some((s) => s && !s.text && !s.error);
     if (session.finalizing || stillTranscribing) {
       const banner = head.createDiv({ cls: "lexvoice-finalizing-banner" });
-      try { obsidian.setIcon(banner.createSpan({ cls: "lexvoice-finalizing-banner-icon" }), "loader-2"); } catch {}
+      try { obsidian.setIcon(banner.createSpan({ cls: "lexvoice-finalizing-banner-icon" }), "loader-2"); } catch { /* intentionally empty */ }
       banner.createSpan({ cls: "lexvoice-finalizing-banner-text", text: session.finalizing ? "AI 正在整理最终纪要内容" : "正在等待转写完成…" });
     }
   }
@@ -9147,7 +9147,7 @@ class OutlineView extends obsidian.ItemView {
       pause.addClass(isPaused ? "is-play-icon" : "is-pause-icon");
       pause.onclick = () => isPaused ? this.plugin.recorder.resume() : this.plugin.recorder.pause();
     } else {
-      try { obsidian.setIcon(pause, "volume"); } catch {}
+      try { obsidian.setIcon(pause, "volume"); } catch { /* intentionally empty */ }
       pause.disabled = isFinalizing;
     }
     if ((isRecording || isPaused) && !isMicBlocked) {
@@ -9160,7 +9160,7 @@ class OutlineView extends obsidian.ItemView {
     const isNetwork = issue.kind === "network";
     const wrap = parent.createDiv({ cls: `lexvoice-recording-alert ${isNetwork ? "is-warning" : "is-neutral"}` });
     const icon = wrap.createSpan({ cls: "lexvoice-recording-alert-icon" });
-    try { obsidian.setIcon(icon, isNetwork ? "wifi-off" : "cloud-off"); } catch {}
+    try { obsidian.setIcon(icon, isNetwork ? "wifi-off" : "cloud-off"); } catch { /* intentionally empty */ }
     const body = wrap.createDiv({ cls: "lexvoice-recording-alert-body" });
     body.createDiv({
       cls: "lexvoice-recording-alert-title",
@@ -9191,7 +9191,7 @@ class OutlineView extends obsidian.ItemView {
     const card = overlay.createDiv({ cls: "lexvoice-recording-blocker-card" });
     const top = card.createDiv({ cls: "lexvoice-recording-blocker-top" });
     const iconWrap = top.createDiv({ cls: "lexvoice-recording-blocker-icon" });
-    try { obsidian.setIcon(iconWrap, "mic-off"); } catch {}
+    try { obsidian.setIcon(iconWrap, "mic-off"); } catch { /* intentionally empty */ }
     const titleWrap = top.createDiv({ cls: "lexvoice-recording-blocker-title-wrap" });
     titleWrap.createDiv({ cls: "lexvoice-recording-blocker-title", text: "麦克风访问被拒绝" });
     const stoppedAt = Number(issue && issue.stoppedAtMs);
@@ -9209,13 +9209,13 @@ class OutlineView extends obsidian.ItemView {
     const saveOnly = actions.createEl("button", { cls: "lexvoice-recording-blocker-secondary", text: "仅保存录音", attr: { type: "button" } });
     saveOnly.onclick = () => this.plugin.stopRecording();
     const settings = actions.createEl("button", { cls: "lexvoice-recording-blocker-primary", attr: { type: "button" } });
-    try { obsidian.setIcon(settings.createSpan({ cls: "lexvoice-recording-blocker-action-icon" }), "settings"); } catch {}
+    try { obsidian.setIcon(settings.createSpan({ cls: "lexvoice-recording-blocker-action-icon" }), "settings"); } catch { /* intentionally empty */ }
     settings.createSpan({ text: "打开系统设置" });
     settings.onclick = () => this.openMicrophoneSettings();
   }
 
   openMicrophoneSettings() {
-    try { window.open("ms-settings:privacy-microphone"); } catch {}
+    try { window.open("ms-settings:privacy-microphone"); } catch { /* intentionally empty */ }
     new obsidian.Notice("请在系统设置 → 隐私与安全 → 麦克风中允许 Obsidian 访问麦克风。", 9000);
   }
 
@@ -9288,7 +9288,7 @@ class OutlineView extends obsidian.ItemView {
     const modeRow = controls.createDiv({ cls: "lexvoice-outline-control-row" });
     modeRow.createEl("span", { cls: "lexvoice-outline-control-label", text: "模板" });
     const modeWrap = modeRow.createDiv({ cls: "lexvoice-outline-select-wrap" });
-    try { obsidian.setIcon(modeWrap.createSpan({ cls: "lexvoice-outline-select-icon" }), "user-check"); } catch {}
+    try { obsidian.setIcon(modeWrap.createSpan({ cls: "lexvoice-outline-select-icon" }), "user-check"); } catch { /* intentionally empty */ }
     const modeSelect = modeWrap.createEl("select", { cls: "dropdown lexvoice-outline-select-control" });
     const currentMode = getEffectivePolishMode(this.plugin.settings, this.plugin.settings.polishMode);
     for (const k of getVisiblePolishModeKeys(this.plugin.settings)) {
@@ -9304,7 +9304,7 @@ class OutlineView extends obsidian.ItemView {
     const capRow = controls.createDiv({ cls: "lexvoice-outline-control-row" });
     capRow.createEl("span", { cls: "lexvoice-outline-control-label", text: "音频" });
     const capWrap = capRow.createDiv({ cls: "lexvoice-outline-select-wrap" });
-    try { obsidian.setIcon(capWrap.createSpan({ cls: "lexvoice-outline-select-icon" }), "mic"); } catch {}
+    try { obsidian.setIcon(capWrap.createSpan({ cls: "lexvoice-outline-select-icon" }), "mic"); } catch { /* intentionally empty */ }
     const capSelect = capWrap.createEl("select", { cls: "dropdown lexvoice-outline-select-control" });
     const capOpts = isMobile
       ? [["mic", "仅麦克风（手机端）"]]
@@ -9342,15 +9342,15 @@ class OutlineView extends obsidian.ItemView {
 
     const actions = controls.createDiv({ cls: "lexvoice-outline-actions" });
     const startBtn = actions.createEl("button", { cls: "mod-cta lexvoice-outline-action-button is-record", attr: { type: "button" } });
-    try { obsidian.setIcon(startBtn.createSpan({ cls: "lexvoice-outline-action-icon" }), "mic"); } catch {}
+    try { obsidian.setIcon(startBtn.createSpan({ cls: "lexvoice-outline-action-icon" }), "mic"); } catch { /* intentionally empty */ }
     startBtn.createSpan({ text: isMobile ? "新建录音" : "新建录音" });
     startBtn.onclick = () => this.plugin.startRecording();
     const importBtn = actions.createEl("button", { cls: "lexvoice-outline-action-button", attr: { type: "button" } });
-    try { obsidian.setIcon(importBtn.createSpan({ cls: "lexvoice-outline-action-icon" }), "file-audio"); } catch {}
+    try { obsidian.setIcon(importBtn.createSpan({ cls: "lexvoice-outline-action-icon" }), "file-audio"); } catch { /* intentionally empty */ }
     importBtn.createSpan({ text: "音频" });
     importBtn.onclick = () => new ImportAudioModal(this.app, this.plugin).open();
     const importTextBtn = actions.createEl("button", { cls: "lexvoice-outline-action-button", attr: { type: "button" } });
-    try { obsidian.setIcon(importTextBtn.createSpan({ cls: "lexvoice-outline-action-icon" }), "file-text"); } catch {}
+    try { obsidian.setIcon(importTextBtn.createSpan({ cls: "lexvoice-outline-action-icon" }), "file-text"); } catch { /* intentionally empty */ }
     importTextBtn.createSpan({ text: "文本" });
     importTextBtn.onclick = () => new ImportTextModal(this.app, this.plugin).open();
   }
@@ -9440,12 +9440,12 @@ class OutlineView extends obsidian.ItemView {
       todoLine.createSpan({ cls: "lexvoice-outline-annotation-todo-task", text: entry.interaction.task || entry.text || "未命名待办" });
       if (entry.interaction.assignee) {
         const chip = todoLine.createSpan({ cls: "lexvoice-outline-annotation-assignee-chip" });
-        try { obsidian.setIcon(chip.createSpan({ cls: "lexvoice-outline-annotation-assignee-icon" }), "user"); } catch {}
+        try { obsidian.setIcon(chip.createSpan({ cls: "lexvoice-outline-annotation-assignee-icon" }), "user"); } catch { /* intentionally empty */ }
         chip.createSpan({ text: entry.interaction.assignee });
       }
     } else if (metaKind === "assignee") {
       const chip = body.createDiv({ cls: "lexvoice-outline-annotation-assignee-chip is-leading" });
-      try { obsidian.setIcon(chip.createSpan({ cls: "lexvoice-outline-annotation-assignee-icon" }), "user-check"); } catch {}
+      try { obsidian.setIcon(chip.createSpan({ cls: "lexvoice-outline-annotation-assignee-icon" }), "user-check"); } catch { /* intentionally empty */ }
       chip.createSpan({ text: entry.interaction.assignee || "未指定" });
       if (entry.interaction.task) {
         const txt = body.createDiv({ cls: "lexvoice-outline-annotation-text" });
@@ -9514,7 +9514,7 @@ class OutlineView extends obsidian.ItemView {
     const btn = parent.createEl("button", { text: options.label || "添加材料", cls, attr: { title: options.label || "添加材料", "aria-label": options.label || "添加材料" } });
     if (options.icon) {
       btn.empty();
-      try { obsidian.setIcon(btn, options.icon); } catch {}
+      try { obsidian.setIcon(btn, options.icon); } catch { /* intentionally empty */ }
       if (!options.iconOnly) btn.createSpan({ text: options.label || "添加材料" });
     }
     btn.onclick = () => input.click();
@@ -9759,7 +9759,7 @@ class OutlineView extends obsidian.ItemView {
     const aiHead = aiWrap.createDiv({ cls: "lexvoice-outline-ai-head is-utility" });
     const aiTitle = aiHead.createDiv({ cls: "lexvoice-outline-source-title" });
     const aiIcon = aiTitle.createSpan({ cls: "lexvoice-outline-source-icon" });
-    try { obsidian.setIcon(aiIcon, session && session.mode === "recruit" ? "user-check" : "sparkles"); } catch {}
+    try { obsidian.setIcon(aiIcon, session && session.mode === "recruit" ? "user-check" : "sparkles"); } catch { /* intentionally empty */ }
     aiTitle.createSpan({ text: session && session.mode === "recruit" ? "AI 面试大纲" : "AI 整理大纲" });
     aiHead.createDiv({ cls: "lexvoice-outline-source-badge", text: session && session.mode === "recruit" ? "转写 + AI 判断" : "由转写整理" });
     const refreshBtn = aiHead.createEl("button", { text: this.outlineRunning ? "停止等待" : "刷新" });
@@ -9827,7 +9827,7 @@ class OutlineView extends obsidian.ItemView {
   renderServiceOutlineFallback(parent) {
     const box = parent.createDiv({ cls: "lexvoice-outline-safe-empty" });
     const icon = box.createDiv({ cls: "lexvoice-outline-safe-empty-icon" });
-    try { obsidian.setIcon(icon, "mic"); } catch {}
+    try { obsidian.setIcon(icon, "mic"); } catch { /* intentionally empty */ }
     box.createDiv({ cls: "lexvoice-outline-safe-empty-title", text: "录音持续中" });
     box.createDiv({ cls: "lexvoice-outline-safe-empty-desc", text: "本地保存安全，结束后可重新生成大纲。" });
   }
@@ -9954,7 +9954,7 @@ class OutlineView extends obsidian.ItemView {
       if (s.startsWith(mk.emoji)) {
         li.addClass(mk.cls);
         const iconSpan = li.createSpan({ cls: "lexvoice-outline-marker-icon" });
-        try { obsidian.setIcon(iconSpan, mk.icon); } catch {}
+        try { obsidian.setIcon(iconSpan, mk.icon); } catch { /* intentionally empty */ }
         // 去掉 emoji 本体 + 可能跟随的变体选择符(️)/零宽连接符 + 空白
         return s.slice(mk.emoji.length).replace(/^[️‍\s]+/, "");
       }
@@ -9989,13 +9989,13 @@ class OutlineView extends obsidian.ItemView {
       const wrap = body.createDiv({ cls: "lexvoice-outline-followup" });
       const ftitle = wrap.createDiv({ cls: "lexvoice-outline-followup-title" });
       const tIco = ftitle.createSpan({ cls: "lexvoice-outline-followup-title-icon" });
-      try { obsidian.setIcon(tIco, "help-circle"); } catch {}
+      try { obsidian.setIcon(tIco, "help-circle"); } catch { /* intentionally empty */ }
       ftitle.createSpan({ cls: "lexvoice-outline-followup-title-text", text: `建议追问（${followupCards.length}）` });
       for (const card of followupCards) {
         const c = wrap.createDiv({ cls: "lexvoice-outline-followup-card lexvoice-followup-status-" + card.status });
         const ch = c.createDiv({ cls: "lexvoice-followup-card-head" });
         const dico = ch.createSpan({ cls: "lexvoice-followup-dim-icon" });
-        try { obsidian.setIcon(dico, JOBPORTRAIT_COVERAGE_ICON[card.status] || "circle"); } catch {}
+        try { obsidian.setIcon(dico, JOBPORTRAIT_COVERAGE_ICON[card.status] || "circle"); } catch { /* intentionally empty */ }
         ch.createSpan({ cls: "lexvoice-followup-dim-name", text: card.name });
         ch.createSpan({ cls: "lexvoice-followup-badge", text: card.status === "missing" ? "缺失" : "模糊" });
         if (card.reason) c.createDiv({ cls: "lexvoice-followup-reason", text: card.reason });
@@ -10004,12 +10004,12 @@ class OutlineView extends obsidian.ItemView {
         const mkBtn = (icon, label, fb) => {
           const b = acts.createEl("button", { cls: "lexvoice-followup-btn", attr: { type: "button", "aria-label": label, title: label } });
           const bi = b.createSpan({ cls: "lexvoice-followup-btn-icon" });
-          try { obsidian.setIcon(bi, icon); } catch {}
+          try { obsidian.setIcon(bi, icon); } catch { /* intentionally empty */ }
           b.createSpan({ cls: "lexvoice-followup-btn-text", text: label });
           b.onclick = () => {
             if (!session.followupFeedback) session.followupFeedback = {};
             session.followupFeedback[card.key] = fb; // session 级，换场清零，不跨岗位污染
-            try { this.scheduleUpdate(); } catch {}
+            try { this.scheduleUpdate(); } catch { /* intentionally empty */ }
           };
         };
         mkBtn("check", "已问", "asked");
@@ -10028,7 +10028,7 @@ class OutlineView extends obsidian.ItemView {
         const status = ["covered", "partial", "missing"].includes(item.status) ? item.status : "missing";
         const leaf = group.createDiv({ cls: "lexvoice-outline-dim-leaf lexvoice-outline-dim-status-" + status });
         const ico = leaf.createSpan({ cls: "lexvoice-outline-marker-icon" });
-        try { obsidian.setIcon(ico, JOBPORTRAIT_COVERAGE_ICON[status] || "circle"); } catch {}
+        try { obsidian.setIcon(ico, JOBPORTRAIT_COVERAGE_ICON[status] || "circle"); } catch { /* intentionally empty */ }
         leaf.createSpan({ cls: "lexvoice-outline-dim-name", text: d.name });
         // evidence 回听锚点（仅 covered/partial 且锚点合法）：造 a.internal-link 种子，由 enhanceAudioTimeLinks 挂点击
         if (status !== "missing" && item.evidence_anchor) {
@@ -10054,7 +10054,7 @@ class OutlineView extends obsidian.ItemView {
         : "录音开始后，AI 会按 14 个画像维度实时标出覆盖进度。" });
     }
     // 点击回听：只调 enhanceAudioTimeLinks（认 a.internal-link[data-href=音频][text=HH:MM]），零额外代码。
-    try { this.plugin.enhanceAudioTimeLinks(body, { sourcePath: (session && session.mdPath) || "" }); } catch {}
+    try { this.plugin.enhanceAudioTimeLinks(body, { sourcePath: (session && session.mdPath) || "" }); } catch { /* intentionally empty */ }
   }
 
   enhanceRenderedOutline(body, opts) {
@@ -10415,7 +10415,7 @@ class OutlineView extends obsidian.ItemView {
     if (opt.disabled) btn.disabled = true;
     if (opt.icon) {
       const icon = btn.createSpan({ cls: "lexvoice-outline-recent-action-icon" });
-      try { obsidian.setIcon(icon, opt.icon); } catch {}
+      try { obsidian.setIcon(icon, opt.icon); } catch { /* intentionally empty */ }
     }
     if (opt.label) btn.createSpan({ cls: "lexvoice-outline-recent-action-label", text: opt.label });
     btn.addEventListener("click", async (evt) => {
@@ -10442,7 +10442,7 @@ class OutlineView extends obsidian.ItemView {
       attr: { title: state.title || state.label || "" },
     });
     const iconName = state.kind === "processing" ? "loader-2" : "alert-triangle";
-    try { obsidian.setIcon(status.createSpan({ cls: "lexvoice-outline-recent-failure-icon" }), iconName); } catch {}
+    try { obsidian.setIcon(status.createSpan({ cls: "lexvoice-outline-recent-failure-icon" }), iconName); } catch { /* intentionally empty */ }
     const pct = clampLexVoiceProgress(state.percent);
     status.createSpan({ text: (state.label || "") + (pct == null ? "" : ` ${pct}%`) });
     if (pct != null) {
@@ -10499,7 +10499,7 @@ class OutlineView extends obsidian.ItemView {
       const prefItems = [];
       const syncPrefChecks = () => {
         const cur = this.plugin.settings.repolishPreference || "";
-        for (const [k, it] of prefItems) { try { it.setChecked(cur === k); } catch {} }
+        for (const [k, it] of prefItems) { try { it.setChecked(cur === k); } catch { /* intentionally empty */ } }
       };
       for (const key of ["detailed", "concise", "structured", "natural", "expanded"]) {
         const preset = getRepolishPreferencePreset(key);
@@ -10625,7 +10625,7 @@ class OutlineView extends obsidian.ItemView {
         addFile(linked);
         if (!linked) addFile(resolveLexVoiceAudioFile(this.app, this.plugin.settings, link));
       }
-    } catch {}
+    } catch { /* intentionally empty */ }
     const mdPath = obsidian.normalizePath(file.path);
     const tasks = getQueueTasksForMarkdown(this.plugin, file, { types: ["transcribe", "merge"] });
     for (const task of tasks) {
@@ -11168,10 +11168,10 @@ class LexVoicePlugin extends obsidian.Plugin {
   }
 
   async onunload() {
-    try { if (this.recorder && this.recorder.state !== "idle") await this.recorder.stop(); } catch {}
+    try { if (this.recorder && this.recorder.state !== "idle") await this.recorder.stop(); } catch { /* intentionally empty */ }
     if (this.bubble) this.bubble.unmount();
     // 清理招聘项目重算 Debouncer，避免卸载后 pending timer 触发已 detach 的实例
-    try { if (this._recruitRecalcDebouncers) { this._recruitRecalcDebouncers.forEach(d => { try { if (d.cancel) d.cancel(); } catch {} }); this._recruitRecalcDebouncers.clear(); } } catch {}
+    try { if (this._recruitRecalcDebouncers) { this._recruitRecalcDebouncers.forEach(d => { try { if (d.cancel) d.cancel(); } catch { /* intentionally empty */ } }); this._recruitRecalcDebouncers.clear(); } } catch { /* intentionally empty */ }
   }
 
   enhanceAudioTimeLinks(el, ctx) {
@@ -11857,16 +11857,16 @@ class LexVoicePlugin extends obsidian.Plugin {
       kind: kind || current.kind || "service",
       at: patch && patch.at ? patch.at : (current.at || Date.now()),
     }));
-    try { this.refreshOutlineView(); } catch {}
-    try { if (this.bubble && this.bubble.scheduleUpdate) this.bubble.scheduleUpdate(); } catch {}
+    try { this.refreshOutlineView(); } catch { /* intentionally empty */ }
+    try { if (this.bubble && this.bubble.scheduleUpdate) this.bubble.scheduleUpdate(); } catch { /* intentionally empty */ }
   }
 
   clearRecordingIssue(kind) {
     if (!this.recordingIssue) return;
     if (kind && this.recordingIssue.kind !== kind) return;
     this.recordingIssue = null;
-    try { this.refreshOutlineView(); } catch {}
-    try { if (this.bubble && this.bubble.scheduleUpdate) this.bubble.scheduleUpdate(); } catch {}
+    try { this.refreshOutlineView(); } catch { /* intentionally empty */ }
+    try { if (this.bubble && this.bubble.scheduleUpdate) this.bubble.scheduleUpdate(); } catch { /* intentionally empty */ }
   }
 
   getRecordingIssue() {
@@ -11876,7 +11876,7 @@ class LexVoicePlugin extends obsidian.Plugin {
   }
 
   refreshOutlineView() {
-    try { this.updateBusyStatus(); } catch {}
+    try { this.updateBusyStatus(); } catch { /* intentionally empty */ }
     const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_OUTLINE);
     for (const leaf of leaves) {
       const v = leaf.view;
@@ -11897,7 +11897,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       el.removeClass("lexvoice-statusbar-hidden");
       el.toggleClass("lexvoice-statusbar-idle", !!muted);
       const ico = el.createSpan({ cls: "lexvoice-statusbar-icon" + (spin ? " lexvoice-statusbar-spin" : "") });
-      try { obsidian.setIcon(ico, icon); } catch {}
+      try { obsidian.setIcon(ico, icon); } catch { /* intentionally empty */ }
       el.createSpan({ cls: "lexvoice-statusbar-text", text });
       el.setAttr("aria-label", text + "（点击查看转写队列）");
     };
@@ -11940,7 +11940,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     const recState = rec && typeof rec.state === "string" ? rec.state : "idle";
     if (s && (recState === "recording" || recState === "paused")) {
       let elapsed = 0;
-      try { elapsed = (rec.getInfo && rec.getInfo().elapsed) || 0; } catch {}
+      try { elapsed = (rec.getInfo && rec.getInfo().elapsed) || 0; } catch { /* intentionally empty */ }
       const segN = Array.isArray(s.segments) ? s.segments.length : 0;
       if (recState === "paused") {
         show("pause", `录音已暂停 ${formatElapsed(elapsed)}`, false);
@@ -11967,14 +11967,14 @@ class LexVoicePlugin extends obsidian.Plugin {
 
   // 兼容旧调用名：早期代码里残留 this.renderStatusBar() 调用点，但 renderStatusBar 从未定义
   // → 运行时抛 TypeError（曾导致"重试失败转写/清空队列"中途崩、完成提示不弹）。统一别名到 updateBusyStatus。
-  renderStatusBar() { try { this.updateBusyStatus(); } catch {} }
+  renderStatusBar() { try { this.updateBusyStatus(); } catch { /* intentionally empty */ } }
 
   // 记一笔"本次启动后已完成"的处理（供处理进度面板展示；不持久化，OB 重启清零）。
   logCompletedWork(title, detail) {
     if (!Array.isArray(this.completedWorkLog)) this.completedWorkLog = [];
     this.completedWorkLog.unshift({ title: String(title || "完成"), detail: String(detail || ""), at: Date.now() });
     if (this.completedWorkLog.length > 80) this.completedWorkLog.length = 80;
-    try { this.updateBusyStatus(); } catch {}
+    try { this.updateBusyStatus(); } catch { /* intentionally empty */ }
   }
 
   // 当前正在进行的处理标签（导入/批量/重整/录音整理/转写/录音），空闲返回 null。供处理进度面板的"处理中"区用。
@@ -12045,7 +12045,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       const rec = this.recorder;
       const recState = rec && typeof rec.state === "string" ? rec.state : "idle";
       if (recState === "recording" || recState === "paused") {
-        let elapsed = 0; try { elapsed = (rec.getInfo && rec.getInfo().elapsed) || 0; } catch {}
+        let elapsed = 0; try { elapsed = (rec.getInfo && rec.getInfo().elapsed) || 0; } catch { /* intentionally empty */ }
         const segN = Array.isArray(s.segments) ? s.segments.length : 0;
         const countTxt = segN ? `已转写 ${segN} 段` : "";
         if (recState === "paused") {
@@ -12317,9 +12317,9 @@ class LexVoicePlugin extends obsidian.Plugin {
     // session 级单飞锁：View / background / final(收尾) 三条触发路径都走这里，用 per-session promise 串行化，
     // 杜绝并发 read-modify-write 互相覆盖 session.realtimeOutlineState / jobPortraitCoverage。
     const prevLock = session._outlineGenLock || Promise.resolve();
-    let releaseLock = () => {};
+    let releaseLock = () => { /* intentionally empty */ };
     session._outlineGenLock = new Promise((r) => { releaseLock = r; });
-    try { await prevLock; } catch {}
+    try { await prevLock; } catch { /* intentionally empty */ }
     try {
       return await this._genOutlineInner(session, opts);
     } finally {
@@ -12826,13 +12826,13 @@ class LexVoicePlugin extends obsidian.Plugin {
       new obsidian.Notice(`无法开始录音：${(e && e.message) || e}`);
       // 清理半初始化状态：acquireStream 抛错(OverconstrainedError 等)后 this.session 已赋值、"（录音中…）"
       // 占位笔记已写，若不清理会残留僵尸会话、笔记永远卡在"录音中…"。
-      try { if (this.recorder && this.recorder.state !== "idle") await this.recorder.stop(); } catch {}
-      try { if (this.recorder && typeof this.recorder.releaseStream === "function") this.recorder.releaseStream(); } catch {}
+      try { if (this.recorder && this.recorder.state !== "idle") await this.recorder.stop(); } catch { /* intentionally empty */ }
+      try { if (this.recorder && typeof this.recorder.releaseStream === "function") this.recorder.releaseStream(); } catch { /* intentionally empty */ }
       const failedSession = this.session;
       this.session = null;
       this._oneShotCaptureMode = null;
-      try { if (failedSession) await this.removeEmptySessionBlock(failedSession); } catch {}
-      try { this.refreshOutlineView(); } catch {}
+      try { if (failedSession) await this.removeEmptySessionBlock(failedSession); } catch { /* intentionally empty */ }
+      try { this.refreshOutlineView(); } catch { /* intentionally empty */ }
     }
   }
 
@@ -12854,7 +12854,7 @@ class LexVoicePlugin extends obsidian.Plugin {
   async closeStreamingForDiscard(session) {
     if (!session) return;
     if (session.pcmEncoder) {
-      try { session.pcmEncoder.stop(); } catch {}
+      try { session.pcmEncoder.stop(); } catch { /* intentionally empty */ }
       session.pcmEncoder = null;
     }
     if (session.streamingClient) {
@@ -12866,7 +12866,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       }
       session.streamingClient = null;
     }
-    try { await this.removeLiveTranscriptBlock(session.mdPath, session.id); } catch {}
+    try { await this.removeLiveTranscriptBlock(session.mdPath, session.id); } catch { /* intentionally empty */ }
   }
 
   async discardFilteredShortSession(session) {
@@ -12896,13 +12896,13 @@ class LexVoicePlugin extends obsidian.Plugin {
     session.workProgress = Object.assign({}, session.workProgress || {}, patch || {}, {
       updatedAt: new Date().toISOString(),
     });
-    try { this.refreshOutlineView(); } catch {}
+    try { this.refreshOutlineView(); } catch { /* intentionally empty */ }
   }
 
   clearSessionWorkProgress(session) {
     if (!session) return;
     delete session.workProgress;
-    try { this.refreshOutlineView(); } catch {}
+    try { this.refreshOutlineView(); } catch { /* intentionally empty */ }
   }
 
   handleSegment(session, seg) {
@@ -12915,7 +12915,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         // 关键：吞掉本段异常，绝不让 writeQueue 链变成 rejected——否则下面的 .then(finalize) 会被跳过、
         // 后续每段挂到 rejected 链上也全部静默丢失、笔记永远卡在"录音中…"。本段失败已在 processSegment 内入队重试。
         console.error("[LexVoice] processSegment failed (swallowed to protect write chain)", e);
-        try { await this.logDiagnostic("error", "segment.process_failed", "分段处理异常（已吞，避免毒化写入链）", { mode: session.mode, isFinal: !!seg.isFinal, error: diagnosticError(e) }); } catch {}
+        try { await this.logDiagnostic("error", "segment.process_failed", "分段处理异常（已吞，避免毒化写入链）", { mode: session.mode, isFinal: !!seg.isFinal, error: diagnosticError(e) }); } catch { /* intentionally empty */ }
       } finally {
         session.activeSegmentJobs = Math.max(0, (Number(session.activeSegmentJobs) || 1) - 1);
         if (!seg.isFinal && session.pendingMeetingWorkbenchInteractions && session.pendingMeetingWorkbenchInteractions.length) {
@@ -13067,7 +13067,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     if (session.streamingClient) {
       // 流式转写：跳过 HTTP 切片转写，等流式客户端 finish 后取累计文本
       try {
-        if (session.pcmEncoder) { try { session.pcmEncoder.stop(); } catch {} session.pcmEncoder = null; }
+        if (session.pcmEncoder) { try { session.pcmEncoder.stop(); } catch { /* intentionally empty */ } session.pcmEncoder = null; }
         await session.streamingClient.finish();
         text = session.streamingClient.getFullText() || session.streamingFullText || "";
       } catch (e) {
@@ -13075,7 +13075,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         console.error("[LexVoice] streaming finish failed", e);
         text = session.streamingFullText || "";
       }
-      try { await this.removeLiveTranscriptBlock(session.mdPath, session.id); } catch {}
+      try { await this.removeLiveTranscriptBlock(session.mdPath, session.id); } catch { /* intentionally empty */ }
       session.streamingClient = null;
     } else if (isStreamingProvider) {
       // 流式服务但客户端连接失败：保留音频但不做 HTTP 切片转写（端点是 wss://，HTTP 必失败）
@@ -13390,7 +13390,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         const doneLabel = isTextImportSession(session) ? "文本整理完成"
           : session.source === "import" ? "导入音频整理完成" : "录音纪要整理完成";
         this.logCompletedWork(doneLabel, session.mdPath || "");
-      } catch {}
+      } catch { /* intentionally empty */ }
     }
 
     new obsidian.Notice(mergeError
@@ -13402,7 +13402,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     if (this.settings.autoOpenNoteAfterFinish) {
       const file = this.app.vault.getAbstractFileByPath(session.mdPath);
       if (file instanceof obsidian.TFile) {
-        try { await this.app.workspace.getLeaf(false).openFile(file); } catch {}
+        try { await this.app.workspace.getLeaf(false).openFile(file); } catch { /* intentionally empty */ }
       }
     }
     if (this.session === session) this.session = null;
@@ -13467,7 +13467,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       const folder = jdFile.parent.path;
       const cand = (sanitizeProjectFolderName(rc.candidateName || "候选人") || "候选人").slice(0, 40);
       let mmdd = "";
-      try { mmdd = window.moment ? window.moment().format("MMDD") : ""; } catch {}
+      try { mmdd = window.moment ? window.moment().format("MMDD") : ""; } catch { /* intentionally empty */ }
       const cur = this.app.vault.getAbstractFileByPath(obsidian.normalizePath(session.mdPath));
       if (!(cur instanceof obsidian.TFile)) return null;
       // 轮次取笔记 frontmatter 实际值（与落盘一致），回退 rc.round，再回退 初面——保证文件名与 frontmatter 轮次 同源
@@ -13513,7 +13513,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       try {
         if (fm.time && window.moment) { const mm = window.moment(fm.time); if (mm && mm.isValid && mm.isValid()) return mm.valueOf(); }
         if (fm.time) { const d = Date.parse(fm.time); if (!Number.isNaN(d)) return d; }
-      } catch {}
+      } catch { /* intentionally empty */ }
       return f && f.stat ? f.stat.mtime : 0;
     };
     for (const f of (folder.children || [])) {
@@ -13534,7 +13534,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       if (t > latestTime) { latestTime = t; latest = { cand, evalText: String(fm.一句话评价 || "").trim() }; }
     }
     // 缓存未就绪 → 稍后再重算一次（metadataCache 大概率已重建），避免统计长期偏小且无自纠正
-    if (staleCache && !retry) { window.setTimeout(() => { this.recalcRecruitProject(folderPath, true).catch(() => {}); }, 2000); }
+    if (staleCache && !retry) { window.setTimeout(() => { this.recalcRecruitProject(folderPath, true).catch(() => { /* intentionally empty */ }); }, 2000); }
     const latestText = latest ? (latest.evalText ? `${latest.cand}：${latest.evalText}` : latest.cand) : "";
     try {
       await this.app.fileManager.processFrontMatter(jdFile, (fm) => {
@@ -13547,7 +13547,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       return true;
     } catch (e) {
       console.error("[LexVoice] processFrontMatter recalc failed", e);
-      if (!retry) { window.setTimeout(() => { this.recalcRecruitProject(folderPath, true).catch(() => {}); }, 1500); }
+      if (!retry) { window.setTimeout(() => { this.recalcRecruitProject(folderPath, true).catch(() => { /* intentionally empty */ }); }, 1500); }
       else new obsidian.Notice("项目统计更新失败，可用命令「刷新当前招聘项目统计」手动刷新");
       return false;
     }
@@ -13572,7 +13572,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     el.empty();
     const bar = el.createDiv({ cls: "lexvoice-hr-actions" });
     bar.createEl("button", { cls: "mod-cta", text: "＋ 新建面试" }).onclick = () => {
-      new RecruitContextModal(this.app, this, { flow: "settings", onConfirm: () => {} }).open();
+      new RecruitContextModal(this.app, this, { flow: "settings", onConfirm: () => { /* intentionally empty */ } }).open();
     };
     bar.createEl("button", { text: "＋ 新建招聘项目" }).onclick = () => this.openNewRecruitProjectDialog();
   }
@@ -13822,12 +13822,12 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
     try {
       const electron = require("electron");
       BrowserWindow = electron && (electron.BrowserWindow || (electron.remote && electron.remote.BrowserWindow));
-    } catch {}
+    } catch { /* intentionally empty */ }
     if (!BrowserWindow) {
       try {
         const remote = require("@electron/remote");
         BrowserWindow = remote && remote.BrowserWindow;
-      } catch {}
+      } catch { /* intentionally empty */ }
     }
     if (!BrowserWindow) throw new Error("当前 Obsidian 环境不支持自动生成 PDF");
     const win = new BrowserWindow({
@@ -13847,7 +13847,7 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
       });
       return pdf;
     } finally {
-      try { win.destroy(); } catch {}
+      try { win.destroy(); } catch { /* intentionally empty */ }
     }
   }
 
@@ -13997,8 +13997,8 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
   // 整页不截断 PDF：隐藏窗口量内容真实尺寸 → 注入 @page 为整页全高 + preferCSSPageSize → 单页长 PDF（非 A4 分页，不截断）。
   async printHtmlToSinglePagePdfBuffer(html) {
     let BrowserWindow = null;
-    try { const e = require("electron"); BrowserWindow = e && (e.BrowserWindow || (e.remote && e.remote.BrowserWindow)); } catch {}
-    if (!BrowserWindow) { try { BrowserWindow = require("@electron/remote").BrowserWindow; } catch {} }
+    try { const e = require("electron"); BrowserWindow = e && (e.BrowserWindow || (e.remote && e.remote.BrowserWindow)); } catch { /* intentionally empty */ }
+    if (!BrowserWindow) { try { BrowserWindow = require("@electron/remote").BrowserWindow; } catch { /* intentionally empty */ } }
     if (!BrowserWindow) throw new Error("当前 Obsidian 环境不支持自动生成 PDF");
     const win = new BrowserWindow({ show: false, width: 1024, height: 1400, webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true } });
     // 超时兜底：渲染进程崩溃/卡死时这些 await 可能永不 settle，不加超时会让用户卡在"正在渲染…"且无法取消。
@@ -14018,7 +14018,7 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
       // 单页高度上限保护：PDF 单页约 200in≈19200px(96dpi)，超了会被裁，封顶 18000px 留余量。超长则提示用户，避免静默丢内容。
       const hpx = Math.min(18000, rawH);
       if (rawH > 18000) {
-        try { new obsidian.Notice("报告较长，整页 PDF 已按单页高度上限裁切；要完整内容请改用 HTML 报告。", 9000); } catch {}
+        try { new obsidian.Notice("报告较长，整页 PDF 已按单页高度上限裁切；要完整内容请改用 HTML 报告。", 9000); } catch { /* intentionally empty */ }
       }
       await withTimeout(win.webContents.executeJavaScript(
         "(()=>{const s=document.createElement('style');s.textContent='@page{size:" + wpx + "px " + hpx + "px;margin:0}';document.head.appendChild(s);return true;})()"
@@ -14026,7 +14026,7 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
       const pdf = await withTimeout(win.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, margins: { marginType: "none" } }), 45000, "PDF 渲染");
       return pdf;
     } finally {
-      try { win.destroy(); } catch {}
+      try { win.destroy(); } catch { /* intentionally empty */ }
     }
   }
 
@@ -14287,7 +14287,7 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
           try {
             const fm = obsidian.parseYaml(fmMatch[1]);
             if (fm && fm.mode) { skipped++; continue; }
-          } catch {}
+          } catch { /* intentionally empty */ }
         }
         const mode = inferModeFromLegacyNote(file.name, content);
         if (!mode) { noMode++; continue; }
@@ -14527,7 +14527,7 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
     for (const p of parts) {
       cur = cur ? `${cur}/${p}` : p;
       const exist = this.app.vault.getAbstractFileByPath(cur);
-      if (!exist) { try { await this.app.vault.createFolder(cur); } catch {} }
+      if (!exist) { try { await this.app.vault.createFolder(cur); } catch { /* intentionally empty */ } }
     }
   }
 
@@ -14747,7 +14747,7 @@ ${source}`;
       // 不再静默吞进隐藏的 customVocabulary：提示用户补路径，否则热词在设置里"看不见摸不着"
       this.settings.customVocabulary = flattenVocabularyGroups(groups).join("\n");
       await this.saveSettings();
-      try { new obsidian.Notice("未配置热词表路径，本次热词已暂存在插件设置中；请在「设置 → 信息对象 → ASR 热词表」填写路径后重新整理。", 9000); } catch {}
+      try { new obsidian.Notice("未配置热词表路径，本次热词已暂存在插件设置中；请在「设置 → 信息对象 → ASR 热词表」填写路径后重新整理。", 9000); } catch { /* intentionally empty */ }
       return null;
     }
     const norm = obsidian.normalizePath(path);
@@ -15312,7 +15312,7 @@ ${source}`;
     }
     if (finalFile instanceof obsidian.TFile) {
       await this.appendMergeMetadataBlock(finalFile, session.mergedSources);
-      try { await this.app.workspace.getLeaf(false).openFile(finalFile); } catch {}
+      try { await this.app.workspace.getLeaf(false).openFile(finalFile); } catch { /* intentionally empty */ }
     }
     try { await this.appendDailyMeetingOverview(session, polished); }
     catch (e) { console.error("[LexVoice] daily overview after merge notes failed", e); }
@@ -15448,7 +15448,7 @@ ${source}`;
         console.error("[LexVoice] daily overview after repolish failed", e);
       }
       new obsidian.Notice(`LexVoice：已生成${meta.prefix}模式纪要${preferenceLabel}${roleMapping.length ? `（角色映射 ${roleMapping.length} 条已应用）` : ""}`);
-      try { this.logCompletedWork(`重新整理完成 · ${meta.prefix}`, (file && file.path) || ""); } catch {}
+      try { this.logCompletedWork(`重新整理完成 · ${meta.prefix}`, (file && file.path) || ""); } catch { /* intentionally empty */ }
     } catch (e) {
       console.error("[LexVoice] repolish markdown failed", e);
       new obsidian.Notice(`重新整理失败：${(e && e.message) || e}`, 8000);
@@ -15627,7 +15627,7 @@ ${source}`;
       // MiMo 单块 base64 ≤10MB：5 分钟 16k WAV（base64 ≈12.8MB）必超限、会被二次解码再切——
       // 选 MiMo 时导入直接按其块长切，省一遍转码；其它服务保持 5 分钟（切点少、边界破词少）。
       let importChunkMs = IMPORT_LONG_AUDIO_CHUNK_MS;
-      try { if (isApimimoAsrProvider(resolveTranscribeProvider(this))) importChunkMs = APIMIMO_ASR_CHUNK_MS; } catch {}
+      try { if (isApimimoAsrProvider(resolveTranscribeProvider(this))) importChunkMs = APIMIMO_ASR_CHUNK_MS; } catch { /* intentionally empty */ }
       let part = 0;
       for (let start = 0; start < totalMs; start += importChunkMs) {
         const end = Math.min(totalMs, start + importChunkMs);
@@ -16011,7 +16011,7 @@ ${source}`;
           editor.scrollIntoView({ from: { line: lastLine, ch: 0 }, to: { line: lastLine, ch: 0 } }, true);
         }
       }
-    } catch {}
+    } catch { /* intentionally empty */ }
   }
 
   async openRecentNote() {
@@ -16261,7 +16261,7 @@ ${source}`;
       try { (this.saveAll || this.saveSettings).call(this); } catch (e) {
         console.warn("[LexVoice] queue delete cleanup save failed", e);
       }
-      try { this.refreshOutlineView(); } catch {}
+      try { this.refreshOutlineView(); } catch { /* intentionally empty */ }
     }
   }
 
@@ -16310,7 +16310,7 @@ ${source}`;
     const activated = task.activate !== false;
     new obsidian.Notice("已创建自定义提示词「" + tpl.name + "」" + (activated ? "，并设为当前默认。" : "。"), 7000);
     if (this.settingTab) {
-      try { this.settingTab.display(); } catch {}
+      try { this.settingTab.display(); } catch { /* intentionally empty */ }
     }
   }
 
@@ -16333,11 +16333,11 @@ ${source}`;
     });
     const meta = getModeMeta(this.settings, mode);
     new obsidian.Notice("已加入后台队列：参考「" + (meta.prefix || mode) + "」生成自定义提示词（切换页面不会中断）", 5000);
-    try { this.recorder.emit(); } catch {}
+    try { this.recorder.emit(); } catch { /* intentionally empty */ }
     // 立刻拉起队列处理（不 await，让调用方立刻返回）
     this.queue.processAll()
       .catch((e) => console.error("[LexVoice] queue processAll", e))
-      .finally(() => { try { this.recorder.emit(); } catch {} });
+      .finally(() => { try { this.recorder.emit(); } catch { /* intentionally empty */ } });
     return task;
   }
 }

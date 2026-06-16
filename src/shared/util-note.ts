@@ -18,7 +18,7 @@ export async function readFileFrontmatter(plugin, file) {
   try {
     const cache = plugin.app.metadataCache.getFileCache(file);
     if (cache && cache.frontmatter) return cache.frontmatter;
-  } catch {}
+  } catch { /* intentionally empty */ }
   try {
     const content = await plugin.app.vault.cachedRead(file);
     const m = String(content || "").match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
@@ -90,7 +90,7 @@ export async function ensureVaultFolder(app, folderPath) {
     cur = cur ? `${cur}/${part}` : part;
     const existing = app.vault.getAbstractFileByPath(cur);
     if (!existing) {
-      try { await app.vault.createFolder(cur); } catch {}
+      try { await app.vault.createFolder(cur); } catch { /* intentionally empty */ }
     }
   }
 }
@@ -112,7 +112,7 @@ export async function ensureTodayDailyNoteFile(app) {
           .replace(/\{\{\s*date\s*(?::([^}]+))?\}\}/g, (_, fmt) => moment().format(fmt || "YYYY-MM-DD"))
           .replace(/\{\{\s*time\s*(?::([^}]+))?\}\}/g, (_, fmt) => moment().format(fmt || "HH:mm"))
           .replace(/\{\{\s*title\s*\}\}/g, info.path.split("/").pop().replace(/\.md$/, ""));
-      } catch {}
+      } catch { /* intentionally empty */ }
     }
   }
   try {

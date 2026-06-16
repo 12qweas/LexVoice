@@ -11,7 +11,7 @@ export function normalizeLlmEndpoint(endpoint) {
     if (/\/chat\/completions$/i.test(path)) return noTrail;
     url.pathname = path + "/chat/completions";
     return url.toString().replace(/\/+$/, "");
-  } catch {}
+  } catch { /* intentionally empty */ }
   if (/\/chat\/completions$/i.test(noTrail)) return noTrail;
   return noTrail;
 }
@@ -55,7 +55,7 @@ export function buildLlmHeaders(apiKey, endpoint) {
       headers["HTTP-Referer"] = "https://github.com/Lynn-x/LexVoice";
       headers["X-OpenRouter-Title"] = "LexVoice";
     }
-  } catch {}
+  } catch { /* intentionally empty */ }
   return headers;
 }
 

@@ -8,9 +8,9 @@ export class DashScopeStreamingClient {
     this.apiKey = opts.apiKey;
     this.model = opts.model || "paraformer-realtime-v2";
     this.sampleRate = opts.sampleRate || 16000;
-    this.onPartial = opts.onPartial || (() => {});
+    this.onPartial = opts.onPartial || (() => { /* intentionally empty */ });
     this.onError = opts.onError || ((e) => console.error("[DashScopeStream]", e));
-    this.onClosed = opts.onClosed || (() => {});
+    this.onClosed = opts.onClosed || (() => { /* intentionally empty */ });
     this.taskId = "lvtask-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
     this.ws = null;
     this.started = false;
@@ -25,7 +25,7 @@ export class DashScopeStreamingClient {
     try {
       const wsModule = require("ws");
       WSCtor = wsModule && (wsModule.WebSocket || wsModule.default || wsModule);
-    } catch {}
+    } catch { /* intentionally empty */ }
     if (!WSCtor) WSCtor = window.WebSocket;
     return new Promise((resolve, reject) => {
       let resolved = false;
@@ -35,7 +35,7 @@ export class DashScopeStreamingClient {
           handshakeTimeout: 8000,
         });
       } catch (e) { reject(e); return; }
-      try { this.ws.binaryType = "arraybuffer"; } catch {}
+      try { this.ws.binaryType = "arraybuffer"; } catch { /* intentionally empty */ }
 
       const onOpen = () => {
         const runTask = {
@@ -131,7 +131,7 @@ export class DashScopeStreamingClient {
           payload: { input: {} },
         }));
       }
-    } catch {}
+    } catch { /* intentionally empty */ }
     return new Promise((resolve) => {
       const t = window.setTimeout(() => { this._safeClose(); resolve(); }, 5000);
       const orig = this.onClosed;
@@ -139,7 +139,7 @@ export class DashScopeStreamingClient {
     });
   }
   _safeClose() {
-    try { if (this.ws) this.ws.close(); } catch {}
+    try { if (this.ws) this.ws.close(); } catch { /* intentionally empty */ }
   }
 }
 
@@ -150,9 +150,9 @@ export class OpenAIRealtimeTranscriptionClient {
     this.model = opts.model || "gpt-realtime-whisper";
     this.language = opts.language || "";
     this.sampleRate = 24000;
-    this.onPartial = opts.onPartial || (() => {});
+    this.onPartial = opts.onPartial || (() => { /* intentionally empty */ });
     this.onError = opts.onError || ((e) => console.error("[OpenAIRealtime]", e));
-    this.onClosed = opts.onClosed || (() => {});
+    this.onClosed = opts.onClosed || (() => { /* intentionally empty */ });
     this.ws = null;
     this.opened = false;
     this.finishing = false;
@@ -166,7 +166,7 @@ export class OpenAIRealtimeTranscriptionClient {
     try {
       const wsModule = require("ws");
       WSCtor = wsModule && (wsModule.WebSocket || wsModule.default || wsModule);
-    } catch {}
+    } catch { /* intentionally empty */ }
     if (!WSCtor) WSCtor = window.WebSocket;
     return new Promise((resolve, reject) => {
       let resolved = false;
@@ -179,7 +179,7 @@ export class OpenAIRealtimeTranscriptionClient {
           handshakeTimeout: 10000,
         });
       } catch (e) { reject(e); return; }
-      try { this.ws.binaryType = "arraybuffer"; } catch {}
+      try { this.ws.binaryType = "arraybuffer"; } catch { /* intentionally empty */ }
 
       const sendUpdate = () => {
         const sessionUpdate = {
@@ -273,14 +273,14 @@ export class OpenAIRealtimeTranscriptionClient {
       if (this.ws && (this.ws.readyState == null || this.ws.readyState === 1)) {
         this.ws.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
       }
-    } catch {}
+    } catch { /* intentionally empty */ }
     return new Promise((resolve) => {
       const t = window.setTimeout(() => { this._safeClose(); resolve(); }, 5000);
       const orig = this.onClosed;
       this.onClosed = (info) => { window.clearTimeout(t); orig(info); resolve(); };
     });
   }
-  _safeClose() { try { if (this.ws) this.ws.close(); } catch {} }
+  _safeClose() { try { if (this.ws) this.ws.close(); } catch { /* intentionally empty */ } }
 }
 
 export class OpenAIRealtimeTranslationClient {
@@ -290,9 +290,9 @@ export class OpenAIRealtimeTranslationClient {
     this.model = opts.model || "gpt-realtime-translate";
     this.targetLanguage = opts.targetLanguage || opts.language || "zh";
     this.sampleRate = 24000;
-    this.onPartial = opts.onPartial || (() => {});
+    this.onPartial = opts.onPartial || (() => { /* intentionally empty */ });
     this.onError = opts.onError || ((e) => console.error("[OpenAITranslate]", e));
-    this.onClosed = opts.onClosed || (() => {});
+    this.onClosed = opts.onClosed || (() => { /* intentionally empty */ });
     this.ws = null;
     this.opened = false;
     this.finishing = false;
@@ -308,7 +308,7 @@ export class OpenAIRealtimeTranslationClient {
     try {
       const wsModule = require("ws");
       WSCtor = wsModule && (wsModule.WebSocket || wsModule.default || wsModule);
-    } catch {}
+    } catch { /* intentionally empty */ }
     if (!WSCtor) WSCtor = window.WebSocket;
     const sep = this.endpointBase.indexOf("?") >= 0 ? "&" : "?";
     const url = this.endpointBase + sep + "model=" + encodeURIComponent(this.model);
@@ -323,7 +323,7 @@ export class OpenAIRealtimeTranslationClient {
           handshakeTimeout: 10000,
         });
       } catch (e) { reject(e); return; }
-      try { this.ws.binaryType = "arraybuffer"; } catch {}
+      try { this.ws.binaryType = "arraybuffer"; } catch { /* intentionally empty */ }
 
       const sendUpdate = () => {
         const sessionUpdate = {
@@ -428,14 +428,14 @@ export class OpenAIRealtimeTranslationClient {
       this.onClosed = (info) => { window.clearTimeout(t); orig(info); resolve(); };
     });
   }
-  _safeClose() { try { if (this.ws) this.ws.close(); } catch {} }
+  _safeClose() { try { if (this.ws) this.ws.close(); } catch { /* intentionally empty */ } }
 }
 
 export class PcmStreamEncoder {
   constructor(stream, opts) {
     this.stream = stream;
     this.targetSampleRate = (opts && opts.sampleRate) || 16000;
-    this.onFrame = (opts && opts.onFrame) || (() => {});
+    this.onFrame = (opts && opts.onFrame) || (() => { /* intentionally empty */ });
     this.audioContext = null;
     this.source = null;
     this.processor = null;
@@ -481,9 +481,9 @@ export class PcmStreamEncoder {
     return out;
   }
   stop() {
-    try { if (this.processor) this.processor.disconnect(); } catch {}
-    try { if (this.source) this.source.disconnect(); } catch {}
-    try { if (this.audioContext) this.audioContext.close(); } catch {}
+    try { if (this.processor) this.processor.disconnect(); } catch { /* intentionally empty */ }
+    try { if (this.source) this.source.disconnect(); } catch { /* intentionally empty */ }
+    try { if (this.audioContext) this.audioContext.close(); } catch { /* intentionally empty */ }
     this.processor = null;
     this.source = null;
     this.audioContext = null;
@@ -495,7 +495,7 @@ export function lexvoiceArrayBufferToBase64(ab) {
     if (typeof Buffer !== "undefined" && Buffer.from) {
       return Buffer.from(ab).toString("base64");
     }
-  } catch {}
+  } catch { /* intentionally empty */ }
   const bytes = new Uint8Array(ab);
   let bin = "";
   const chunk = 0x8000;

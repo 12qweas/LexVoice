@@ -508,7 +508,7 @@ export async function writeSedimentObjectCards(plugin, sourceFile, objects) {
     const dailyFile = await ensureTodayDailyNoteFile(plugin.app);
     if (dailyFile instanceof obsidian.TFile) {
       let dailyContent = "";
-      try { dailyContent = await plugin.app.vault.read(dailyFile); } catch {}
+      try { dailyContent = await plugin.app.vault.read(dailyFile); } catch { /* intentionally empty */ }
       for (const todo of todos) {
         const todoId = getSedimentTodoId(todo);
         const entry = buildSedimentTodoDailyEntry(todo, sourceFile, todoId);

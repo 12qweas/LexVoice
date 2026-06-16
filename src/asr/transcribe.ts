@@ -23,7 +23,7 @@ export async function decodeAudioBlob(blob) {
     const ab = await blob.arrayBuffer();
     return await ctx.decodeAudioData(ab.slice(0));
   } finally {
-    try { await ctx.close(); } catch {}
+    try { await ctx.close(); } catch { /* intentionally empty */ }
   }
 }
 
@@ -215,7 +215,7 @@ export function normalizeApimimoAsrEndpoint(endpoint) {
     const path = (url.pathname || "").replace(/\/+$/, "");
     url.pathname = path + "/chat/completions";
     return url.toString().replace(/\/+$/, "");
-  } catch {}
+  } catch { /* intentionally empty */ }
   return noTrail;
 }
 
@@ -355,7 +355,7 @@ export async function transcribeAudioWithApimimo(plugin, provider, blob, mime, v
         await plugin.logDiagnostic("warn", "asr.apimimo_empty_chunk", "APIMiMo 单块转写为空", {
           chunkIndex: i, chunkCount: chunks.length, chunkBytes: chunks[i].blob && chunks[i].blob.size,
         });
-      } catch {}
+      } catch { /* intentionally empty */ }
     }
   }
   const rawText = parts.join(" ").replace(/\s+/g, " ").trim();

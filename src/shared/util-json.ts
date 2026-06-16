@@ -6,11 +6,11 @@ export function extractJsonObject(text) {
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```$/i, "")
     .trim();
-  try { return JSON.parse(raw); } catch {}
+  try { return JSON.parse(raw); } catch { /* intentionally empty */ }
   const start = raw.indexOf("{");
   const end = raw.lastIndexOf("}");
   if (start >= 0 && end > start) {
-    try { return JSON.parse(raw.slice(start, end + 1)); } catch {}
+    try { return JSON.parse(raw.slice(start, end + 1)); } catch { /* intentionally empty */ }
   }
   return null;
 }

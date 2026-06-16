@@ -20,7 +20,7 @@ export function pickReportAccentColor(app, defaultHex) {
     modal.titleEl.setText("选择报告配色");
     let chosen = defaultHex || "#E85F28";
     let settled = false;
-    const finish = (val) => { if (settled) return; settled = true; resolve(val); try { modal.close(); } catch {} };
+    const finish = (val) => { if (settled) return; settled = true; resolve(val); try { modal.close(); } catch { /* intentionally empty */ } };
     const wrap = modal.contentEl.createDiv({ cls: "lexvoice-color-pick" });
     wrap.createEl("p", { cls: "lexvoice-color-hint", text: "报告按所选色相整体重新着色，纯白弥散风格不变。可多次生成不同配色（文件名自动加序号，不覆盖旧的）。" });
     const sw = wrap.createDiv({ cls: "lexvoice-color-swatches" });
@@ -84,8 +84,8 @@ export class AudioTimeModal extends obsidian.Modal {
         try {
           const target = Math.max(0, Math.min(audio.duration || 0, this.startMs / 1000));
           audio.currentTime = target;
-          audio.play().catch(() => {});
-        } catch {}
+          audio.play().catch(() => { /* intentionally empty */ });
+        } catch { /* intentionally empty */ }
       });
     } catch (e) {
       console.error("[LexVoice] audio time modal failed", e);
@@ -101,7 +101,7 @@ export class AudioTimeModal extends obsidian.Modal {
   onClose() {
     this.contentEl.empty();
     if (this.objectUrl) {
-      try { URL.revokeObjectURL(this.objectUrl); } catch {}
+      try { URL.revokeObjectURL(this.objectUrl); } catch { /* intentionally empty */ }
       this.objectUrl = "";
     }
   }
@@ -480,7 +480,7 @@ export class QueueModal extends obsidian.Modal {
         if (t.lastError) info.createEl("div", { cls: "lexvoice-queue-error", text: t.lastError });
         const actions = row.createDiv({ cls: "lexvoice-queue-row-actions" });
         const retryBtn = actions.createEl("button", { text: "重试" });
-        retryBtn.onclick = async () => { try { await this.plugin.queue.processOne(t); } catch {} this.onOpen(); };
+        retryBtn.onclick = async () => { try { await this.plugin.queue.processOne(t); } catch { /* intentionally empty */ } this.onOpen(); };
         const delBtn = actions.createEl("button", { text: "删除" });
         delBtn.onclick = async () => {
           await this.plugin.queue.remove(t.id);
@@ -508,7 +508,7 @@ export class QueueModal extends obsidian.Modal {
 
     // 处理中时每 1.2s 重渲染，让步骤名/百分比实时更新；空闲（无活动、无运行任务）即停止刷新。
     if (activity || running.length) {
-      this._activityTimer = window.setInterval(() => { try { this.onOpen(); } catch {} }, 1200);
+      this._activityTimer = window.setInterval(() => { try { this.onOpen(); } catch { /* intentionally empty */ } }, 1200);
     }
   }
   onClose() {
@@ -2033,7 +2033,7 @@ export class BubbleWidget {
           jumpBtn.empty();
           obsidian.setIcon(jumpBtn, name);
           if (jumpBtn.querySelector("svg")) { painted = true; break; }
-        } catch {}
+        } catch { /* intentionally empty */ }
       }
       if (!painted) {
         jumpBtn.empty();
@@ -2077,7 +2077,7 @@ export class BubbleWidget {
         startLeft: parseFloat(wrapEl.style.left) || 60,
         startTop: parseFloat(wrapEl.style.top) || 120,
       };
-      try { wrapEl.setPointerCapture(e.pointerId); } catch {}
+      try { wrapEl.setPointerCapture(e.pointerId); } catch { /* intentionally empty */ }
     });
     wrapEl.addEventListener("pointermove", (e) => {
       if (!this.drag) return;
@@ -2099,7 +2099,7 @@ export class BubbleWidget {
       };
       this.plugin.saveSettings();
       this.drag = null;
-      try { wrapEl.releasePointerCapture(e.pointerId); } catch {}
+      try { wrapEl.releasePointerCapture(e.pointerId); } catch { /* intentionally empty */ }
     };
     wrapEl.addEventListener("pointerup", endDrag);
     wrapEl.addEventListener("pointercancel", endDrag);

@@ -31,12 +31,12 @@ export function getHeaderValue(headers, name) {
     if (typeof headers.get === "function") {
       return headers.get(name) || headers.get(wanted) || "";
     }
-  } catch {}
+  } catch { /* intentionally empty */ }
   try {
     for (const key of Object.keys(headers)) {
       if (String(key).toLowerCase() === wanted) return String(headers[key] || "");
     }
-  } catch {}
+  } catch { /* intentionally empty */ }
   return "";
 }
 
@@ -63,7 +63,7 @@ export function getRequestUrlText(response) {
   if (!response) return "";
   if (typeof response.text === "string") return response.text;
   if (response.arrayBuffer && typeof TextDecoder !== "undefined") {
-    try { return new TextDecoder("utf-8").decode(response.arrayBuffer); } catch {}
+    try { return new TextDecoder("utf-8").decode(response.arrayBuffer); } catch { /* intentionally empty */ }
   }
   return "";
 }

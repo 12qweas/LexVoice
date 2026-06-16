@@ -761,7 +761,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       const blob = new Blob(chunks, { type: rec.mimeType });
       return await transcribeAudio(this.plugin, blob, blob.type);
     } finally {
-      try { await ctx.close(); } catch {}
+      try { await ctx.close(); } catch { /* intentionally empty */ }
     }
   }
 
@@ -1545,7 +1545,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       for (const f of files) {
         if (f instanceof obsidian.TFolder && f.path && f.path !== "/") out.push(f.path);
       }
-    } catch {}
+    } catch { /* intentionally empty */ }
     return out.sort();
   }
 
@@ -1586,7 +1586,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         const dl = setting.settingEl.createEl("datalist");
         dl.id = listId;
         for (const fp of this.getAllVaultFolderPaths()) dl.createEl("option", { value: fp });
-      } catch {}
+      } catch { /* intentionally empty */ }
       text.onChange(async (v) => {
         await opts.setValue(String(v || "").trim());
         renderWarn(v);

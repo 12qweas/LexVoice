@@ -391,15 +391,15 @@ export async function getRecruitInterviewOutline(plugin, ctx) {
   // 1) 通用段：ctx.generalOutline 已带则用；否则再读一次 JD 现状；仍空且有 JD/素质则生成并写回
   let general = String(ctx.generalOutline || "").trim();
   if (!general && ctx.jdFile) {
-    try { const parsed = await parseJdProject(plugin.app, ctx.jdFile); general = String(parsed.统一提纲 || "").trim(); } catch {}
+    try { const parsed = await parseJdProject(plugin.app, ctx.jdFile); general = String(parsed.统一提纲 || "").trim(); } catch { /* intentionally empty */ }
   }
   if (!general && (ctx.jd || (Array.isArray(ctx.requiredQualities) && ctx.requiredQualities.length))) {
     general = await generateRecruitGeneralOutline(plugin, ctx);
-    if (general && ctx.jdFile) { try { await writeGeneralOutlineToJd(plugin.app, ctx.jdFile, general); } catch {} }
+    if (general && ctx.jdFile) { try { await writeGeneralOutlineToJd(plugin.app, ctx.jdFile, general); } catch { /* intentionally empty */ } }
   }
   // 2) 上轮待澄清
   let prevPending = [];
-  try { const prev = await findPrevRoundRecruitNote(plugin.app, ctx); if (prev && prev.pending) prevPending = prev.pending; } catch {}
+  try { const prev = await findPrevRoundRecruitNote(plugin.app, ctx); if (prev && prev.pending) prevPending = prev.pending; } catch { /* intentionally empty */ }
   // 3) 针对段
   const targeted = await generateInterviewBriefForRecruit(plugin, ctx, { generalOutline: general, prevPending });
   // 4) 组合：面试现场优先看「本场提词卡」；通用题库折叠保留，避免整屏长题库压住真正要问的问题。
@@ -732,7 +732,7 @@ export async function extractPdfTextBestEffort(app, file) {
       const content = await page.getTextContent();
       pages.push((content.items || []).map(it => (it && it.str) || "").join(" "));
     }
-    try { if (doc.destroy) doc.destroy(); } catch {}
+    try { if (doc.destroy) doc.destroy(); } catch { /* intentionally empty */ }
     return pages.join("\n").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
   } catch (e) {
     console.warn("[LexVoice] PDF 文本提取失败，回退手动粘贴", e);

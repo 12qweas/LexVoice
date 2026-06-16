@@ -251,7 +251,7 @@ export function openLexVoiceExternalUrl(url) {
       electron.shell.openExternal(url);
       return;
     }
-  } catch {}
+  } catch { /* intentionally empty */ }
   try { window.open(url, "_blank"); } catch (e) { console.warn("[LexVoice] open url failed", e); }
 }
 

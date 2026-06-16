@@ -82,7 +82,7 @@ export function normalizeAudioLinkTarget(linkPath) {
         || url.searchParams.get("target")
         || url.pathname;
     }
-  } catch {}
+  } catch { /* intentionally empty */ }
   target = safeDecodeUriText(target).replace(/^\/+/, "").trim();
   return target;
 }
