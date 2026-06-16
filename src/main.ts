@@ -15,7 +15,7 @@ import { sanitizeReportFileStem, generateHtmlReportFromMarkdown, generateStyledR
 import { parseElapsedMsToken, parseLexVoiceDurationLabel, TEXT_IMPORT_PRE_SUMMARY_CHUNK_CHARS, buildBriefingLanguageInstruction, applyBriefingLanguageInstruction, getSessionMetaDurationMs, getSegmentsDurationMs, truncateForLlmPrompt, splitLongTextForLlm } from "./shared/util-text";
 import { JOBPORTRAIT_DIMENSIONS, DEFAULT_RECRUIT_QUALITIES, isRecruitFeatureUnlocked, buildRecruitContextPrefix, getRecruitInterviewOutline, parseRecruitQualitiesFromOutput, buildCompactRecruitContextPrefix, buildRecruitTextImportMergePrompt, generateJobPortrait, normalizeRecruitContext, hasRecruitContextContent, parseJdProject, renderRecruitCandidateBase, renderRecruitAggregateBase, ensureRecruitAggregateBase, createRecruitProject, renderRecruitHomepageTemplate, listRecruitCandidateNotes, recruitRecommendationColor } from "./recruit";
 import { normalizeAsrConcurrency, decodeAudioBlob, renderAudioBufferSliceToWav, mapLimit, transcribeImportAudioChunk, resolveTranscribeProvider, makeRecordingIssue, APIMIMO_ASR_CHUNK_MS, isApimimoAsrProvider, apimimoPermanentError, transcribeAudio } from "./asr/transcribe";
-import { getFrontmatterTags, readFileFrontmatter, upsertFrontmatterInMarkdown, LEARNING_CARD_TAG, CONCEPT_CARD_TAG, TODO_CARD_TAG, getTodayDailyNoteInfo, ensureTodayDailyNoteFile } from "./shared/util-note";
+import { getFrontmatterTags, readFileFrontmatter, upsertFrontmatterInMarkdown, LEARNING_CARD_TAG, CONCEPT_CARD_TAG, TODO_CARD_TAG, ensureTodayDailyNoteFile } from "./shared/util-note";
 import { PEOPLE_SUGGESTION_CACHE_LIMIT, normalizePeopleContextMode, splitPersonFieldValue, normalizePersonLookupText, loadPeopleDirectory, buildPeopleContextForLlm, ensurePeopleNoteRelatedBaseSection, formatPeopleBaseYaml, formatPeopleNoteMarkdown, mergeUniqueStrings, normalizePeopleSuggestion, normalizePeopleSuggestionIgnores, isPeopleSuggestionIgnored, addPeopleSuggestionIgnore, removePeopleSuggestionIgnores, getPeopleSuggestionCacheKey, normalizePeopleSuggestionCache, makePeopleSuggestionCacheRecord, isPeopleSuggestionCacheRecordCurrent, peopleSuggestionRecordToSuggestion, peopleSuggestionIgnoreRecordToSuggestion, findMatchingPersonEntry, mergeSourceNoteRelatedPeopleFrontmatter, mergePersonFrontmatter, generatePeopleDirectorySuggestions, normalizePersonNameForEmail, parsePeopleFromOutput } from "./people";
 import { getSedimentTodoId, getSedimentCardId, getSedimentHotwordId, getSedimentPersonId, withSedimentCandidateIds, removeSedimentGroupDone, sanitizeSedimentText, normalizeSedimentTodoSubtasks, normalizeSedimentExtractionModel, appendSedimentPreExtractionInstruction, stripSedimentPreExtractionBlocks, extractSedimentPreExtractionBlock, splitOutSedimentBlock, appendSedimentPreExtractionBlock, upsertSedimentPreExtractionBlockInFile, generateSedimentObjects, writeSedimentObjectCards } from "./sediment";
 import { createVocabularyGroups, parseVocabularyGroups, flattenVocabularyGroups, countVocabularyGroups, normalizeVocabularyInput, mergeVocabularyGroups, isStructuredVocabularyMarkdown, loadVocabularyGroups, formatVocabularyMarkdown } from "./vocabulary";
@@ -507,10 +507,6 @@ async function fetchUpdateText(url) {
     errors.push("fetch: " + ((e && e.message) || e));
   }
   throw new Error(errors.join("；"));
-}
-
-async function fetchUpdateJson(url) {
-  return JSON.parse(await fetchUpdateText(url));
 }
 
 async function fetchUpdateTextFromSources(rawBases, fileName) {
@@ -1665,11 +1661,6 @@ function buildRealtimeOutlineDetails(session) {
   ].join("\n");
 }
 
-function isMeetingWorkbenchMode(mode) {
-  return mode === "meeting" || mode === "seminar" || mode === "huddle";
-}
-
-
 function normalizeMeetingMaterials(materials, limit = 30) {
   const normalized = [];
   const seen = new Set();
@@ -1766,31 +1757,6 @@ function detectMeetingWorkbenchInteraction(text) {
     };
   }
   return null;
-}
-
-function getMeetingWorkbenchOutlineSignature(value, maxAtMs = Infinity) {
-  const workbench = normalizeMeetingWorkbench(value);
-  const limit = Number.isFinite(Number(maxAtMs)) ? Number(maxAtMs) : Infinity;
-  const notes = String(workbench.notes || "").trim().slice(-1000);
-  const entries = workbench.entries
-    .filter(entry => (Number(entry.atMs) || 0) <= limit)
-    .slice(-80)
-    .map(entry => [
-      entry.id || "",
-      Math.round(Number(entry.atMs) || 0),
-      entry.source || "",
-      String(entry.text || "").trim(),
-      (entry.materials || []).map(item => [item.path || "", item.name || "", item.kind || ""].join("@")).join(","),
-    ].join("::"))
-    .join("|");
-  const materials = workbench.materials
-    .map(item => [item.path || "", item.name || "", item.kind || ""].join("@"))
-    .join("|");
-  return [notes, entries, materials].filter(Boolean).join("\n");
-}
-
-function getRealtimeOutlineWorkbenchSignature(session) {
-  return getMeetingWorkbenchOutlineSignature(session && session.meetingWorkbench, getSessionLatestSegmentEndMs(session));
 }
 
 function isRealtimeOutlineCurrent(session) {
@@ -2139,12 +2105,6 @@ function getAudioTimeLink(audioName, ms) {
   return `[[${name}|${formatElapsed(ms || 0)}]]`;
 }
 
-function getAudioTimeRangeLink(audioName, startMs, endMs) {
-  const name = String(audioName || "").trim();
-  if (!name) return "";
-  return `[[${name}|${formatElapsed(startMs || 0)}–${formatElapsed(endMs || 0)}]]`;
-}
-
 function getSegmentAudioLinkOffsetMs(segment) {
   const local = Number(segment && segment.audioStartOffsetMs);
   if (Number.isFinite(local) && local >= 0) return local;
@@ -2427,15 +2387,6 @@ function isSyncConflictName(name) {
 
 
 
-function parseVocabTerms(text) {
-  return flattenVocabularyGroups(parseVocabularyGroups(text));
-}
-
-
-
-
-
-
 
 function normalizeModeFromLabel(settings, label) {
   const text = String(label || "").trim();
@@ -2508,14 +2459,6 @@ const RECENT_TIME_FILTER_OPTIONS = [
   { id: "today", label: "今日" },
   { id: "month", label: "本月" },
   { id: "all", label: "全部日期" },
-];
-
-const RECENT_STATUS_FILTER_OPTIONS = [
-  { id: "all", label: "全部状态" },
-  { id: "pending", label: "待沉淀" },
-  { id: "failed", label: "转写失败" },
-  { id: "raw", label: "待整理" },
-  { id: "done", label: "已整理" },
 ];
 
 const RECENT_TOPIC_FALLBACKS = ["招聘", "学习", "会议", "访谈", "PPT", "AI"];
@@ -4605,13 +4548,6 @@ function rewriteFrontmatterRoleMappings(frontmatterText, mapping) {
   }
   return next;
 }
-
-
-function findTodayDailyNoteFile(app) {
-  const info = getTodayDailyNoteInfo(app);
-  return info ? info.file : null;
-}
-
 
 
 function extractLexVoiceSessionId(content, fallback) {
