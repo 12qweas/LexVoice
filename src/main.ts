@@ -3,68 +3,35 @@
 import * as obsidian from "obsidian";
 // 实时大纲"文本/状态纯函数层"已抽到独立模块并由 vitest 回归测试覆盖（src/outline-text.test.ts）。
 // 这里 import 回来，保持原有调用点用裸名引用不变。
-import {
-  REALTIME_OUTLINE_STATE_MAX_NODES,
-  REALTIME_OUTLINE_STATE_MAX_CHILDREN,
-  REALTIME_OUTLINE_ANCHOR_RE,
-  REALTIME_OUTLINE_ANCHOR_GLOBAL_RE,
-  REALTIME_OUTLINE_INLINE_SEP_RE,
-  REALTIME_OUTLINE_INLINE_SEP_SPLIT_RE,
-  splitRealtimeOutlineAtEmbeddedAnchors,
-  normalizeRealtimeOutlineList,
-  hashRealtimeOutlineText,
-  getRealtimeOutlineAnchorTime,
-  cleanRealtimeOutlineItemText,
-  makeRealtimeOutlineNode,
-  parseRealtimeOutlineStateFromMarkdown,
-  mergeStableRealtimeOutlineNodes,
-  normalizeOutlineMarkdownForDisplay,
-  validateRealtimeOutlineMarkdown,
-  mergeCoverageNoRegress,
-  deriveFollowupCards,
-  findLowEvidenceEntities,
-  extractMarkdownSection,
-  serializeRequiredQualities,
-  desensitizeResumeText,
-  sanitizeProjectFolderName,
-  recolorReportHtml,
-} from "./outline-text";
-import {
-  RECRUIT_REPORT_TEMPLATE,
-  SEMINAR_REPORT_TEMPLATE,
-  RECRUIT_REPORT_PROMPT,
-  SEMINAR_REPORT_PROMPT,
-} from "./report-templates";
-import { LV_SETTINGS_TABS, LexVoiceSettingTab } from "./ui/settings-tab";
-import { pickReportAccentColor, AudioTimeModal, PeopleHotwordsConsentModal, PeopleDirectorySuggestionModal, QueueModal, VirtualCableSetupModal, RecruitContextModal, PromptTemplateModal, ImportTextModal, ImportAudioModal, BubbleWidget } from "./ui/modals";
-import { LEXVOICE_UPDATE_REPO_URL, LEXVOICE_UPDATE_BRANCH, LEXVOICE_UPDATE_PLUGIN_DIR, LEXVOICE_UPDATE_RAW_BASE_URL, SUPPORTED_AUDIO_INPUT_MODES, parseGithubRepoUrl, trimSlashes, resolveUpdateRawBase, resolveUpdateRawBases, stripLexVoiceFrontmatterSimple, stripArchivedDetailsBlocks, normalizeRecentNoteMeaningfulText, noteHasSuccessfulLlmBriefing, noteHasUsableRawTranscriptDespiteFailures, getRecentNoteProcessingState, getLexVoiceImportMarkerState, lexvoiceConfirm, lexvoicePromptText, openLexVoicePickListModal, openLexVoiceExternalUrl, enumerateAudioDevices, isVirtualCableLabel, trashLexVoiceFile, pluginBasePath, normalizeAudioInputMode, audioInputModeLabel, classifyImportTextFileForModal, makeImportTextCheckboxId, countKnowledgeExtractionHistory } from "./ui/helpers";
-import { STANDARD_POLISH_MODES, ALL_POLISH_MODES, isKnownPolishMode, isCustomPromptModeTemplate, makeCustomPromptModeId, getCustomPromptModeTemplate, getCustomPromptModeTemplates, getBuiltInVisiblePolishModeKeys, getVisiblePolishModeKeys, getModeMeta, getEffectivePolishMode, getVisibleModeEntries, setLexVoiceModePillIcon, sanitizePromptTemplate } from "./shared/mode-meta";
+import { REALTIME_OUTLINE_STATE_MAX_NODES, normalizeRealtimeOutlineList, hashRealtimeOutlineText, getRealtimeOutlineAnchorTime, cleanRealtimeOutlineItemText, makeRealtimeOutlineNode, parseRealtimeOutlineStateFromMarkdown, mergeStableRealtimeOutlineNodes, normalizeOutlineMarkdownForDisplay, validateRealtimeOutlineMarkdown, mergeCoverageNoRegress, deriveFollowupCards, findLowEvidenceEntities, sanitizeProjectFolderName, recolorReportHtml } from "./outline-text";
+import { LexVoiceSettingTab } from "./ui/settings-tab";
+import { pickReportAccentColor, AudioTimeModal, PeopleDirectorySuggestionModal, QueueModal, VirtualCableSetupModal, RecruitContextModal, ImportTextModal, ImportAudioModal, BubbleWidget } from "./ui/modals";
+import { LEXVOICE_UPDATE_REPO_URL, resolveUpdateRawBase, resolveUpdateRawBases, stripLexVoiceFrontmatterSimple, getRecentNoteProcessingState, lexvoiceConfirm, enumerateAudioDevices, isVirtualCableLabel, trashLexVoiceFile, pluginBasePath, normalizeAudioInputMode, audioInputModeLabel } from "./ui/helpers";
+import { isKnownPolishMode, isCustomPromptModeTemplate, makeCustomPromptModeId, getCustomPromptModeTemplate, getCustomPromptModeTemplates, getBuiltInVisiblePolishModeKeys, getVisiblePolishModeKeys, getModeMeta, getEffectivePolishMode, getVisibleModeEntries, sanitizePromptTemplate } from "./shared/mode-meta";
 import { compareVersions, isLexVoiceMobileRuntime } from "./shared/util-platform";
 import { normalizeKnowledgeExtractionHistory } from "./shared/util-knowledge";
 import { listJDProjects } from "./recruit/jd-projects";
-import { snapshotActiveAsr, schemeIsOneKey, syncWorkingAsrToActiveScheme } from "./llm/asr-scheme";
-import { sanitizeGeneratedHtmlReport, injectHtmlReportExportScript, extractMarkdownForHtmlReport, sanitizeReportFileStem, normalizeReportArray, normalizeReportObjects, normalizeHtmlReportModel, renderReportList, renderReportParagraphs, renderReportChips, renderHtmlReport, buildHtmlReportPrompt, generateHtmlReportFromMarkdown, generateStyledReportFromMarkdown, normalizeSlideVisualItems, normalizeSlideTodos, stripHtmlCodeFence, renderDecisionPanel, renderTodoPanel, renderVisualCards, renderLogicFlow } from "./report/render";
-import { BRIEFING_LANGUAGE_LABELS, parseElapsedMsToken, parseLexVoiceDurationLabel, TEXT_IMPORT_PRE_SUMMARY_CHUNK_CHARS, getBriefingTargetLanguage, buildBriefingLanguageInstruction, applyBriefingLanguageInstruction, getSessionMetaDurationMs, getSegmentsDurationMs, truncateForLlmPrompt, splitLongTextForLlm, stripMarkdownDetailsWrapper } from "./shared/util-text";
-import { RECRUIT_ROUND_RANK, JOBPORTRAIT_DIMENSIONS, RECRUIT_CONTEXT_FLOW_COPY, DEFAULT_RECRUIT_QUALITIES, isRecruitFeatureUnlocked, buildRecruitContextPrefix, buildRecruitInterviewBriefStrategy, generateInterviewBriefForRecruit, recruitRoundRank, findPrevRoundRecruitNote, writeGeneralOutlineToJd, generateRecruitGeneralOutline, getRecruitInterviewOutline, parseRecruitQualitiesFromOutput, buildCompactRecruitContextPrefix, buildRecruitTextImportMergePrompt, buildJobPortraitMergePrompt, generateJobPortrait, getRecruitContextCopy, normalizeRecruitContext, hasRecruitContextContent, normalizeRecruitJdSignatureText, hashRecruitJdText, makeRecruitJdLibraryEntry, getRecruitJdLibrarySignature, upsertRecruitJdLibrary, getRecruitJdLibrary, applyRecruitJdLibraryItem, getRecruitJdPreview, isRecruitJdFile, parseJdProject, extractPdfTextBestEffort, listResumePdfs, renderRecruitJdTemplate, renderRecruitCandidateBase, renderRecruitAggregateBase, ensureRecruitAggregateBase, createRecruitProject, renderRecruitHomepageTemplate, listRecruitCandidateNotes, recruitRecommendationColor } from "./recruit";
-import { normalizeAsrConcurrency, IMPORT_AUDIO_CHUNK_SAMPLE_RATE, decodeAudioBlob, renderAudioBufferSliceToWav, encodeMonoWav, mapLimit, transcribeImportAudioChunk, resolveTranscribeProvider, formatUploadSize, compactErrorBody, approxBase64Bytes, buildTranscribeHttpError, makeRecordingIssue, getTranscribeRequestTimeoutMs, APIMIMO_ASR_PROTOCOL, APIMIMO_ASR_MAX_BASE64_BYTES, APIMIMO_ASR_NATIVE_EXTS, APIMIMO_ASR_CHUNK_MS, APIMIMO_ASR_MAX_CHUNKS, apimimoNativeAudioMime, isApimimoAsrProvider, normalizeApimimoAsrEndpoint, apimimoPermanentError, buildApimimoAsrChunks, extractApimimoAsrText, requestApimimoAsrChunk, transcribeAudioWithApimimo, transcribeAudio } from "./asr/transcribe";
-import { getFrontmatterTags, readFileFrontmatter, upsertFrontmatterInMarkdown, LEARNING_CARD_TAG, CONCEPT_CARD_TAG, TODO_CARD_TAG, upsertLexVoiceObjectNote, getTodayDailyNoteInfo, ensureVaultFolder, ensureTodayDailyNoteFile, isLocalServiceEndpoint } from "./shared/util-note";
-import { PEOPLE_SUGGESTION_CACHE_LIMIT, normalizePeopleContextMode, splitPersonFieldValue, normalizePersonLookupText, getFrontmatterPeople, firstPersonField, personEntryFromFrontmatter, dedupePeopleEntries, loadPeopleDirectory, hasPeopleHotwordsConsent, getPeopleNameHotwordTerms, shouldUsePeopleHotwordsForCloud, shouldUsePeopleHotwordsForAsr, shouldUseFullPeopleContextForLlm, shouldUsePeopleHotwordsForLlm, buildPeopleHotwordsContext, buildLocalPeopleContext, buildPeopleContextForLlm, buildPeopleHotwordsForAsr, formatPersonRelatedBriefingsBase, ensurePeopleNoteRelatedBaseSection, formatPeopleBaseYaml, formatPeopleNoteMarkdown, normalizePeopleArray, mergeUniqueStrings, normalizePeopleSuggestion, normalizePeopleSuggestionsModel, getPeopleSuggestionIgnoreTerms, makeStoredPeopleSuggestionForIgnore, normalizePeopleSuggestionIgnoreRecord, normalizePeopleSuggestionIgnores, isPeopleSuggestionIgnored, addPeopleSuggestionIgnore, removePeopleSuggestionIgnores, getPeopleSuggestionCacheKey, normalizePeopleSuggestionCacheRecord, normalizePeopleSuggestionCache, makePeopleSuggestionCacheRecord, isPeopleSuggestionCacheRecordCurrent, peopleSuggestionRecordToSuggestion, peopleSuggestionIgnoreRecordToSuggestion, findMatchingPersonEntry, buildPeopleDirectorySuggestionPrompt, mergeSourceNoteRelatedPeopleFrontmatter, mergePersonFrontmatter, generatePeopleDirectorySuggestions, normalizePersonNameForEmail, parsePeopleFromOutput } from "./people";
-import { SEDIMENT_PREEXTRACT_BEGIN, SEDIMENT_PREEXTRACT_END, makeSedimentStableHash, makeSedimentStableId, getSedimentTodoId, getSedimentCardId, getSedimentHotwordId, getSedimentPersonId, withSedimentCandidateIds, removeSedimentGroupDone, sanitizeSedimentText, normalizeSedimentTextList, normalizeSedimentTodoSubtasks, getSedimentSourceDateLabel, normalizeSedimentExtractionModel, buildLexVoiceObjectTags, buildSedimentPreExtractionInstruction, appendSedimentPreExtractionInstruction, getSedimentPreExtractionBlockPatterns, stripSedimentPreExtractionBlocks, extractSedimentPreExtractionBlock, formatSedimentPreExtractionBlock, splitOutSedimentBlock, appendSedimentPreExtractionBlock, upsertSedimentPreExtractionBlockInFile, buildSedimentExtractionPrompt, generateSedimentObjects, formatSedimentLearningCardMarkdown, formatSedimentTodoCardMarkdown, writeSedimentObjectCards, buildSedimentTodoDailyEntry, upsertSedimentTodoInDailyNote } from "./sediment";
-import { createVocabularyGroups, detectVocabularySectionKey, normalizeVocabularyCorrectionSide, normalizeVocabularyCorrectionTerm, normalizeVocabularyTerm, addVocabularyTerm, parseVocabularyGroups, flattenVocabularyGroups, getVocabularyCorrectionPairs, applyVocabularyCorrections, countVocabularyGroups, summarizeVocabularyGroups, normalizeVocabularyInput, mergeVocabularyGroups, isStructuredVocabularyMarkdown, loadVocabularyGroups, loadVocabularyTerms, loadVocabularyPrompt, buildVocabularyPrompt, formatVocabularyMarkdown } from "./vocabulary";
-import { withPromiseTimeout, getHeaderValue, parseRetryAfterMs, parseRequestUrlJson, getRequestUrlText } from "./shared/util-http";
-import { LlmRequestQueue, LLM_REQUEST_QUEUE, DEFAULT_LLM_REQUEST_TIMEOUT_MS, resolveLlmRequestTimeoutMs, getLlmRetryAfterMsFromHeaders, decorateLlmHttpDetail, readLlmError, createLlmHttpError, pickLlmRequestError, countLlmMessageChars, logLlmRequestDiagnostic, requestLlmChatCompletionViaObsidian, getLlmRequestPriority, runQueuedLlmRequest, accumulateLlmSseDataLine, readLlmSseStream, finalizeLlmSseContent, requestLlmChatCompletion, testLlmConnection, isTransientLlmError, getLlmRetryDelayMs, fetchLlmModelList, getLlmConfigIssue, isLlmConfigError, isLlmServiceBlockedError, isNonRetryableLlmHttpFailure, isLlmNonRetryableError, formatLlmConfigIssue, formatLlmFailureIssue, isTruncatedFinishReason, extractLlmFinishReason, callLlmWithMeta, callLlm, callBriefingMergeLlm, stripModeSuggestionBlocks } from "./llm/core";
+import { sanitizeReportFileStem, generateHtmlReportFromMarkdown, generateStyledReportFromMarkdown } from "./report/render";
+import { parseElapsedMsToken, parseLexVoiceDurationLabel, TEXT_IMPORT_PRE_SUMMARY_CHUNK_CHARS, buildBriefingLanguageInstruction, applyBriefingLanguageInstruction, getSessionMetaDurationMs, getSegmentsDurationMs, truncateForLlmPrompt, splitLongTextForLlm } from "./shared/util-text";
+import { JOBPORTRAIT_DIMENSIONS, DEFAULT_RECRUIT_QUALITIES, isRecruitFeatureUnlocked, buildRecruitContextPrefix, getRecruitInterviewOutline, parseRecruitQualitiesFromOutput, buildCompactRecruitContextPrefix, buildRecruitTextImportMergePrompt, generateJobPortrait, normalizeRecruitContext, hasRecruitContextContent, parseJdProject, renderRecruitCandidateBase, renderRecruitAggregateBase, ensureRecruitAggregateBase, createRecruitProject, renderRecruitHomepageTemplate, listRecruitCandidateNotes, recruitRecommendationColor } from "./recruit";
+import { normalizeAsrConcurrency, decodeAudioBlob, renderAudioBufferSliceToWav, mapLimit, transcribeImportAudioChunk, resolveTranscribeProvider, makeRecordingIssue, APIMIMO_ASR_CHUNK_MS, isApimimoAsrProvider, apimimoPermanentError, transcribeAudio } from "./asr/transcribe";
+import { getFrontmatterTags, readFileFrontmatter, upsertFrontmatterInMarkdown, LEARNING_CARD_TAG, CONCEPT_CARD_TAG, TODO_CARD_TAG, getTodayDailyNoteInfo, ensureTodayDailyNoteFile } from "./shared/util-note";
+import { PEOPLE_SUGGESTION_CACHE_LIMIT, normalizePeopleContextMode, splitPersonFieldValue, normalizePersonLookupText, loadPeopleDirectory, buildPeopleContextForLlm, ensurePeopleNoteRelatedBaseSection, formatPeopleBaseYaml, formatPeopleNoteMarkdown, mergeUniqueStrings, normalizePeopleSuggestion, normalizePeopleSuggestionIgnores, isPeopleSuggestionIgnored, addPeopleSuggestionIgnore, removePeopleSuggestionIgnores, getPeopleSuggestionCacheKey, normalizePeopleSuggestionCache, makePeopleSuggestionCacheRecord, isPeopleSuggestionCacheRecordCurrent, peopleSuggestionRecordToSuggestion, peopleSuggestionIgnoreRecordToSuggestion, findMatchingPersonEntry, mergeSourceNoteRelatedPeopleFrontmatter, mergePersonFrontmatter, generatePeopleDirectorySuggestions, normalizePersonNameForEmail, parsePeopleFromOutput } from "./people";
+import { getSedimentTodoId, getSedimentCardId, getSedimentHotwordId, getSedimentPersonId, withSedimentCandidateIds, removeSedimentGroupDone, sanitizeSedimentText, normalizeSedimentTodoSubtasks, normalizeSedimentExtractionModel, appendSedimentPreExtractionInstruction, stripSedimentPreExtractionBlocks, extractSedimentPreExtractionBlock, splitOutSedimentBlock, appendSedimentPreExtractionBlock, upsertSedimentPreExtractionBlockInFile, generateSedimentObjects, writeSedimentObjectCards } from "./sediment";
+import { createVocabularyGroups, parseVocabularyGroups, flattenVocabularyGroups, countVocabularyGroups, normalizeVocabularyInput, mergeVocabularyGroups, isStructuredVocabularyMarkdown, loadVocabularyGroups, formatVocabularyMarkdown } from "./vocabulary";
+import { logLlmRequestDiagnostic, requestLlmChatCompletion, getLlmConfigIssue, isLlmConfigError, isLlmServiceBlockedError, isLlmNonRetryableError, formatLlmConfigIssue, formatLlmFailureIssue, callLlm, callBriefingMergeLlm, stripModeSuggestionBlocks } from "./llm/core";
 import { DEFAULT_DAILY_MEETING_OVERVIEW_HEADING, DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE, DEFAULT_SETTINGS } from "./shared/defaults";
-import { LLM_SERVICE_PRESETS, ONE_CARD_PROVIDERS, getLlmServicePreset, normalizeLlmProfiles, findLlmProfile, syncWorkingConfigToLlmProfile, applyLlmProfileToWorkingConfig, inferLlmServicePresetId, getActiveLlmServicePresetId, getLlmOutputCeiling, getBriefingMergeDesiredTokens, getBriefingMergeMaxTokens, BRIEFING_MERGE_MAX_TOKENS_SHORT, BRIEFING_MERGE_MAX_TOKENS_MEDIUM, BRIEFING_MERGE_MAX_TOKENS_LONG, BRIEFING_MERGE_MAX_TOKENS_ULTRA, LLM_OUTPUT_CEILING_FALLBACK, normalizeSchemeAsrSnapshot } from "./llm/config";
-import { DashScopeStreamingClient, OpenAIRealtimeTranscriptionClient, OpenAIRealtimeTranslationClient, PcmStreamEncoder, lexvoiceArrayBufferToBase64 } from "./asr/clients";
+import { LLM_SERVICE_PRESETS, normalizeLlmProfiles, getLlmOutputCeiling, getBriefingMergeDesiredTokens, getBriefingMergeMaxTokens, LLM_OUTPUT_CEILING_FALLBACK } from "./llm/config";
+import { DashScopeStreamingClient, OpenAIRealtimeTranscriptionClient, OpenAIRealtimeTranslationClient, PcmStreamEncoder } from "./asr/clients";
 import { MODE_META, FRONTMATTER_SCHEMA, MODE_PREFIX_TO_KEY } from "./shared/catalog-modes";
-import { SEDIMENT_GROUP_CONFIG, SEDIMENT_GROUP_ORDER, SEDIMENT_GROUP_STATUS_LABELS, VOCABULARY_SECTIONS, PEOPLE_DIRECTORY_TAG } from "./shared/catalog-sediment";
-import { AUDIO_EXT, TEXT_IMPORT_EXT, IMPORT_TEXT_CATEGORY_CONFIG, IMPORT_TEXT_CATEGORY_ORDER, VIRTUAL_CABLE_PATTERNS } from "./shared/catalog-import";
+import { SEDIMENT_GROUP_CONFIG, SEDIMENT_GROUP_ORDER, VOCABULARY_SECTIONS } from "./shared/catalog-sediment";
+import { AUDIO_EXT, TEXT_IMPORT_EXT } from "./shared/catalog-import";
 import { isRecord, cloneJson, pickDefined, pickNonBlankString, genId, pad, formatElapsed, sanitizeFilename, escapeRegExp, stripHtmlText, safeDecodeUriText, normalizeAudioLinkTarget } from "./shared/util-common";
-import { escapeYamlScalar, escapeBaseString, makeFileWikiLink, escapeHtmlText } from "./shared/util-markdown";
-import { mimeFromExt, extFromMime, delayMs, isTransientAsrError, isAsrNonRetryableError, pickMimeType, assertAudioCaptureSupported } from "./shared/util-audio";
-import { normalizeLlmEndpoint, isLocalLlmEndpoint, isPoeLlmEndpoint, isMoonshotKimiModel, buildLlmHeaders, comparableLlmEndpoint, isPrivateNetworkHost } from "./shared/util-llm-endpoint";
-import { obfuscateApiKey, deobfuscateApiKey, LEXVOICE_KEY_OBFUSCATION_MARKER, LEXVOICE_KEY_OBFUSCATION_SALT, redactDiagnosticText, sanitizeDiagnosticData, lexvoiceXorTransform, diagnosticPathLabel, diagnosticError } from "./shared/util-key-diag";
-import { extractJsonObject, extractLlmContent } from "./shared/util-json";
+import { escapeHtmlText } from "./shared/util-markdown";
+import { mimeFromExt, extFromMime, isAsrNonRetryableError, pickMimeType, assertAudioCaptureSupported } from "./shared/util-audio";
+import { isLocalLlmEndpoint } from "./shared/util-llm-endpoint";
+import { obfuscateApiKey, deobfuscateApiKey, redactDiagnosticText, sanitizeDiagnosticData, diagnosticError } from "./shared/util-key-diag";
+import { extractJsonObject } from "./shared/util-json";
 import { MODE_BODIES } from "./prompts/mode-bodies";
 import { SHARED_DISCIPLINE, STRUCTURE_LEVEL_INSTRUCTIONS } from "./prompts/discipline";
 import { INDUSTRY_META_PROMPT } from "./prompts/industry-meta";

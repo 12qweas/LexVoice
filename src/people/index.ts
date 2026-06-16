@@ -5,7 +5,7 @@ import { PEOPLE_DIRECTORY_TAG } from '../shared/catalog-sediment';
 import { makeFileWikiLink, escapeYamlScalar, escapeBaseString } from '../shared/util-markdown';
 import { isLocalLlmEndpoint } from '../shared/util-llm-endpoint';
 import { DEFAULT_SETTINGS } from '../shared/defaults';
-import { sanitizeFilename, genId, pickNonBlankString, pickDefined } from '../shared/util-common';
+
 import { extractJsonObject } from '../shared/util-json';
 import { getFrontmatterTags, readFileFrontmatter, isLocalServiceEndpoint } from '../shared/util-note';
 import { callLlm } from '../llm/core';

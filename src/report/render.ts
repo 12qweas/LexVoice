@@ -3,10 +3,7 @@
 // 由 main.ts 抽出（模块化拆解，提升工程稳定性；纯搬迁、零行为改动）。
 import { extractJsonObject } from '../shared/util-json';
 import { escapeHtmlText } from '../shared/util-markdown';
-import { sanitizeFilename, pickDefined, pickNonBlankString, isRecord } from '../shared/util-common';
-import { truncateForLlmPrompt, splitLongTextForLlm, getSessionMetaDurationMs, getSegmentsDurationMs, applyBriefingLanguageInstruction } from '../shared/util-text';
-import { DEFAULT_SETTINGS } from '../shared/defaults';
-import { recolorReportHtml, extractMarkdownSection } from '../outline-text';
+import { isRecord } from '../shared/util-common';
 import { RECRUIT_REPORT_TEMPLATE, SEMINAR_REPORT_TEMPLATE, RECRUIT_REPORT_PROMPT, SEMINAR_REPORT_PROMPT } from '../report-templates';
 import { callLlm } from '../llm/core';
 

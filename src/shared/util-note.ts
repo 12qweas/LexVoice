@@ -2,7 +2,6 @@
 // 由 main.ts 抽出（模块化拆解，提升工程稳定性；纯搬迁、零行为改动）。
 import * as obsidian from "obsidian";
 import { sanitizeFilename } from './util-common';
-import { escapeYamlScalar } from './util-markdown';
 import { isPrivateNetworkHost } from './util-llm-endpoint';
 
 export function getFrontmatterTags(frontmatter) {

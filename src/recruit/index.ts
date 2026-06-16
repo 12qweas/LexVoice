@@ -1,15 +1,10 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- LexVoice's settings/data layer is intentionally dynamically typed (files use @ts-nocheck and read untyped JSON from loadData); these type-only rules yield no actionable findings here and are tracked for incremental typing */
 // 由 main.ts 抽出（模块化拆解，提升工程稳定性；纯搬迁、零行为改动）。
 import * as obsidian from "obsidian";
-import { sanitizeFilename, genId, pickDefined, pickNonBlankString } from '../shared/util-common';
-import { makeFileWikiLink, escapeYamlScalar } from '../shared/util-markdown';
-import { readFileFrontmatter, getFrontmatterTags, upsertFrontmatterInMarkdown, ensureVaultFolder } from '../shared/util-note';
-import { extractJsonObject } from '../shared/util-json';
 import { FRONTMATTER_SCHEMA } from '../shared/catalog-modes';
-import { DEFAULT_SETTINGS } from '../shared/defaults';
-import { truncateForLlmPrompt, splitLongTextForLlm, stripMarkdownDetailsWrapper, getBriefingTargetLanguage, buildBriefingLanguageInstruction, applyBriefingLanguageInstruction, getSessionMetaDurationMs, getSegmentsDurationMs } from '../shared/util-text';
-import { serializeRequiredQualities, desensitizeResumeText, extractMarkdownSection, sanitizeProjectFolderName } from '../outline-text';
-import { JOBPORTRAIT_SYSTEM_PROMPT, JOBPORTRAIT_FOLLOWUP_RULES } from '../prompts/recruit-hrbp';
+import { truncateForLlmPrompt, stripMarkdownDetailsWrapper, applyBriefingLanguageInstruction, getSessionMetaDurationMs, getSegmentsDurationMs } from '../shared/util-text';
+import { serializeRequiredQualities, extractMarkdownSection, sanitizeProjectFolderName } from '../outline-text';
+import { JOBPORTRAIT_SYSTEM_PROMPT } from '../prompts/recruit-hrbp';
 import { getBriefingMergeMaxTokens } from '../llm/config';
 import { callLlm, callBriefingMergeLlm, stripModeSuggestionBlocks } from '../llm/core';
 
