@@ -219,7 +219,7 @@ export function normalizeLlmProfiles(input) {
     const name = String(item.name || "").trim();
     if (!id || seen.has(id)) continue;
     seen.add(id);
-    const profile: Record<string, any> = {
+    const profile: Record<string, unknown> = {
       id,
       name: name || "未命名配置",
       endpoint: String(item.endpoint || "").trim(),

@@ -73,7 +73,7 @@ export function diagnosticPathLabel(path) {
 
 export function diagnosticError(error) {
   const e = error || {};
-  const out: Record<string, any> = {
+  const out: Record<string, unknown> = {
     name: redactDiagnosticText(e.name || "Error"),
     message: redactDiagnosticText(e.message || String(error || "")),
     stack: e.stack ? redactDiagnosticText(String(e.stack).split("\n").slice(0, 4).join("\n")) : "",
