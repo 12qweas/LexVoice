@@ -6101,7 +6101,7 @@ class OutlineView extends obsidian.ItemView {
         && this.plugin.session
         && this.plugin.session.segments.length > 0
         && !this.aiOutline) {
-      window.setTimeout(() => this.refreshAIOutline({ silent: true }), 400);
+      window.setTimeout(() => { void this.refreshAIOutline({ silent: true }); }, 400);
     }
   }
   async onClose() {
@@ -7010,7 +7010,7 @@ class OutlineView extends obsidian.ItemView {
       const meta = content.createDiv({ cls: "lexvoice-sediment-field-row" });
       const ownerField = this.renderSedimentField(meta, "user", raw.owner || "加责任人", raw.owner ? "" : "is-empty");
       ownerField.dataset.field = "owner";
-      ownerField.onclick = (evt) => { evt.stopPropagation(); this.enterTodoOwnerEdit(ownerField, content, file, raw); };
+      ownerField.onclick = (evt) => { evt.stopPropagation(); void this.enterTodoOwnerEdit(ownerField, content, file, raw); };
       const dueField = this.renderSedimentField(meta, "calendar-plus", raw.due || "加时间", raw.due ? "is-time" : "is-empty");
       dueField.dataset.field = "due";
       dueField.onclick = (evt) => { evt.stopPropagation(); this.enterTodoDueEdit(dueField, content, file, raw); };
@@ -7113,11 +7113,11 @@ class OutlineView extends obsidian.ItemView {
       }
     };
     const onKey = (e) => {
-      if (e.key === "Enter") { e.preventDefault(); finish(true, null); }
-      else if (e.key === "Escape") { e.preventDefault(); titleEl.textContent = original; finish(false, null); }
+      if (e.key === "Enter") { e.preventDefault(); void finish(true, null); }
+      else if (e.key === "Escape") { e.preventDefault(); titleEl.textContent = original; void finish(false, null); }
       else if (e.key === "Tab") {
         e.preventDefault();
-        finish(true, e.shiftKey ? null : "owner");
+        void finish(true, e.shiftKey ? null : "owner");
       }
     };
     const onBlur = () => finish(true, null);
@@ -7158,7 +7158,7 @@ class OutlineView extends obsidian.ItemView {
         try { obsidian.setIcon(cur.createSpan({ cls: "lexvoice-todo-inline-item-icon" }), "user-check"); } catch { /* intentionally empty */ }
         cur.createSpan({ cls: "lexvoice-todo-inline-item-name", text: raw.owner });
         const clr = cur.createSpan({ cls: "lexvoice-todo-inline-item-clear", text: "清除" });
-        clr.onclick = (e) => { e.stopPropagation(); finish("", null); };
+        clr.onclick = (e) => { e.stopPropagation(); void finish("", null); };
         cur.dataset.value = raw.owner;
         cur.onclick = () => finish(raw.owner, null);
         items.push(cur);
@@ -7206,14 +7206,14 @@ class OutlineView extends obsidian.ItemView {
       else if (e.key === "Enter") {
         e.preventDefault();
         const target = items[selectedIdx];
-        if (target) finish(target.dataset.value || "", null);
-        else if (input.value.trim()) finish(input.value.trim(), null);
+        if (target) void finish(target.dataset.value || "", null);
+        else if (input.value.trim()) void finish(input.value.trim(), null);
       }
-      else if (e.key === "Escape") { e.preventDefault(); finish(raw.owner || "", null); }
-      else if (e.key === "Tab") { e.preventDefault(); finish(input.value.trim() || (raw.owner || ""), e.shiftKey ? "title" : "due"); }
+      else if (e.key === "Escape") { e.preventDefault(); void finish(raw.owner || "", null); }
+      else if (e.key === "Tab") { e.preventDefault(); void finish(input.value.trim() || (raw.owner || ""), e.shiftKey ? "title" : "due"); }
     };
     const onOutside = (e) => {
-      if (!panel.contains(e.target) && e.target !== input && !input.contains(e.target)) finish(input.value.trim() || (raw.owner || ""), null);
+      if (!panel.contains(e.target) && e.target !== input && !input.contains(e.target)) void finish(input.value.trim() || (raw.owner || ""), null);
     };
     const cleanup = () => {
       input.removeEventListener("input", onInput);
@@ -7266,7 +7266,7 @@ class OutlineView extends obsidian.ItemView {
       const dateInput = bar.createEl("input", { cls: "lexvoice-todo-inline-date", attr: { type: "date" } });
       const currentISO = raw.due && /^\d{4}-\d{2}-\d{2}/.test(raw.due) ? raw.due.slice(0, 10) : "";
       dateInput.value = currentISO;
-      dateInput.onchange = () => { if (dateInput.value) finish(dateInput.value, null); };
+      dateInput.onchange = () => { if (dateInput.value) void finish(dateInput.value, null); };
       dateInput.focus();
       try { dateInput.click(); } catch { /* intentionally empty */ }
     };
@@ -7284,14 +7284,14 @@ class OutlineView extends obsidian.ItemView {
       }
     };
     const onKey = (e) => {
-      if (e.key === "Escape") { e.preventDefault(); finish(raw.due || "", null); }
-      else if (e.key === "Tab") { e.preventDefault(); finish(raw.due || "", e.shiftKey ? "owner" : "subtasks"); }
+      if (e.key === "Escape") { e.preventDefault(); void finish(raw.due || "", null); }
+      else if (e.key === "Tab") { e.preventDefault(); void finish(raw.due || "", e.shiftKey ? "owner" : "subtasks"); }
       else if (["1","2","3","4","5"].includes(e.key)) {
         const btn = bar.querySelector(`[data-key="${e.key}"]`);
         if (btn) { e.preventDefault(); btn.click(); }
       }
     };
-    const onOutside = (e) => { if (!panel.contains(e.target) && e.target !== fieldEl) finish(raw.due || "", null); };
+    const onOutside = (e) => { if (!panel.contains(e.target) && e.target !== fieldEl) void finish(raw.due || "", null); };
     const cleanup = () => {
       activeDocument.removeEventListener("keydown", onKey, true);
       activeDocument.removeEventListener("mousedown", onOutside, true);
@@ -7325,7 +7325,7 @@ class OutlineView extends obsidian.ItemView {
         const cleaned = next.map((s) => String(s || "").trim()).filter(Boolean);
         await this.updateSedimentTodoCandidate(file, raw, { subtasks: cleaned });
       };
-      text.addEventListener("blur", () => { saveIfChanged(); });
+      text.addEventListener("blur", () => { void saveIfChanged(); });
       text.addEventListener("keydown", (e) => {
         if (e.key === "Enter") { e.preventDefault(); text.blur(); }
         else if (e.key === "Escape") {
@@ -7495,10 +7495,10 @@ class OutlineView extends obsidian.ItemView {
           addInput.focus();
         }
       }
-      else if (e.key === "Escape") { e.preventDefault(); finish(null); }
-      else if (e.key === "Tab") { e.preventDefault(); finish(e.shiftKey ? "due" : null); }
+      else if (e.key === "Escape") { e.preventDefault(); void finish(null); }
+      else if (e.key === "Tab") { e.preventDefault(); void finish(e.shiftKey ? "due" : null); }
     };
-    const onOutside = (e) => { if (!panel.contains(e.target) && e.target !== fieldEl) finish(null); };
+    const onOutside = (e) => { if (!panel.contains(e.target) && e.target !== fieldEl) void finish(null); };
     const cleanup = () => {
       addInput.removeEventListener("keydown", onAddKey);
       activeDocument.removeEventListener("mousedown", onOutside, true);
@@ -7567,8 +7567,8 @@ class OutlineView extends obsidian.ItemView {
       }
     };
     const onKey = (e) => {
-      if (e.key === "Enter") { e.preventDefault(); finish(true); }
-      else if (e.key === "Escape") { e.preventDefault(); titleEl.textContent = before; finish(false); }
+      if (e.key === "Enter") { e.preventDefault(); void finish(true); }
+      else if (e.key === "Escape") { e.preventDefault(); titleEl.textContent = before; void finish(false); }
     };
     const onBlur = () => finish(true);
     titleEl.addEventListener("keydown", onKey);
@@ -7780,7 +7780,7 @@ class OutlineView extends obsidian.ItemView {
     pop.style.top = `${rect.bottom + 6}px`;
 
     // 渲染对应内容
-    if (field === "owner") this.renderTodoOwnerPopover(pop, file, todo);
+    if (field === "owner") void this.renderTodoOwnerPopover(pop, file, todo);
     else if (field === "due") this.renderTodoDuePopover(pop, file, todo);
     else if (field === "subtasks") this.renderTodoSubtasksPopover(pop, file, todo);
 
@@ -8158,7 +8158,7 @@ class OutlineView extends obsidian.ItemView {
       this.confirmSedimentRescan(file);
       return;
     }
-    this.extractSedimentForFile(file);
+    void this.extractSedimentForFile(file);
   }
 
   getSedimentPendingCandidateCount(file) {
@@ -8745,7 +8745,7 @@ class OutlineView extends obsidian.ItemView {
     const outlineBody = outlineSec.createDiv({ cls: "lexvoice-outline-ai-body" });
     if (data.outline) {
       const rendered = obsidian.MarkdownRenderer.render(this.app, normalizeOutlineMarkdownForDisplay(data.outline), outlineBody, file.path, this);
-      Promise.resolve(rendered).then(() => {
+      void Promise.resolve(rendered).then(() => {
         this.enhanceRenderedOutline(outlineBody, {
           sourcePath: file.path,
           onTimeLink: (payload) => this.seekInlineAudio(payload),
@@ -8762,7 +8762,7 @@ class OutlineView extends obsidian.ItemView {
       timelineSec.createDiv({ cls: "lexvoice-outline-section-title", text: "回听时间轴" });
       const timelineBody = timelineSec.createDiv({ cls: "lexvoice-outline-ai-body lexvoice-outline-note-timeline" });
       const rendered = obsidian.MarkdownRenderer.render(this.app, data.timeline, timelineBody, file.path, this);
-      Promise.resolve(rendered).then(() => this.plugin.enhanceAudioTimeLinks(timelineBody, {
+      void Promise.resolve(rendered).then(() => this.plugin.enhanceAudioTimeLinks(timelineBody, {
         sourcePath: file.path,
         onTimeLink: (payload) => this.seekInlineAudio(payload),
       }));
@@ -9179,7 +9179,7 @@ class OutlineView extends obsidian.ItemView {
     });
     action.onclick = () => {
       if (isNetwork) {
-        this.refreshAIOutline({ silent: false });
+        void this.refreshAIOutline({ silent: false });
         return;
       }
       new obsidian.Notice(issue.message ? `AI 服务暂时不可用：${issue.message}` : "AI 服务暂时不可用，本地录音仍在继续。", 8000);
@@ -9338,7 +9338,7 @@ class OutlineView extends obsidian.ItemView {
 
     // 设备状态条：根据当前音频输入方式检测对应硬件，给出可见反馈
     const devStatus = controls.createDiv({ cls: "lexvoice-outline-device-status" });
-    this.renderDeviceStatus(devStatus, currentInputMode);
+    void this.renderDeviceStatus(devStatus, currentInputMode);
 
     const actions = controls.createDiv({ cls: "lexvoice-outline-actions" });
     const startBtn = actions.createEl("button", { cls: "mod-cta lexvoice-outline-action-button is-record", attr: { type: "button" } });
@@ -9449,13 +9449,13 @@ class OutlineView extends obsidian.ItemView {
       chip.createSpan({ text: entry.interaction.assignee || "未指定" });
       if (entry.interaction.task) {
         const txt = body.createDiv({ cls: "lexvoice-outline-annotation-text" });
-        try { obsidian.MarkdownRenderer.render(this.app, entry.interaction.task, txt, sourcePath, this); }
+        try { void obsidian.MarkdownRenderer.render(this.app, entry.interaction.task, txt, sourcePath, this); }
         catch (e) { txt.setText(entry.interaction.task); }
       }
     } else if (entry.text) {
       const txt = body.createDiv({ cls: "lexvoice-outline-annotation-text" });
       // 渲染 Markdown，让用户补充的内容里的 **粗体** / *斜体* / 列表等正常显示
-      try { obsidian.MarkdownRenderer.render(this.app, entry.text, txt, sourcePath, this); }
+      try { void obsidian.MarkdownRenderer.render(this.app, entry.text, txt, sourcePath, this); }
       catch (e) { console.warn("[LexVoice] annotation text markdown render failed", e); txt.setText(entry.text); }
     }
     if (entry.interaction && (entry.interaction.status || entry.interaction.response || entry.interaction.error)) {
@@ -9467,7 +9467,7 @@ class OutlineView extends obsidian.ItemView {
         reply.empty();
         reply.createSpan({ cls: "lexvoice-outline-annotation-ai-label", text: "AI" });
         const replyBody = reply.createDiv({ cls: "lexvoice-outline-annotation-ai-body" });
-        try { obsidian.MarkdownRenderer.render(this.app, entry.interaction.response, replyBody, sourcePath, this); }
+        try { void obsidian.MarkdownRenderer.render(this.app, entry.interaction.response, replyBody, sourcePath, this); }
         catch (e) { console.warn("[LexVoice] annotation AI reply markdown render failed", e); replyBody.setText(entry.interaction.response); }
       } else if (entry.interaction.error) {
         reply.setText(`AI 补充失败：${entry.interaction.error}`);
@@ -9766,7 +9766,7 @@ class OutlineView extends obsidian.ItemView {
     refreshBtn.disabled = !session || session.segments.length === 0;
     refreshBtn.onclick = () => {
       if (this.outlineRunning) this.cancelOutlineGeneration();
-      else this.refreshAIOutline();
+      else void this.refreshAIOutline();
     };
 
     const body = aiWrap.createDiv({ cls: "lexvoice-outline-ai-body" });
@@ -9807,7 +9807,7 @@ class OutlineView extends obsidian.ItemView {
         decorateAfterRender();
       } else {
         const rendered = obsidian.MarkdownRenderer.render(this.app, outlineText, body, sourcePath, this);
-        Promise.resolve(rendered).then(decorateAfterRender);
+        void Promise.resolve(rendered).then(decorateAfterRender);
       }
     } else if (recordingIssue && recordingIssue.kind === "service") {
       this.renderServiceOutlineFallback(body);
@@ -10882,7 +10882,7 @@ class OutlineView extends obsidian.ItemView {
         if (shouldRunRealtimeOutline(this.plugin.session, { silent: true, local })) {
           const nextAllowedAt = Number(this.plugin.session && this.plugin.session.realtimeOutlineNextAllowedAt) || 0;
           const wait = Math.max(1000, nextAllowedAt - Date.now());
-          window.setTimeout(() => this.refreshAIOutline({ silent: true }), wait);
+          window.setTimeout(() => { void this.refreshAIOutline({ silent: true }); }, wait);
         }
       }
     }
@@ -10930,7 +10930,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     this.addCommand({ id: "polish-selection-or-note", name: "AI 润色：当前选区或整篇", editorCallback: (editor) => this.polishEditor(editor) });
     this.addCommand({ id: "toggle-floating-ball", name: "显示/隐藏悬浮气泡（总开关）", callback: () => {
       this.settings.showFloatingBall = !this.settings.showFloatingBall;
-      this.saveSettings();
+      void this.saveSettings();
       this.syncBubbleVisibility();
       new obsidian.Notice(this.settings.showFloatingBall ? "浮窗已启用（常驻显示，可拖动）" : "浮窗已关闭");
     }});
@@ -10950,7 +10950,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         const isMd = file instanceof obsidian.TFile && file.extension === "md";
         if (!isMd) return false;
         if (checking) return true;
-        this.generateHtmlReportForMarkdownFile(file);
+        void this.generateHtmlReportForMarkdownFile(file);
         return true;
       },
     });
@@ -10962,16 +10962,16 @@ class LexVoicePlugin extends obsidian.Plugin {
         const isMd = file instanceof obsidian.TFile && file.extension === "md";
         if (!isMd) return false;
         if (checking) return true;
-        this.generatePdfReportForMarkdownFile(file);
+        void this.generatePdfReportForMarkdownFile(file);
         return true;
       },
     });
     this.addCommand({ id: "check-updates", name: "检查 LexVoice 更新", callback: () => this.checkForUpdates({ silent: false }) });
     this.addCommand({ id: "install-update", name: "安装 LexVoice 可用更新", callback: () => this.installAvailableUpdate() });
     this.addCommand({ id: "open-outline", name: "打开实时纪要面板", callback: () => this.openOutlineView() });
-    this.addCommand({ id: "record-mic-only", name: "开始录音 · 仅麦克风", callback: () => { this._oneShotCaptureMode = "mic"; this.startRecording(); } });
-    this.addCommand({ id: "record-mic-virtual", name: "开始录音 · 麦克风 + 电脑音频", callback: () => { this._oneShotCaptureMode = "mix-virtual"; this.startRecording(); } });
-    this.addCommand({ id: "record-virtual-only", name: "开始录音 · 仅电脑音频", callback: () => { this._oneShotCaptureMode = "virtualCable"; this.startRecording(); } });
+    this.addCommand({ id: "record-mic-only", name: "开始录音 · 仅麦克风", callback: () => { this._oneShotCaptureMode = "mic"; void this.startRecording(); } });
+    this.addCommand({ id: "record-mic-virtual", name: "开始录音 · 麦克风 + 电脑音频", callback: () => { this._oneShotCaptureMode = "mix-virtual"; void this.startRecording(); } });
+    this.addCommand({ id: "record-virtual-only", name: "开始录音 · 仅电脑音频", callback: () => { this._oneShotCaptureMode = "virtualCable"; void this.startRecording(); } });
     this.addCommand({ id: "import-text", name: "导入已有文本 / MD 结构化整理", callback: () => new ImportTextModal(this.app, this).open() });
 
     this.settingTab = new LexVoiceSettingTab(this.app, this);
@@ -11122,7 +11122,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         const mode = isMd ? this.detectModeFromMarkdown(file) : null;
         if (!isMd || !mode) return false;
         if (checking) return true;
-        this.repolishMarkdownFile(file, mode);
+        void this.repolishMarkdownFile(file, mode);
         return true;
       },
     });
@@ -11162,7 +11162,7 @@ class LexVoicePlugin extends obsidian.Plugin {
 
     if (this.queue.tasks.length > 0) {
       new obsidian.Notice(`LexVoice：发现 ${this.queue.tasks.length} 个待处理任务，后台重试中…`);
-      window.setTimeout(() => this.retryQueue(), 2500);
+      window.setTimeout(() => { void this.retryQueue(); }, 2500);
     }
     this.app.workspace.onLayoutReady(() => this.checkForUpdatesOnStartup());
   }
@@ -11657,7 +11657,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     return () => {
       if (scheduled) return;
       scheduled = true;
-      window.setTimeout(flush, 1500);
+      window.setTimeout(() => { void flush(); }, 1500);
     };
   }
 
@@ -12079,7 +12079,7 @@ class LexVoicePlugin extends obsidian.Plugin {
           v.refreshAIOutline({ silent: true });
         }
       }
-      if (!handledByView) this.refreshRealtimeOutlineInBackground({ silent: true });
+      if (!handledByView) void this.refreshRealtimeOutlineInBackground({ silent: true });
     }, delay);
   }
 
@@ -12130,7 +12130,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         if (shouldRunRealtimeOutline(this.session, { silent: true, local })) {
           const nextAllowedAt = Number(this.session && this.session.realtimeOutlineNextAllowedAt) || 0;
           const wait = Math.max(1000, nextAllowedAt - Date.now());
-          window.setTimeout(() => this.refreshRealtimeOutlineInBackground({ silent: true }), wait);
+          window.setTimeout(() => { void this.refreshRealtimeOutlineInBackground({ silent: true }); }, wait);
         }
       }
     }
@@ -12518,7 +12518,7 @@ class LexVoicePlugin extends obsidian.Plugin {
   async openOutlineView() {
     const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_OUTLINE);
     if (existing.length) {
-      this.app.workspace.revealLeaf(existing[0]);
+      void this.app.workspace.revealLeaf(existing[0]);
       this.syncBubbleVisibility();
       return;
     }
@@ -12526,7 +12526,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       ? this.app.workspace.getLeaf(true)
       : (this.app.workspace.getRightLeaf(false) || this.app.workspace.getLeaf(true));
     await leaf.setViewState({ type: VIEW_TYPE_OUTLINE, active: true });
-    this.app.workspace.revealLeaf(leaf);
+    void this.app.workspace.revealLeaf(leaf);
     this.syncBubbleVisibility();
   }
 
@@ -13564,7 +13564,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         box.createSpan({ text: "数据加载失败。" });
         box.createEl("button", { text: "重试" }).onclick = () => go();
       });
-      go();
+      void go();
     });
   }
 
@@ -13637,7 +13637,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       const li = list.createEl("li");
       const label = `${n.候选人 || "候选人"}${n.轮次 ? " · " + n.轮次 : ""}${n.项目 ? "（" + n.项目 + "）" : ""}`;
       const a = li.createEl("a", { text: label, href: "#" });
-      a.onclick = (e) => { e.preventDefault(); this.app.workspace.openLinkText(n.path, "", false); };
+      a.onclick = (e) => { e.preventDefault(); void this.app.workspace.openLinkText(n.path, "", false); };
     }
   }
 

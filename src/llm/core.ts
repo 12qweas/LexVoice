@@ -35,7 +35,7 @@ export class LlmRequestQueue {
       .shift();
     if (!next) return;
     this.running += 1;
-    Promise.resolve()
+    void Promise.resolve()
       .then(next.run)
       .then(next.resolve, next.reject)
       .finally(() => {

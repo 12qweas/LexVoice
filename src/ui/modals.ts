@@ -94,7 +94,7 @@ export class AudioTimeModal extends obsidian.Modal {
 
     const actions = contentEl.createDiv({ cls: "lexvoice-audio-modal-actions" });
     actions.createEl("button", { text: "打开音频文件" }).onclick = () => {
-      this.app.workspace.getLeaf(false).openFile(this.file);
+      void this.app.workspace.getLeaf(false).openFile(this.file);
     };
   }
 
@@ -750,7 +750,7 @@ export class RecruitContextModal extends obsidian.Modal {
         sel.createEl("option", { value: p.jdFilePath, text: `${p.position}（已面 ${p.interviewed} 人）${tag}` });
       }
       sel.value = this.ctx.jdFile || "";
-      sel.addEventListener("change", () => { this.applyJdProjectSelection(sel.value); });
+      sel.addEventListener("change", () => { void this.applyJdProjectSelection(sel.value); });
       this._jdProjectSel = sel;
       const saveBtn = projRow.createEl("button", { text: "＋ 存为招聘项目", cls: "lexvoice-recruit-lib-btn" });
       saveBtn.onclick = () => this.saveAsProject();
@@ -780,7 +780,7 @@ export class RecruitContextModal extends obsidian.Modal {
         const pdfSel = resumeHead.createEl("select", { cls: "lexvoice-recruit-input dropdown lexvoice-recruit-pdf-sel" });
         pdfSel.createEl("option", { value: "", text: "从简历库选 PDF…" });
         for (const f of pdfs) pdfSel.createEl("option", { value: f.path, text: f.basename });
-        pdfSel.addEventListener("change", async () => {
+        pdfSel.addEventListener("change", () => { void (async () => {
           const p = pdfSel.value;
           pdfSel.value = "";
           if (!p) return;
@@ -796,7 +796,7 @@ export class RecruitContextModal extends obsidian.Modal {
           this.clearCachedInterviewBrief();
           if (this.formEls.resume) this.formEls.resume.value = text;
           new obsidian.Notice("已提取简历文本，可在下方编辑");
-        });
+        })(); });
       }
     }
     const resumeTa = resumeSec.createEl("textarea", { cls: "lexvoice-recruit-textarea" });
@@ -1359,7 +1359,7 @@ export class ImportTextModal extends obsidian.Modal {
 
     this.listEl = contentEl.createDiv({ cls: "lexvoice-import-list" });
     this.renderFileList();
-    this.loadTextFiles();
+    void this.loadTextFiles();
 
     const actions = contentEl.createDiv({ cls: "lexvoice-import-actions" });
     this.processBtn = actions.createEl("button", { text: "开始处理（0 个文件）", cls: "mod-cta" });

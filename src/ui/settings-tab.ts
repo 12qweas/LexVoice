@@ -598,7 +598,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         await this.populateAudioInputMicSelect(micSelect, micHint);
         new obsidian.Notice(micSelect.value ? "麦克风选择已保存" : "请选择一个麦克风");
       });
-      this.populateAudioInputMicSelect(micSelect, micHint);
+      void this.populateAudioInputMicSelect(micSelect, micHint);
     }
 
     // 电脑音频选择器：仅电脑音频 / 混合模式下显示（原来藏在「设备检测」里，现在直接放到主卡片）
@@ -614,7 +614,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         await this.populateAudioInputVirtualSelect(vcSelect, vcHint);
         new obsidian.Notice(vcSelect.value ? "电脑音频输入选择已保存" : "请选择一个电脑音频输入");
       });
-      this.populateAudioInputVirtualSelect(vcSelect, vcHint);
+      void this.populateAudioInputVirtualSelect(vcSelect, vcHint);
     }
 
     const warning = card.createDiv({ cls: "lexvoice-audio-input-warning" });
@@ -1667,7 +1667,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
           await this.plugin.saveSettings();
         });
         // 失焦回显真正保存的值，避免"输入框显示 100、实际存 30"的所见非所存
-        t.inputEl.addEventListener("blur", () => t.setValue(String(this.plugin.settings.segmentIntervalMinutes)));
+        t.inputEl.addEventListener("blur", () => { t.setValue(String(this.plugin.settings.segmentIntervalMinutes)); });
       });
 
     new obsidian.Setting(c).setName("转写并发数")
@@ -1778,7 +1778,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
           this.plugin.settings.inboxStabilizeDelayMs = clamped;
           await this.plugin.saveSettings();
         });
-        t.inputEl.addEventListener("blur", () => t.setValue(String(this.plugin.settings.inboxStabilizeDelayMs ?? 3000)));
+        t.inputEl.addEventListener("blur", () => { t.setValue(String(this.plugin.settings.inboxStabilizeDelayMs ?? 3000)); });
       });
 
     new obsidian.Setting(c).setName("立即扫描收件箱")
@@ -1804,7 +1804,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
           this.plugin.settings.maxRetries = clamped;
           await this.plugin.saveSettings();
         });
-        t.inputEl.addEventListener("blur", () => t.setValue(String(this.plugin.settings.maxRetries || 3)));
+        t.inputEl.addEventListener("blur", () => { t.setValue(String(this.plugin.settings.maxRetries || 3)); });
       });
 
     new obsidian.Setting(c).setName("待处理队列")
