@@ -43,7 +43,7 @@ import { compareVersions, isLexVoiceMobileRuntime } from "./shared/util-platform
 import { normalizeKnowledgeExtractionHistory } from "./shared/util-knowledge";
 import { listJDProjects } from "./recruit/jd-projects";
 import { snapshotActiveAsr, schemeIsOneKey, syncWorkingAsrToActiveScheme } from "./llm/asr-scheme";
-import { sanitizeGeneratedHtmlReport, injectHtmlReportExportScript, extractMarkdownForHtmlReport, sanitizeReportFileStem, normalizeReportArray, normalizeReportObjects, normalizeHtmlReportModel, renderReportList, renderReportParagraphs, renderReportChips, renderHtmlReport, buildHtmlReportPrompt, generateHtmlReportFromMarkdown, generateStyledReportFromMarkdown, normalizeSlideVisualItems, normalizeSlideTodos, LEXVOICE_DECK_THEMES, LEXVOICE_LAYOUT_PRESETS, LEXVOICE_LAYOUT_ALIASES, normalizeDeckThemePreset, getDeckTheme, normalizeHtmlDeckModel, renderDeckPoints, renderDeckMetricGrid, renderDeckBars, renderDeckTree, renderDeckMatrix, renderDeckQuote, renderDeckFlow, renderDeckRowline, renderDeckPillars, renderDeckVisual, renderHtmlDeck, injectHtmlDeckExportScript, normalizePptSlideRange, buildHtmlDeckPrompt, generateDeckModelFromMarkdown, generateHtmlDeckFromMarkdown, generateEditablePptxFromMarkdown, pptxIn, pptxXml, pptxColor, pptxAlphaXml, pptxSolidFill, pptxLineFill, pptxShortText, pptxTextParagraphs, pptxTextBox, pptxShape, pptxRect, pptxLine, pptxSlideBase, pptxDecorativeBackdrop, pptxCommonSlideChrome, pptxRenderVisualShapes, pptxRenderSlide, pptxRelsXml, pptxContentTypesXml, pptxPresentationXml, pptxMasterXml, pptxLayoutXml, pptxThemeXml, pptxCoreXml, pptxAppXml, createStoreZip, renderEditablePptxDeck, stripHtmlCodeFence, renderDecisionPanel, renderTodoPanel, renderVisualCards, renderLogicFlow, hexToRgbParts, normalizeLayoutPreset, getLayoutPresetInfo, extractVisualNumber, PPTX_W, PPTX_H, PPTX_DPI, crc32, zipDosDateTime, u16, u32 } from "./report/render";
+import { sanitizeGeneratedHtmlReport, injectHtmlReportExportScript, extractMarkdownForHtmlReport, sanitizeReportFileStem, normalizeReportArray, normalizeReportObjects, normalizeHtmlReportModel, renderReportList, renderReportParagraphs, renderReportChips, renderHtmlReport, buildHtmlReportPrompt, generateHtmlReportFromMarkdown, generateStyledReportFromMarkdown, normalizeSlideVisualItems, normalizeSlideTodos, stripHtmlCodeFence, renderDecisionPanel, renderTodoPanel, renderVisualCards, renderLogicFlow } from "./report/render";
 import { BRIEFING_LANGUAGE_LABELS, parseElapsedMsToken, parseLexVoiceDurationLabel, TEXT_IMPORT_PRE_SUMMARY_CHUNK_CHARS, getBriefingTargetLanguage, buildBriefingLanguageInstruction, applyBriefingLanguageInstruction, getSessionMetaDurationMs, getSegmentsDurationMs, truncateForLlmPrompt, splitLongTextForLlm, stripMarkdownDetailsWrapper } from "./shared/util-text";
 import { RECRUIT_ROUND_RANK, JOBPORTRAIT_DIMENSIONS, RECRUIT_CONTEXT_FLOW_COPY, DEFAULT_RECRUIT_QUALITIES, isRecruitFeatureUnlocked, buildRecruitContextPrefix, buildRecruitInterviewBriefStrategy, generateInterviewBriefForRecruit, recruitRoundRank, findPrevRoundRecruitNote, writeGeneralOutlineToJd, generateRecruitGeneralOutline, getRecruitInterviewOutline, parseRecruitQualitiesFromOutput, buildCompactRecruitContextPrefix, buildRecruitTextImportMergePrompt, buildJobPortraitMergePrompt, generateJobPortrait, getRecruitContextCopy, normalizeRecruitContext, hasRecruitContextContent, normalizeRecruitJdSignatureText, hashRecruitJdText, makeRecruitJdLibraryEntry, getRecruitJdLibrarySignature, upsertRecruitJdLibrary, getRecruitJdLibrary, applyRecruitJdLibraryItem, getRecruitJdPreview, isRecruitJdFile, parseJdProject, extractPdfTextBestEffort, listResumePdfs, renderRecruitJdTemplate, renderRecruitCandidateBase, renderRecruitAggregateBase, ensureRecruitAggregateBase, createRecruitProject, renderRecruitHomepageTemplate, listRecruitCandidateNotes, recruitRecommendationColor } from "./recruit";
 import { normalizeAsrConcurrency, IMPORT_AUDIO_CHUNK_SAMPLE_RATE, decodeAudioBlob, renderAudioBufferSliceToWav, encodeMonoWav, mapLimit, transcribeImportAudioChunk, resolveTranscribeProvider, formatUploadSize, compactErrorBody, approxBase64Bytes, buildTranscribeHttpError, makeRecordingIssue, getTranscribeRequestTimeoutMs, APIMIMO_ASR_PROTOCOL, APIMIMO_ASR_MAX_BASE64_BYTES, APIMIMO_ASR_NATIVE_EXTS, APIMIMO_ASR_CHUNK_MS, APIMIMO_ASR_MAX_CHUNKS, apimimoNativeAudioMime, isApimimoAsrProvider, normalizeApimimoAsrEndpoint, apimimoPermanentError, buildApimimoAsrChunks, extractApimimoAsrText, requestApimimoAsrChunk, transcribeAudioWithApimimo, transcribeAudio } from "./asr/transcribe";
@@ -156,8 +156,6 @@ function normalizeLexVoiceSettings(savedData) {
   s.mdFolder = pickDefined(storage.briefingNotePath, raw.mdFolder, defaults.mdFolder);
   s.meetingMaterialsFolder = obsidian.normalizePath(pickDefined(storage.meetingMaterialPath, raw.meetingMaterialsFolder, defaults.meetingMaterialsFolder));
   s.htmlReportFolder = pickDefined(storage.htmlReportPath, raw.htmlReportFolder, defaults.htmlReportFolder);
-  s.htmlSlideFolder = pickDefined(storage.htmlSlidePath, raw.htmlSlideFolder, defaults.htmlSlideFolder);
-  s.pptxSlideFolder = pickDefined(storage.pptxPath, raw.pptxSlideFolder, defaults.pptxSlideFolder);
   s.inboxFolder = pickDefined(storage.inboxPath, raw.inboxFolder, defaults.inboxFolder);
   s.inboxAutoImport = pickDefined(storage.autoImportInbox, raw.inboxAutoImport, defaults.inboxAutoImport);
   s.inboxArchiveSubfolder = pickDefined(storage.archiveSubfolder, raw.inboxArchiveSubfolder, defaults.inboxArchiveSubfolder);
@@ -240,12 +238,8 @@ function normalizeLexVoiceSettings(savedData) {
   s.industryProfile = Object.assign({}, defaults.industryProfile, composer.industryProfile || raw.industryProfile || {});
 
   const presentation = raw.presentation || {};
-  // pptThemePreset / pptTaskAngle / pptAudienceHint 已移除：代码从未读取（PPT 主题由模型按内容决定），属死设置。
-  s.pptSlideRange = pickDefined(presentation.slideRange, raw.pptSlideRange, defaults.pptSlideRange);
-  s.pptPromptAddendum = pickDefined(presentation.promptAddendum, raw.pptPromptAddendum, defaults.pptPromptAddendum);
   s.autoOpenHtmlReportAfterGenerate = pickDefined(presentation.openHtmlReportAfterGenerate, raw.autoOpenHtmlReportAfterGenerate, defaults.autoOpenHtmlReportAfterGenerate);
   s.reportBrandName = String(pickDefined(presentation.reportBrandName, raw.reportBrandName, defaults.reportBrandName) || "").trim();
-  s.autoOpenHtmlSlideAfterGenerate = pickDefined(presentation.openHtmlSlideAfterGenerate, raw.autoOpenHtmlSlideAfterGenerate, defaults.autoOpenHtmlSlideAfterGenerate);
 
   const vocabulary = raw.vocabulary || {};
   s.customVocabulary = pickDefined(vocabulary.inlineTerms, raw.customVocabulary, defaults.customVocabulary);
@@ -380,8 +374,6 @@ function serializeLexVoiceSettings(s) {
       briefingNotePath: s.mdFolder,
       meetingMaterialPath: s.meetingMaterialsFolder || DEFAULT_SETTINGS.meetingMaterialsFolder,
       htmlReportPath: s.htmlReportFolder,
-      htmlSlidePath: s.htmlSlideFolder,
-      pptxPath: s.pptxSlideFolder,
       inboxPath: s.inboxFolder,
       autoImportInbox: s.inboxAutoImport,
       archiveSubfolder: s.inboxArchiveSubfolder,
@@ -442,10 +434,7 @@ function serializeLexVoiceSettings(s) {
       industryProfile: s.industryProfile || {},
     },
     presentation: {
-      slideRange: s.pptSlideRange || "6-10",
-      promptAddendum: s.pptPromptAddendum || "",
       openHtmlReportAfterGenerate: s.autoOpenHtmlReportAfterGenerate !== false,
-      openHtmlSlideAfterGenerate: s.autoOpenHtmlSlideAfterGenerate !== false,
       reportBrandName: s.reportBrandName || "",
     },
     vocabulary: {
@@ -10655,12 +10644,6 @@ class OutlineView extends obsidian.ItemView {
       sub.addItem((subItem) => subItem
         .setTitle("PDF 报告（整页不截断）")
         .onClick(() => this.plugin.generatePdfReportForMarkdownFile(file)));
-      sub.addItem((subItem) => subItem
-        .setTitle("HTML 幻灯片")
-        .onClick(() => this.plugin.generateHtmlDeckForMarkdownFile(file)));
-      sub.addItem((subItem) => subItem
-        .setTitle("可编辑 PPTX")
-        .onClick(() => this.plugin.generateEditablePptxForMarkdownFile(file)));
     });
     menu.addSeparator();
     menu.addItem((item) => {
@@ -11077,30 +11060,6 @@ class LexVoicePlugin extends obsidian.Plugin {
         if (!isMd) return false;
         if (checking) return true;
         this.generatePdfReportForMarkdownFile(file);
-        return true;
-      },
-    });
-    this.addCommand({
-      id: "generate-html-slides",
-      name: "AI 生成当前纪要 HTML PPT",
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        const isMd = file instanceof obsidian.TFile && file.extension === "md";
-        if (!isMd) return false;
-        if (checking) return true;
-        this.generateHtmlDeckForMarkdownFile(file);
-        return true;
-      },
-    });
-    this.addCommand({
-      id: "generate-editable-pptx",
-      name: "AI 生成当前纪要可编辑 PPTX",
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        const isMd = file instanceof obsidian.TFile && file.extension === "md";
-        if (!isMd) return false;
-        if (checking) return true;
-        this.generateEditablePptxForMarkdownFile(file);
         return true;
       },
     });
@@ -13897,10 +13856,8 @@ class LexVoicePlugin extends obsidian.Plugin {
     if (!stem) return [];
     const folders = [
       this.settings.htmlReportFolder || DEFAULT_SETTINGS.htmlReportFolder,
-      this.settings.htmlSlideFolder || DEFAULT_SETTINGS.htmlSlideFolder,
-      this.settings.pptxSlideFolder || DEFAULT_SETTINGS.pptxSlideFolder,
     ].map(p => obsidian.normalizePath(p || "")).filter(Boolean);
-    const allowed = new Set(["html", "htm", "pptx", "ppt", "pdf"]);
+    const allowed = new Set(["html", "htm", "pdf"]);
     const out = [];
     const seen = new Set();
     for (const candidate of this.app.vault.getFiles()) {
@@ -14167,62 +14124,6 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
       return pdf;
     } finally {
       try { win.destroy(); } catch {}
-    }
-  }
-
-  async generateHtmlDeckForMarkdownFile(file) {
-    if (!(file instanceof obsidian.TFile) || file.extension !== "md") return;
-    if (!this.settings.llmApiKey && !isLocalLlmEndpoint(this.settings.llmEndpoint)) {
-      new obsidian.Notice("请先在 API 页配置大模型服务；本地 localhost 服务可留空密钥。", 8000);
-      return;
-    }
-    if (!this.settings.llmEndpoint || !this.settings.llmModel) {
-      new obsidian.Notice("请先配置大模型服务地址和模型标识。", 8000);
-      return;
-    }
-    try {
-      new obsidian.Notice("LexVoice：正在生成 HTML PPT…");
-      const markdown = await this.app.vault.read(file);
-      const html = await generateHtmlDeckFromMarkdown(this, file.basename, markdown);
-      const folder = obsidian.normalizePath(this.settings.htmlSlideFolder || DEFAULT_SETTINGS.htmlSlideFolder);
-      await this.ensureFolder(folder);
-      const target = this.getAvailableVaultPath(`${folder}/${sanitizeReportFileStem(file.basename)}-HTML幻灯片.html`);
-      if (!target) throw new Error("无法生成可用的 HTML PPT 路径");
-      const outFile = await this.app.vault.create(target, html);
-      new obsidian.Notice(`LexVoice：已生成 HTML PPT：${target}`, 8000);
-      if (this.settings.autoOpenHtmlSlideAfterGenerate !== false) {
-        this.openVaultFileInSystem(outFile.path);
-      }
-    } catch (e) {
-      console.error("[LexVoice] generate html deck failed", e);
-      new obsidian.Notice(`HTML PPT 生成失败：${(e && e.message) || e}`, 8000);
-    }
-  }
-
-  async generateEditablePptxForMarkdownFile(file) {
-    if (!(file instanceof obsidian.TFile) || file.extension !== "md") return;
-    if (!this.settings.llmApiKey && !isLocalLlmEndpoint(this.settings.llmEndpoint)) {
-      new obsidian.Notice("请先在 API 页配置大模型服务；本地 localhost 服务可留空密钥。", 8000);
-      return;
-    }
-    if (!this.settings.llmEndpoint || !this.settings.llmModel) {
-      new obsidian.Notice("请先配置大模型服务地址和模型标识。", 8000);
-      return;
-    }
-    try {
-      new obsidian.Notice("LexVoice：正在生成可编辑 PPTX…");
-      const markdown = await this.app.vault.read(file);
-      const pptx = await generateEditablePptxFromMarkdown(this, file.basename, markdown);
-      const folder = obsidian.normalizePath(this.settings.pptxSlideFolder || DEFAULT_SETTINGS.pptxSlideFolder);
-      await this.ensureFolder(folder);
-      const target = this.getAvailableVaultPath(`${folder}/${sanitizeReportFileStem(file.basename)}-可编辑PPTX.pptx`);
-      if (!target) throw new Error("无法生成可用的 PPTX 路径");
-      const outFile = await this.app.vault.createBinary(target, pptx);
-      new obsidian.Notice(`LexVoice：已生成可编辑 PPTX：${target}`, 8000);
-      this.openVaultFileInSystem(outFile.path);
-    } catch (e) {
-      console.error("[LexVoice] generate editable pptx failed", e);
-      new obsidian.Notice(`PPTX 生成失败：${(e && e.message) || e}`, 8000);
     }
   }
 

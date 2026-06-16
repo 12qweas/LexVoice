@@ -18,10 +18,6 @@ export const DEFAULT_SETTINGS = {
   meetingMaterialsFolder: "LexVoice/会议资料",
   htmlReportFolder: "LexVoice/HTML报告",
   reportBrandName: "",  // recruit/seminar 报告页脚公司名；留空则用纪要里的「公司/」标签。报告不含 logo。
-  htmlSlideFolder: "LexVoice/HTML幻灯片",
-  pptxSlideFolder: "LexVoice/PPT",
-  pptSlideRange: "6-10",
-  pptPromptAddendum: "",
   noteFileNameFormatNew: "YYYY-MM-DD HHmm",
 
   // —— 转写：多 provider 注册表 ——
@@ -187,7 +183,6 @@ export const DEFAULT_SETTINGS = {
   floatingBallPos: { left: 60, top: 120 },
   autoOpenNoteAfterFinish: true,
   autoOpenHtmlReportAfterGenerate: true,
-  autoOpenHtmlSlideAfterGenerate: true,
   writeDailyMeetingOverview: true,
   dailyMeetingOverviewHeading: DEFAULT_DAILY_MEETING_OVERVIEW_HEADING,
   dailyMeetingOverviewTemplate: DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE,

@@ -15,7 +15,6 @@ import { normalizeAsrConcurrency, resolveTranscribeProvider, transcribeAudio } f
 import { countVocabularyGroups, formatVocabularyMarkdown, isStructuredVocabularyMarkdown, parseVocabularyGroups, summarizeVocabularyGroups } from '../vocabulary';
 import { hasPeopleHotwordsConsent, loadPeopleDirectory, normalizePeopleContextMode, normalizePeopleSuggestionCache, normalizePeopleSuggestionIgnores } from '../people';
 import { isRecruitFeatureUnlocked } from '../recruit';
-import { normalizePptSlideRange } from '../report/render';
 import { LEXVOICE_UPDATE_REPO_URL, audioInputModeLabel, countKnowledgeExtractionHistory, enumerateAudioDevices, isVirtualCableLabel, lexvoiceConfirm, lexvoicePromptText, normalizeAudioInputMode, openLexVoiceExternalUrl, openLexVoicePickListModal, pluginBasePath, resolveUpdateRawBases, trashLexVoiceFile } from './helpers';
 import { PeopleHotwordsConsentModal, PromptTemplateModal, QueueModal, VirtualCableSetupModal } from './modals';
 
@@ -1223,63 +1222,6 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
           this.plugin.settings.reportBrandName = v.trim();
           await this.plugin.saveSettings();
         }));
-
-    new obsidian.Setting(c).setName("AI PPT").setHeading();
-    const pptHint = c.createDiv({ cls: "setting-item-description lexvoice-section-hint" });
-    pptHint.setText("PPT 是面向演示的二次重构，不是把纪要原样搬上去。生成流程会先判断演示任务、规划页面结构并做设计质量检查；本页只保留页数范围和长期生成偏好。具体会议内容、客户信息或密钥不应写入设置项。");
-
-    new obsidian.Setting(c).setName("HTML PPT 保存文件夹")
-      .setDesc("相对当前 Obsidian 库的路径。HTML PPT 可全屏演示、打印，也可另存当前页或长图。修改后仅影响新文件，已有文件不会自动迁移。")
-      .addText(t => t
-        .setPlaceholder("LexVoice/HTML幻灯片")
-        .setValue(this.plugin.settings.htmlSlideFolder || DEFAULT_SETTINGS.htmlSlideFolder)
-        .onChange(async v => {
-          this.plugin.settings.htmlSlideFolder = obsidian.normalizePath(v.trim() || DEFAULT_SETTINGS.htmlSlideFolder);
-          await this.plugin.saveSettings();
-        }));
-
-    new obsidian.Setting(c).setName("可编辑 PPTX 保存文件夹")
-      .setDesc("相对当前 Obsidian 库的路径。PPTX 使用原生文本框和形状，方便在 PowerPoint、Keynote 或 WPS 里继续编辑。修改后仅影响新文件，已有文件不会自动迁移。")
-      .addText(t => t
-        .setPlaceholder("LexVoice/PPT")
-        .setValue(this.plugin.settings.pptxSlideFolder || DEFAULT_SETTINGS.pptxSlideFolder)
-        .onChange(async v => {
-          this.plugin.settings.pptxSlideFolder = obsidian.normalizePath(v.trim() || DEFAULT_SETTINGS.pptxSlideFolder);
-          await this.plugin.saveSettings();
-        }));
-
-    new obsidian.Setting(c).setName("生成 HTML PPT 后自动打开")
-      .setDesc("使用系统默认浏览器打开生成的 HTML 幻灯片。")
-      .addToggle(t => t
-        .setValue(this.plugin.settings.autoOpenHtmlSlideAfterGenerate !== false)
-        .onChange(async v => {
-          this.plugin.settings.autoOpenHtmlSlideAfterGenerate = v;
-          await this.plugin.saveSettings();
-        }));
-
-    new obsidian.Setting(c).setName("PPT 页数偏好")
-      .setDesc("填写范围即可，例如 6-10、8 或 4-6。生成时会按材料复杂度调整页数，但最多 12 页。")
-      .addText(t => {
-        t.setPlaceholder("6-10")
-          .setValue(this.plugin.settings.pptSlideRange || DEFAULT_SETTINGS.pptSlideRange)
-          .onChange(async v => {
-            this.plugin.settings.pptSlideRange = normalizePptSlideRange(v);
-            await this.plugin.saveSettings();
-          });
-        // 失焦回显归一化后的实际保存值（如 "abc" → "6-10"），所见即所存
-        t.inputEl.addEventListener("blur", () => t.setValue(this.plugin.settings.pptSlideRange || DEFAULT_SETTINGS.pptSlideRange));
-      });
-
-    new obsidian.Setting(c).setName("自定义 PPT 生成提示词")
-      .setDesc("用于保存长期偏好，例如更偏数据可视化、少文字、多用时间线、突出决议和待办。本项不适合填写具体会议内容、客户信息或密钥。");
-    const pptPromptTa = c.createEl("textarea", { cls: "lexvoice-textarea" });
-    pptPromptTa.value = this.plugin.settings.pptPromptAddendum || "";
-    pptPromptTa.placeholder = "例如：每页只讲一个判断；优先可视化待办、决议和风险；避免等宽卡片堆叠；减少段落文字；不出现演讲提示。";
-    pptPromptTa.rows = 4;
-    pptPromptTa.addEventListener("change", async () => {
-      this.plugin.settings.pptPromptAddendum = pptPromptTa.value.trim();
-      await this.plugin.saveSettings();
-    });
 
     new obsidian.Setting(c).setName("转写提示词").setHeading();
     const sceneHint = c.createDiv({ cls: "setting-item-description lexvoice-section-hint" });
