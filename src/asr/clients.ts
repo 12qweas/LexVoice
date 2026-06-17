@@ -34,7 +34,7 @@ export class DashScopeStreamingClient {
           headers: { Authorization: "bearer " + this.apiKey, "X-DashScope-DataInspection": "enable" },
           handshakeTimeout: 8000,
         });
-      } catch (e) { reject(e); return; }
+      } catch (e) { reject(e instanceof Error ? e : new Error(typeof e === "string" ? e : JSON.stringify(e))); return; }
       try { this.ws.binaryType = "arraybuffer"; } catch { /* intentionally empty */ }
 
       const onOpen = () => {
@@ -52,7 +52,7 @@ export class DashScopeStreamingClient {
           },
         };
         try { this.ws.send(JSON.stringify(runTask)); }
-        catch (e) { if (!resolved) { resolved = true; reject(e); } }
+        catch (e) { if (!resolved) { resolved = true; reject(e instanceof Error ? e : new Error(typeof e === "string" ? e : JSON.stringify(e))); } }
       };
       const onMessage = (data) => {
         const text = (typeof data === "string") ? data
@@ -178,7 +178,7 @@ export class OpenAIRealtimeTranscriptionClient {
           },
           handshakeTimeout: 10000,
         });
-      } catch (e) { reject(e); return; }
+      } catch (e) { reject(e instanceof Error ? e : new Error(typeof e === "string" ? e : JSON.stringify(e))); return; }
       try { this.ws.binaryType = "arraybuffer"; } catch { /* intentionally empty */ }
 
       const sendUpdate = () => {
@@ -199,7 +199,7 @@ export class OpenAIRealtimeTranscriptionClient {
           },
         };
         try { this.ws.send(JSON.stringify(sessionUpdate)); }
-        catch (e) { if (!resolved) { resolved = true; reject(e); } }
+        catch (e) { if (!resolved) { resolved = true; reject(e instanceof Error ? e : new Error(typeof e === "string" ? e : JSON.stringify(e))); } }
       };
       const onOpen = () => {
         this.opened = true;
@@ -322,7 +322,7 @@ export class OpenAIRealtimeTranslationClient {
           },
           handshakeTimeout: 10000,
         });
-      } catch (e) { reject(e); return; }
+      } catch (e) { reject(e instanceof Error ? e : new Error(typeof e === "string" ? e : JSON.stringify(e))); return; }
       try { this.ws.binaryType = "arraybuffer"; } catch { /* intentionally empty */ }
 
       const sendUpdate = () => {
@@ -331,7 +331,7 @@ export class OpenAIRealtimeTranslationClient {
           session: { audio: { output: { language: this.targetLanguage } } },
         };
         try { this.ws.send(JSON.stringify(sessionUpdate)); }
-        catch (e) { if (!resolved) { resolved = true; reject(e); } }
+        catch (e) { if (!resolved) { resolved = true; reject(e instanceof Error ? e : new Error(typeof e === "string" ? e : JSON.stringify(e))); } }
       };
       const onOpen = () => {
         this.opened = true;

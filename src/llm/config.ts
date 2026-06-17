@@ -299,6 +299,12 @@ export function getLlmOutputCeiling(settings) {
     if (/v4|v3\.[2-9]/.test(model)) return 64000;
     return LLM_OUTPUT_CEILING_FALLBACK;
   }
+  // 小米 MiMo（mimo-v2.5-pro 等，多为带思维链的推理模型，max_tokens 需同时容纳 reasoning + 正文，
+  // 旧 fallback 8000 会让长会议纪要严重缩水/截断）：给 16000。
+  if (/mimo/.test(model)) return 16000;
+  // 其它确认支持 ≥16K 输出的国产模型（MiniMax abab / 阶跃 step / 文心 4 / 混元）。
+  // 通义千问 / GLM / Kimi / Doubao 上限不一，仍走下方安全回退。
+  if (/minimax|abab|step-[12]|ernie-4|hunyuan/.test(model)) return 16000;
   // Claude / Anthropic（含 opus/sonnet/haiku/fable 命名）。⚠️旧 3.5 上限只有 8192，必须先判，
   // 否则会被下面的 sonnet/haiku 分支抢先误给 48000 → 旧 3.5 超限 400。
   if (/claude|anthropic|opus|sonnet|haiku|fable/.test(model)) {
@@ -313,18 +319,28 @@ export function getLlmOutputCeiling(settings) {
   return LLM_OUTPUT_CEILING_FALLBACK;
 }
 
-export function getBriefingMergeDesiredTokens(stats) {
+// 录音长度分档（单一来源）：输出 token 配额（下方 getBriefingMergeDesiredTokens）与篇幅策略指令
+// （main.ts buildAdaptiveBriefingLengthInstruction）共用，避免两处各写一份阈值导致漂移。
+// 阈值较早期下调过一档（段数 48/24/12 → 36/18/9，时长/字符同比例下调），让中长会议更早拿到
+// 更高的 token 配额和更强的"必须全程覆盖"展开指令——这是长会议纪要不被压缩的关键前置条件。
+export function classifyBriefingLength(stats) {
   const durationMs = Math.max(0, Number(stats && stats.durationMs) || 0);
   const transcriptChars = Math.max(0, Number(stats && stats.transcriptChars) || 0);
   const segmentCount = Math.max(0, Number(stats && stats.segmentCount) || 0);
   const hours = durationMs / 3600000;
-  const isUltraLong = hours >= 4 || transcriptChars >= 120000 || segmentCount >= 48;
-  const isLong = hours >= 2 || transcriptChars >= 60000 || segmentCount >= 24;
-  const isMediumLong = hours >= 1 || transcriptChars >= 30000 || segmentCount >= 12;
-  if (isUltraLong) return BRIEFING_MERGE_MAX_TOKENS_ULTRA;
-  if (isLong) return BRIEFING_MERGE_MAX_TOKENS_LONG;
-  if (isMediumLong) return BRIEFING_MERGE_MAX_TOKENS_MEDIUM;
-  return BRIEFING_MERGE_MAX_TOKENS_SHORT;
+  if (hours >= 3 || transcriptChars >= 90000 || segmentCount >= 36) return "ultra";
+  if (hours >= 1.5 || transcriptChars >= 45000 || segmentCount >= 18) return "long";
+  if (hours >= 0.75 || transcriptChars >= 22000 || segmentCount >= 9) return "medium";
+  return "short";
+}
+
+export function getBriefingMergeDesiredTokens(stats) {
+  switch (classifyBriefingLength(stats)) {
+    case "ultra": return BRIEFING_MERGE_MAX_TOKENS_ULTRA;
+    case "long": return BRIEFING_MERGE_MAX_TOKENS_LONG;
+    case "medium": return BRIEFING_MERGE_MAX_TOKENS_MEDIUM;
+    default: return BRIEFING_MERGE_MAX_TOKENS_SHORT;
+  }
 }
 
 export function getBriefingMergeMaxTokens(stats, settings) {

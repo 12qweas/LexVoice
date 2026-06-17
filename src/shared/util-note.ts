@@ -117,7 +117,7 @@ export async function ensureTodayDailyNoteFile(app) {
   }
   try {
     return await app.vault.create(info.path, initial);
-  } catch (e) {
+  } catch {
     const existing = app.vault.getAbstractFileByPath(info.path);
     return existing instanceof obsidian.TFile ? existing : null;
   }

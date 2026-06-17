@@ -250,7 +250,7 @@ export class PeopleDirectorySuggestionModal extends obsidian.Modal {
       }
 
       const targetBox = box.createDiv({ cls: "lexvoice-people-suggestion-target" });
-      const targetLabel = targetBox.createDiv({ cls: "lexvoice-people-suggestion-target-label", text: "保存到人员资料" });
+      targetBox.createDiv({ cls: "lexvoice-people-suggestion-target-label", text: "保存到人员资料" });
       const targetSelect = targetBox.createEl("select", { cls: "dropdown lexvoice-people-suggestion-target-select" });
       targetSelect.createEl("option", { value: "", text: "新建人员资料" });
       const currentPath = obsidian.normalizePath(item.matchPath || "");
@@ -1183,7 +1183,8 @@ export class PromptTemplateModal extends obsidian.Modal {
     const delBtn = actions.createEl("button", { text: "删除" });
     delBtn.addClass("mod-warning");
     delBtn.onclick = async () => {
-      if (!confirm("删除自定义提示词「" + (tpl.name || tpl.id) + "」？此操作不可恢复。")) return;
+      const ok = await lexvoiceConfirm(this.app, "删除自定义提示词", "删除自定义提示词「" + (tpl.name || tpl.id) + "」？此操作不可恢复。", "删除");
+      if (!ok) return;
       const tpls = Object.assign({}, this.plugin.settings.promptTemplates || {});
       delete tpls[tpl.id];
       const active = Object.assign({}, this.plugin.settings.activeTemplateByMode || {});
@@ -1390,7 +1391,7 @@ export class ImportTextModal extends obsidian.Modal {
   async collectTextFiles() {
     const files = this.app.vault.getFiles()
       .filter((file) => file instanceof obsidian.TFile && TEXT_IMPORT_EXT.has(String(file.extension || "").toLowerCase()))
-      .filter((file) => !obsidian.normalizePath(file.path).startsWith(".obsidian/"))
+      .filter((file) => !obsidian.normalizePath(file.path).startsWith(this.app.vault.configDir + "/"))
       .sort((a, b) => b.stat.mtime - a.stat.mtime || a.path.localeCompare(b.path));
     const items = [];
     for (const file of files) {
@@ -1884,7 +1885,7 @@ export class BubbleWidget {
   mount(ribbonEl) {
     if (this.wrapEl) return;
     this.ribbonEl = ribbonEl || null;
-    const wrapEl = document.body.createDiv({ cls: "lexvoice-bubble-wrap" });
+    const wrapEl = activeDocument.body.createDiv({ cls: "lexvoice-bubble-wrap" });
     const el = wrapEl.createDiv({ cls: "lexvoice-bubble is-idle" });
     this.wrapEl = wrapEl;
     this.el = el;
@@ -2061,7 +2062,7 @@ export class BubbleWidget {
       makeDocButton("跳到当前录音笔记的转写位置", () => this.plugin.openSessionNote());
       const ctrl = this.el.createDiv({ cls: "lexvoice-bubble-ctrl" });
       const pauseBtn = ctrl.createEl("button", { cls: `lexvoice-bubble-btn ${info.state === "paused" ? "is-play-icon" : "is-pause-icon"}`, attr: { title: info.state === "paused" ? "继续" : "暂停", "aria-label": info.state === "paused" ? "继续" : "暂停" } });
-      pauseBtn.onclick = (e) => { e.stopPropagation(); info.state === "paused" ? this.plugin.recorder.resume() : this.plugin.recorder.pause(); };
+      pauseBtn.onclick = (e) => { e.stopPropagation(); if (info.state === "paused") this.plugin.recorder.resume(); else this.plugin.recorder.pause(); };
       const stopBtn = ctrl.createEl("button", { cls: "lexvoice-bubble-btn stop is-stop-icon", attr: { title: "停止并合并润色", "aria-label": "停止并合并润色" } });
       stopBtn.onclick = (e) => { e.stopPropagation(); this.plugin.stopRecording(); };
       const timer = this.el.createDiv({ cls: "lexvoice-bubble-timer" });

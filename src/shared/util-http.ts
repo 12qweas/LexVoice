@@ -6,9 +6,10 @@ export function withPromiseTimeout(promise, timeoutMs, makeError) {
   return new Promise((resolve, reject) => {
     const timer = window.setTimeout(() => {
       try {
-        reject(makeError ? makeError() : new Error("请求超时"));
+        const reason = makeError ? makeError() : new Error("请求超时");
+        reject(reason instanceof Error ? reason : new Error(typeof reason === "string" ? reason : JSON.stringify(reason)));
       } catch (e) {
-        reject(e);
+        reject(e instanceof Error ? e : new Error(typeof e === "string" ? e : JSON.stringify(e)));
       }
     }, timeoutMs);
     Promise.resolve(promise).then(
@@ -18,7 +19,7 @@ export function withPromiseTimeout(promise, timeoutMs, makeError) {
       },
       (error) => {
         window.clearTimeout(timer);
-        reject(error);
+        reject(error instanceof Error ? error : new Error(typeof error === "string" ? error : JSON.stringify(error)));
       }
     );
   });

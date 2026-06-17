@@ -4682,21 +4682,23 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   align-items: center;
   justify-content: center;
   gap: 4px;
-  padding: 0 7px;
-  border-radius: var(--radius-s);
-  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
-  background: color-mix(in srgb, var(--background-primary) 80%, var(--background-secondary));
+  padding: 0 4px;
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  background: none;
+  box-shadow: none;
   color: var(--text-muted);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--background-modifier-box-shadow) 18%, transparent);
   cursor: pointer;
   font-size: var(--font-ui-smaller);
   line-height: 1;
+  opacity: 0.55;
+  transition: opacity 0.12s ease, color 0.12s ease;
 }
 
 .lexvoice-outline-recent-action:hover {
+  opacity: 1;
   color: var(--text-accent);
-  border-color: color-mix(in srgb, var(--text-accent) 34%, var(--background-modifier-border));
-  background: color-mix(in srgb, var(--text-accent) 7%, var(--background-primary));
 }
 
 .lexvoice-outline-recent-action:disabled {
@@ -4705,9 +4707,8 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
 }
 
 .lexvoice-outline-recent-action:disabled:hover {
+  opacity: 0.55;
   color: var(--text-muted);
-  border-color: color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
-  background: color-mix(in srgb, var(--background-primary) 80%, var(--background-secondary));
 }
 
 .lexvoice-outline-recent-action-icon,
@@ -4739,13 +4740,9 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
 
 .lexvoice-outline-recent-action.is-retry {
   color: var(--lex-danger-text, var(--text-error));
-  border-color: var(--lex-danger-border, color-mix(in srgb, var(--text-error) 28%, var(--background-modifier-border)));
-  background: var(--lex-danger-bg, color-mix(in srgb, var(--text-error) 11%, var(--background-primary)));
   width: 24px;
   min-width: 24px;
   padding: 0;
-  border-radius: 999px;
-  box-shadow: none;
 }
 
 .lexvoice-outline-recent-action.is-retry .lexvoice-outline-recent-action-label {

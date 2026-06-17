@@ -434,7 +434,7 @@ export function parseRecruitQualitiesFromOutput(text) {
         if (name && /^(达到|未达|本场未验证)$/.test(verdict)) qualities[name] = verdict;
       }
     }
-  } catch (e) { /* 解析失败：安全降级，不写素质字段 */ }
+  } catch { /* 解析失败：安全降级，不写素质字段 */ }
   const cleaned = text.replace(new RegExp(re.source, "gi"), "").replace(/\n{3,}$/, "\n\n").trimEnd() + "\n";
   return { qualities, cleaned };
 }

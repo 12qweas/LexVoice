@@ -6,7 +6,7 @@ import * as obsidian from "obsidian";
 import { REALTIME_OUTLINE_STATE_MAX_NODES, normalizeRealtimeOutlineList, hashRealtimeOutlineText, getRealtimeOutlineAnchorTime, cleanRealtimeOutlineItemText, makeRealtimeOutlineNode, parseRealtimeOutlineStateFromMarkdown, mergeStableRealtimeOutlineNodes, normalizeOutlineMarkdownForDisplay, validateRealtimeOutlineMarkdown, mergeCoverageNoRegress, deriveFollowupCards, findLowEvidenceEntities, sanitizeProjectFolderName, recolorReportHtml } from "./outline-text";
 import { LexVoiceSettingTab } from "./ui/settings-tab";
 import { pickReportAccentColor, AudioTimeModal, PeopleDirectorySuggestionModal, QueueModal, VirtualCableSetupModal, RecruitContextModal, ImportTextModal, ImportAudioModal, BubbleWidget } from "./ui/modals";
-import { LEXVOICE_UPDATE_REPO_URL, resolveUpdateRawBase, resolveUpdateRawBases, stripLexVoiceFrontmatterSimple, getRecentNoteProcessingState, lexvoiceConfirm, enumerateAudioDevices, isVirtualCableLabel, trashLexVoiceFile, pluginBasePath, normalizeAudioInputMode, audioInputModeLabel } from "./ui/helpers";
+import { LEXVOICE_UPDATE_REPO_URL, resolveUpdateRawBase, resolveUpdateRawBases, stripLexVoiceFrontmatterSimple, getRecentNoteProcessingState, lexvoiceConfirm, enumerateAudioDevices, trashLexVoiceFile, pluginBasePath, normalizeAudioInputMode, audioInputModeLabel } from "./ui/helpers";
 import { isKnownPolishMode, isCustomPromptModeTemplate, makeCustomPromptModeId, getCustomPromptModeTemplate, getCustomPromptModeTemplates, getBuiltInVisiblePolishModeKeys, getVisiblePolishModeKeys, getModeMeta, getEffectivePolishMode, getVisibleModeEntries, sanitizePromptTemplate } from "./shared/mode-meta";
 import { compareVersions, isLexVoiceMobileRuntime } from "./shared/util-platform";
 import { normalizeKnowledgeExtractionHistory } from "./shared/util-knowledge";
@@ -14,14 +14,14 @@ import { listJDProjects } from "./recruit/jd-projects";
 import { sanitizeReportFileStem, generateHtmlReportFromMarkdown, generateStyledReportFromMarkdown } from "./report/render";
 import { parseElapsedMsToken, parseLexVoiceDurationLabel, TEXT_IMPORT_PRE_SUMMARY_CHUNK_CHARS, buildBriefingLanguageInstruction, applyBriefingLanguageInstruction, getSessionMetaDurationMs, getSegmentsDurationMs, truncateForLlmPrompt, splitLongTextForLlm } from "./shared/util-text";
 import { JOBPORTRAIT_DIMENSIONS, DEFAULT_RECRUIT_QUALITIES, isRecruitFeatureUnlocked, buildRecruitContextPrefix, getRecruitInterviewOutline, parseRecruitQualitiesFromOutput, buildCompactRecruitContextPrefix, buildRecruitTextImportMergePrompt, generateJobPortrait, normalizeRecruitContext, hasRecruitContextContent, parseJdProject, renderRecruitCandidateBase, renderRecruitAggregateBase, ensureRecruitAggregateBase, createRecruitProject, renderRecruitHomepageTemplate, listRecruitCandidateNotes, recruitRecommendationColor } from "./recruit";
-import { normalizeAsrConcurrency, decodeAudioBlob, renderAudioBufferSliceToWav, mapLimit, transcribeImportAudioChunk, resolveTranscribeProvider, makeRecordingIssue, APIMIMO_ASR_CHUNK_MS, isApimimoAsrProvider, apimimoPermanentError, transcribeAudio } from "./asr/transcribe";
+import { normalizeAsrConcurrency, decodeAudioBlob, renderAudioBufferSliceToWav, mapLimit, transcribeImportAudioChunk, resolveTranscribeProvider, makeRecordingIssue, APIMIMO_ASR_CHUNK_MS, isApimimoAsrProvider, transcribeAudio } from "./asr/transcribe";
 import { getFrontmatterTags, readFileFrontmatter, upsertFrontmatterInMarkdown, LEARNING_CARD_TAG, CONCEPT_CARD_TAG, TODO_CARD_TAG, ensureTodayDailyNoteFile } from "./shared/util-note";
 import { PEOPLE_SUGGESTION_CACHE_LIMIT, normalizePeopleContextMode, splitPersonFieldValue, normalizePersonLookupText, loadPeopleDirectory, buildPeopleContextForLlm, ensurePeopleNoteRelatedBaseSection, formatPeopleBaseYaml, formatPeopleNoteMarkdown, mergeUniqueStrings, normalizePeopleSuggestion, normalizePeopleSuggestionIgnores, isPeopleSuggestionIgnored, addPeopleSuggestionIgnore, removePeopleSuggestionIgnores, getPeopleSuggestionCacheKey, normalizePeopleSuggestionCache, makePeopleSuggestionCacheRecord, isPeopleSuggestionCacheRecordCurrent, peopleSuggestionRecordToSuggestion, peopleSuggestionIgnoreRecordToSuggestion, findMatchingPersonEntry, mergeSourceNoteRelatedPeopleFrontmatter, mergePersonFrontmatter, generatePeopleDirectorySuggestions, normalizePersonNameForEmail, parsePeopleFromOutput } from "./people";
 import { getSedimentTodoId, getSedimentCardId, getSedimentHotwordId, getSedimentPersonId, withSedimentCandidateIds, removeSedimentGroupDone, sanitizeSedimentText, normalizeSedimentTodoSubtasks, normalizeSedimentExtractionModel, appendSedimentPreExtractionInstruction, stripSedimentPreExtractionBlocks, extractSedimentPreExtractionBlock, splitOutSedimentBlock, appendSedimentPreExtractionBlock, upsertSedimentPreExtractionBlockInFile, generateSedimentObjects, writeSedimentObjectCards } from "./sediment";
 import { createVocabularyGroups, parseVocabularyGroups, flattenVocabularyGroups, countVocabularyGroups, normalizeVocabularyInput, mergeVocabularyGroups, isStructuredVocabularyMarkdown, loadVocabularyGroups, formatVocabularyMarkdown } from "./vocabulary";
-import { logLlmRequestDiagnostic, requestLlmChatCompletion, getLlmConfigIssue, isLlmConfigError, isLlmServiceBlockedError, isLlmNonRetryableError, formatLlmConfigIssue, formatLlmFailureIssue, callLlm, callBriefingMergeLlm, stripModeSuggestionBlocks } from "./llm/core";
+import { logLlmRequestDiagnostic, getLlmConfigIssue, isLlmConfigError, isLlmServiceBlockedError, isLlmNonRetryableError, formatLlmConfigIssue, formatLlmFailureIssue, callLlm, callBriefingMergeLlm, stripModeSuggestionBlocks } from "./llm/core";
 import { DEFAULT_DAILY_MEETING_OVERVIEW_HEADING, DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE, DEFAULT_SETTINGS } from "./shared/defaults";
-import { LLM_SERVICE_PRESETS, normalizeLlmProfiles, getLlmOutputCeiling, getBriefingMergeDesiredTokens, getBriefingMergeMaxTokens, LLM_OUTPUT_CEILING_FALLBACK } from "./llm/config";
+import { normalizeLlmProfiles, getLlmOutputCeiling, getBriefingMergeDesiredTokens, getBriefingMergeMaxTokens, LLM_OUTPUT_CEILING_FALLBACK, classifyBriefingLength } from "./llm/config";
 import { DashScopeStreamingClient, OpenAIRealtimeTranscriptionClient, OpenAIRealtimeTranslationClient, PcmStreamEncoder } from "./asr/clients";
 import { MODE_META, FRONTMATTER_SCHEMA, MODE_PREFIX_TO_KEY } from "./shared/catalog-modes";
 import { SEDIMENT_GROUP_CONFIG, SEDIMENT_GROUP_ORDER, VOCABULARY_SECTIONS } from "./shared/catalog-sediment";
@@ -4239,8 +4239,7 @@ function splitLexVoiceTranscriptSections(markdown) {
   }
 
   const startRe = /<!--\s*lexvoice-segments-start(?::[^>]*)?\s*-->/g;
-  let startMatch;
-  while ((startMatch = startRe.exec(text))) {
+  while (startRe.exec(text)) {
     const endRe = /<!--\s*lexvoice-segments-end(?::[^>]*)?\s*-->/g;
     endRe.lastIndex = startRe.lastIndex;
     const endMatch = endRe.exec(text);
@@ -4973,7 +4972,7 @@ function postProcessBriefingOutput(rawOutput, mode, sessionMeta, originalFrontma
   let llmFm = null;
   let body = stripped;
   if (fmMatch) {
-    try { llmFm = obsidian.parseYaml(fmMatch[1]); } catch (e) { llmFm = null; }
+    try { llmFm = obsidian.parseYaml(fmMatch[1]); } catch { llmFm = null; }
     body = stripped.slice(fmMatch[0].length).replace(/^\n+/, "");
   }
   body = normalizeLexVoiceCallouts(body);
@@ -5064,7 +5063,7 @@ function postProcessBriefingOutput(rawOutput, mode, sessionMeta, originalFrontma
   ordered.tags = base.tags;
 
   let yamlBlock;
-  try { yamlBlock = obsidian.stringifyYaml(ordered); } catch (e) {
+  try { yamlBlock = obsidian.stringifyYaml(ordered); } catch {
     // 兜底：手动拼
     yamlBlock = Object.entries(ordered).map(([k, v]) => {
       if (Array.isArray(v)) return k + ":\n" + v.map(x => "  - " + String(x)).join("\n");
@@ -5172,25 +5171,28 @@ function buildSessionMetaPrefix(meta, mode) {
 
 
 function buildAdaptiveBriefingLengthInstruction(mode, stats) {
-  const durationMs = Math.max(0, Number(stats && stats.durationMs) || 0);
-  const transcriptChars = Math.max(0, Number(stats && stats.transcriptChars) || 0);
-  const segmentCount = Math.max(0, Number(stats && stats.segmentCount) || 0);
-  const hours = durationMs / 3600000;
-  const isUltraLong = hours >= 4 || transcriptChars >= 120000 || segmentCount >= 48;
-  const isLong = isUltraLong || hours >= 2 || transcriptChars >= 60000 || segmentCount >= 24;
-  const isMediumLong = isLong || hours >= 1 || transcriptChars >= 30000 || segmentCount >= 12;
+  // 长度分档与 token 配额共用同一判定（src/llm/config.ts classifyBriefingLength），
+  // 确保"给多少篇幅指令"和"给多少 max_tokens"始终在同一档位，不会一个说超长、另一个只给短配额。
+  const tier = classifyBriefingLength(stats);
+  const isUltraLong = tier === "ultra";
+  const isLong = isUltraLong || tier === "long";
+  const isMediumLong = isLong || tier === "medium";
   const lines = [
     "## 篇幅与信息密度策略",
     "",
+    "- 【还原而非摘要】你的任务是「重建」这场录音的完整内容，不是「概括」它。原文里出现的每一个事实、数字、人名、判断、立场、案例、待办、风险都要在纪要里有对应落点；用户要的是结构化的完整还原，不是形式上的精简。",
+    "- 【禁止偷懒式压缩】严禁用「此外还讨论了 X」「双方还交流了 Y 等话题」这类一句话带过一整段讨论。凡原文实际展开过的内容，纪要也必须实际展开，而不是只留一个标题或一句概述。「更结构化」指层次更清晰，绝不等于「更简略」。",
     "- 内置模板里的句数、字数和条数是常规材料的起步基准，不是封顶线；请按录音时长、信息密度和主题数量自动扩展。",
     "- 顶部摘要要便于快速扫读，但主体内容不能因为摘要短而缩水；必须覆盖开头、中段、结尾和所有主要主题。",
     "- 如果模型上下文或输出能力有限，优先保证全篇覆盖：宁可每个主题略短，也不要只整理前半段或少数高频片段。",
+    "- 注意：上面这些「扩展/完整」要求针对的是原文真实存在的内容；不得为凑长度编造原文没有的事实、人名或数字（这与忠实还原同等重要）。",
   ];
   if (isUltraLong) {
     lines.push("- 当前材料属于超长录音或多文件合并材料。请先按时间顺序建立全景章节，再逐章整理，覆盖从开头到结尾的每一段。");
     lines.push("- 【篇幅自管理·重要】你的单次输出长度有限。务必把篇幅预算分配到全程：宁可每个章节写得更紧凑，也必须一路覆盖到录音结尾——绝不允许前半段写得很充分、却在中途用尽篇幅导致后半段缺失。先确保「全程都到了」，再在余量内加深细节。");
   } else if (isLong) {
     lines.push("- 当前材料属于长录音。请按主题/章节展开，不要压缩成普通短会纪要；每个主要章节都要有独立标题、核心观点和必要支撑。");
+    lines.push("- 每个被实际讨论过的主题，至少展开成一段完整叙述（背景 → 展开 → 结论或分歧），不要把一个详细讨论过的主题压成单句。一小时以上的会议，主体通常应有多个三级标题、整体篇幅明显长于短会纪要。");
     lines.push("- 篇幅自管理：注意把篇幅分配到全程，确保覆盖到录音结尾，不要前段冗长、后段缺失。");
   } else if (isMediumLong) {
     lines.push("- 当前材料偏长。摘要仍保持清晰，但主体应比短录音更充分，避免把多个主题合并成过粗的一两段。");
@@ -5629,7 +5631,7 @@ function splitSegmentsIntoGroups(segments, targetChars) {
 function buildChunkMergePrompt(joinedChunk, partIndex, partTotal, timeRange) {
   return `你正在整理一场超长会议/录音的**第 ${partIndex}/${partTotal} 部分**（时间段约 ${timeRange}）。请把这部分的分段转写整理成忠实、结构化的 Markdown 纪要**正文片段**。
 
-【最高优先级·忠实还原】本部分出现的所有事实、数字、判断、立场、待办、风险、关键原话一律保留，宁可写长也不要漏；只做无损整理（去口头禅、合并重复表述），不得以"概括/精炼"为名删除任何一条具体信息。
+【最高优先级·忠实还原】本部分出现的所有事实、数字、判断、立场、待办、风险、关键原话一律保留，宁可写长也不要漏；只做无损整理（去口头禅、合并重复表述），不得以"概括/精炼"为名删除任何一条具体信息。禁止用"还讨论了 X""此外提到 Y"这类一句话带过本部分实际展开过的内容——该展开的要展开成完整段落。
 
 【硬性要求】
 - 只整理本部分，不复述其它部分；**不要**写 YAML frontmatter；**不要**写顶部总览/摘要 callout（顶部总览由程序统一生成）。
@@ -5647,8 +5649,10 @@ ${joinedChunk}`;
 // 仅在 desired > ceiling 的超长场景触发（见 mergeAndPolish 的 shouldChunk）。返回 null 表示无法分段、退回单次。
 async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, originalFrontmatter, repolishOptions, ceiling) {
   const safeCeiling = Math.max(2048, Number(ceiling) || LLM_OUTPUT_CEILING_FALLBACK);
-  // 每组转写字符目标：组产出的纪要 token ≈ 0.25×字符数，控制在 ceiling 内 → 字符目标 ≈ 3.5×ceiling（留余量）。
-  const targetChars = Math.max(8000, Math.floor(safeCeiling * 3.5));
+  // 每组转写字符目标：组产出纪要 token ≈ 0.25×字符数，要落在 ceiling 内 → 字符目标 ≈ 3.2×ceiling（留余量给截断检测）。
+  // 再加绝对上限 36000：确保「内容真的多」的超长会议无论模型 ceiling 多高都能切成多组、逐段充分整理，
+  // 而不是因 ceiling 偏高（如 MiMo 16K → 旧公式 56000）导致 targetChars 过大、切不出多组又退回单次。
+  const targetChars = Math.min(36000, Math.max(8000, Math.floor(safeCeiling * 3.2)));
   const groups = splitSegmentsIntoGroups(segments, targetChars);
   if (groups.length < 2) return null; // 切不出多组 → 退回单次
   await logLlmRequestDiagnostic(plugin, "info", "llm.merge_long_session_chunked", "超长会议启用分段整理+拼接", {
@@ -7878,7 +7882,7 @@ class OutlineView extends obsidian.ItemView {
       }
       // 当前选中
       if (todo.owner) {
-        const cur = list.createDiv({ cls: "lexvoice-todo-popover-section", text: "当前" });
+        list.createDiv({ cls: "lexvoice-todo-popover-section", text: "当前" });
         const row = list.createDiv({ cls: "lexvoice-todo-popover-item is-current" });
         row.createSpan({ cls: "lexvoice-todo-popover-item-name", text: todo.owner });
         const clear = row.createSpan({ cls: "lexvoice-todo-popover-item-clear", text: "清除" });
@@ -8039,7 +8043,6 @@ class OutlineView extends obsidian.ItemView {
   }
 
   renderSedimentReviewGroup(parent, file, state, groupKey) {
-    const group = (state.groups || []).find(item => item.key === groupKey) || SEDIMENT_GROUP_CONFIG[groupKey];
     const review = this.getSedimentGroupReview(file, groupKey);
     const items = review && Array.isArray(review.items) ? review.items : [];
     const canRollback = !!(review && review.restore);
@@ -8545,7 +8548,6 @@ class OutlineView extends obsidian.ItemView {
   }
 
   async commitSedimentGroup(file, groupKey) {
-    const bucket = this.getSedimentCandidateBucket(file);
     try {
       let successText = "";
       let completed = false;
@@ -9025,7 +9027,7 @@ class OutlineView extends obsidian.ItemView {
       try {
         if (!current || !current.isConnected) return;
         current.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
-      } catch (e) {
+      } catch {
         try { current.scrollIntoView(false); } catch { /* intentionally empty */ }
       }
     });
@@ -9488,7 +9490,7 @@ class OutlineView extends obsidian.ItemView {
       if (entry.interaction.task) {
         const txt = body.createDiv({ cls: "lexvoice-outline-annotation-text" });
         try { void obsidian.MarkdownRenderer.render(this.app, entry.interaction.task, txt, sourcePath, this); }
-        catch (e) { txt.setText(entry.interaction.task); }
+        catch { txt.setText(entry.interaction.task); }
       }
     } else if (entry.text) {
       const txt = body.createDiv({ cls: "lexvoice-outline-annotation-text" });
@@ -10895,7 +10897,7 @@ class OutlineView extends obsidian.ItemView {
     const head = card.createDiv({ cls: "lexvoice-recruit-card-head" });
     const hasJd = !!(ctx.jd && ctx.jd.trim());
     const hasResume = !!(ctx.resume && ctx.resume.trim());
-    const dot = head.createSpan({ cls: `lexvoice-recruit-card-dot ${hasJd ? "is-ok" : "is-warn"}` });
+    head.createSpan({ cls: `lexvoice-recruit-card-dot ${hasJd ? "is-ok" : "is-warn"}` });
     const title = head.createSpan({ cls: "lexvoice-recruit-card-title" });
     if (hasJd) {
       const positionLabel = ctx.position || "（未命名岗位）";
@@ -10995,15 +10997,16 @@ class OutlineView extends obsidian.ItemView {
         new obsidian.Notice(`大纲生成失败：${(e && e.message) || e}`);
       }
     } finally {
-      if (this.outlineRunSeq !== runId) return;
-      this.outlineRunning = false;
-      this.render();
-      if (this.outlineQueued) {
-        this.outlineQueued = false;
-        if (shouldRunRealtimeOutline(this.plugin.session, { silent: true, local })) {
-          const nextAllowedAt = Number(this.plugin.session && this.plugin.session.realtimeOutlineNextAllowedAt) || 0;
-          const wait = Math.max(1000, nextAllowedAt - Date.now());
-          window.setTimeout(() => { void this.refreshAIOutline({ silent: true }); }, wait);
+      if (this.outlineRunSeq === runId) {
+        this.outlineRunning = false;
+        this.render();
+        if (this.outlineQueued) {
+          this.outlineQueued = false;
+          if (shouldRunRealtimeOutline(this.plugin.session, { silent: true, local })) {
+            const nextAllowedAt = Number(this.plugin.session && this.plugin.session.realtimeOutlineNextAllowedAt) || 0;
+            const wait = Math.max(1000, nextAllowedAt - Date.now());
+            window.setTimeout(() => { void this.refreshAIOutline({ silent: true }); }, wait);
+          }
         }
       }
     }
@@ -11057,7 +11060,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     }});
     this.addCommand({ id: "open-queue", name: "打开待处理队列", callback: () => new QueueModal(this.app, this).open() });
     this.addCommand({ id: "retry-queue-all", name: "重试所有失败任务", callback: () => this.retryQueue() });
-    this.addCommand({ id: "copy-diagnostic-report", name: "复制 LexVoice 诊断报告", callback: () => this.copyDiagnosticReport() });
+    this.addCommand({ id: "copy-diagnostic-report", name: "复制诊断报告", callback: () => this.copyDiagnosticReport() });
     this.addCommand({ id: "suggest-people-directory-updates", name: "AI 扫描纪要库提取人员建议", callback: () => this.suggestPeopleDirectoryFromLibrary() });
     this.addCommand({ id: "open-learning-card-wall", name: "打开学习卡片瀑布墙", callback: () => this.openLearningWall("learning") });
     this.addCommand({ id: "open-concept-wall", name: "打开概念墙", callback: () => this.openLearningWall("concept") });
@@ -11087,8 +11090,8 @@ class LexVoicePlugin extends obsidian.Plugin {
         return true;
       },
     });
-    this.addCommand({ id: "check-updates", name: "检查 LexVoice 更新", callback: () => this.checkForUpdates({ silent: false }) });
-    this.addCommand({ id: "install-update", name: "安装 LexVoice 可用更新", callback: () => this.installAvailableUpdate() });
+    this.addCommand({ id: "check-updates", name: "检查更新", callback: () => this.checkForUpdates({ silent: false }) });
+    this.addCommand({ id: "install-update", name: "安装可用更新", callback: () => this.installAvailableUpdate() });
     this.addCommand({ id: "open-outline", name: "打开实时纪要面板", callback: () => this.openOutlineView() });
     this.addCommand({ id: "record-mic-only", name: "开始录音 · 仅麦克风", callback: () => { this._oneShotCaptureMode = "mic"; void this.startRecording(); } });
     this.addCommand({ id: "record-mic-virtual", name: "开始录音 · 麦克风 + 电脑音频", callback: () => { this._oneShotCaptureMode = "mix-virtual"; void this.startRecording(); } });
@@ -11217,10 +11220,10 @@ class LexVoicePlugin extends obsidian.Plugin {
     }));
 
     // F7：招聘主页 4 个 code block 渲染器（实时计算零落盘，外层 try/catch 降级重试）+ 重建主页命令。
-    this.mountHrBlock("lexvoice-hr-actions", this.renderHrActions);
-    this.mountHrBlock("lexvoice-hr-stats", this.renderHrStats);
-    this.mountHrBlock("lexvoice-hr-recent", this.renderHrRecent);
-    this.mountHrBlock("lexvoice-hr-latest-notes", this.renderHrLatest);
+    this.mountHrBlock("lexvoice-hr-actions", (source, el, ctx) => this.renderHrActions(source, el, ctx));
+    this.mountHrBlock("lexvoice-hr-stats", (source, el, ctx) => this.renderHrStats(source, el, ctx));
+    this.mountHrBlock("lexvoice-hr-recent", (source, el, ctx) => this.renderHrRecent(source, el, ctx));
+    this.mountHrBlock("lexvoice-hr-latest-notes", (source, el, ctx) => this.renderHrLatest(source, el, ctx));
     this.addCommand({ id: "lexvoice-rebuild-recruit-homepage", name: "新建 / 重建招聘主页", callback: () => this.rebuildRecruitHomepage() });
     this.addCommand({ id: "cleanup-empty-short-recordings", name: "清理空白短录音", callback: () => this.cleanupEmptyShortRecordings() });
 
@@ -13906,8 +13909,6 @@ class LexVoicePlugin extends obsidian.Plugin {
       const el = activeDocument.createElement("article");
       if (obsidian.MarkdownRenderer && typeof obsidian.MarkdownRenderer.render === "function") {
         await obsidian.MarkdownRenderer.render(this.app, markdown, el, file.path, renderComponent);
-      } else if (obsidian.MarkdownRenderer && typeof obsidian.MarkdownRenderer.renderMarkdown === "function") {
-        await obsidian.MarkdownRenderer.renderMarkdown(markdown, el, file.path, renderComponent);
       }
       contentHtml = el.innerHTML;
     } catch (e) {
@@ -14514,8 +14515,11 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
       .map((c) => `- ${c.file.path}（${formatElapsed(c.durationMs)}，录音 ${c.audioFiles.length} 个）`)
       .join("\n");
     const more = candidates.length > 10 ? `\n...另有 ${candidates.length - 10} 条` : "";
-    const ok = confirm(
-      `发现 ${candidates.length} 条空白短录音。\n\n条件：时长不超过 10 秒，且没有有效转写文本。\n将移入系统废纸篓：${candidates.length} 篇纪要、${uniqueAudioFiles.length} 个录音文件。\n\n${preview}${more}\n\n继续清理吗？`
+    const ok = await lexvoiceConfirm(
+      this.app,
+      "清理空白短录音",
+      `发现 ${candidates.length} 条空白短录音。\n\n条件：时长不超过 10 秒，且没有有效转写文本。\n将移入系统废纸篓：${candidates.length} 篇纪要、${uniqueAudioFiles.length} 个录音文件。\n\n${preview}${more}\n\n继续清理吗？`,
+      "清理"
     );
     if (!ok) return;
 
@@ -15343,7 +15347,7 @@ ${source}`;
       new obsidian.Notice("没有找到这篇之前的最近一条 LexVoice 纪要。", 6000);
       return;
     }
-    const ok = confirm(`将生成一篇新的合并纪要，源文件会保留。\n\n来源：\n1. ${previous.basename}\n2. ${file.basename}\n\n继续合并？`);
+    const ok = await lexvoiceConfirm(this.app, "合并纪要", `将生成一篇新的合并纪要，源文件会保留。\n\n来源：\n1. ${previous.basename}\n2. ${file.basename}\n\n继续合并？`, "合并");
     if (!ok) return;
     try {
       await this.mergeMarkdownFilesAsNew([previous, file]);
