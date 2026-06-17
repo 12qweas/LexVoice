@@ -59,6 +59,8 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     }
 
     const content = containerEl.createDiv({ cls: "lexvoice-settings-content" });
+    // 移动端运行时强制单列堆叠（手机设置面板有时宽于 760px CSS px，纯靠 @media 会漏）。
+    content.toggleClass("is-mobile", isLexVoiceMobileRuntime());
     switch (this.activeTab) {
       case "home":     this.renderHome(content); break;
       case "general":  this.renderGeneral(content); break;

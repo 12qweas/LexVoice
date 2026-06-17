@@ -1075,7 +1075,7 @@ ${frontmatterSection}**整体结构原则**：顶部用 callout 做结构化速�
 - \`> [!tip]\` 模式不匹配的软建议
 - \`> [!question]\` 悬而未决/待澄清（仅在出现时）
 - 其他正文一律不用 callout
-- 连续 callout 之间必须保留两个引用空行：上一块结束后写两行单独的 \`>\`，再写下一个 \`> [!type]\`，避免 Obsidian 把多个 callout 合并成一个块
+- 连续 callout 之间必须用**一个普通空行**隔开：上一个 callout 结束后直接空一行（**行首不要写 \`>\`**），再写下一个 \`> [!type]\`；**不要**用 \`>\` 空引用行去分隔——那样 Obsidian 会把它们当作同一个引用块、合并成一个 callout 显示
 
 **主体内容写作要求**（**还原优先，提炼为辅**——结构化是为了让人读懂，不是为了变短）：
 - 把讨论的逻辑层级**结构化**呈现：议题/主论点 → 支撑（事实、案例、数据、异议）→ 关键细节
@@ -2565,13 +2565,25 @@ function getRecentNotes(plugin, limit) {
   const pendingPathSet = getRecentPendingDepositPathSet(plugin);
   for (const f of getMarkdownFilesUnderFolder(plugin.app, norm)) {
     if (!(f instanceof obsidian.TFile) || f.extension !== "md") continue;
-    const m = f.basename.match(/^(\d{4}-\d{2}-\d{2})(?:\s+(\d{4}))?/);
-    if (!m) continue;
-    const stamp = m[2] ? `${m[1]} ${m[2]}` : m[1];
-    const t = moment(stamp, m[2] ? "YYYY-MM-DD HHmm" : "YYYY-MM-DD", true);
-    if (!t.isValid()) continue;
     const frontmatter = ((plugin.app.metadataCache.getFileCache(f) || {}).frontmatter) || {};
     const mode = detectRecentNoteMode(plugin, f, frontmatter);
+    // 是否 LexVoice 纪要：能识别出 mode（非 off）或 frontmatter 自带 mode / lexvoice 标记。
+    // 手动改名（丢掉日期前缀）的纪要也要保留，否则在纪要面板里找不到、没法重新整理。
+    const isLexVoiceNote = (mode && mode !== "off") || !!frontmatter.mode
+      || /lexvoice/i.test(String(frontmatter.tags || frontmatter.tag || ""));
+    const m = f.basename.match(/^(\d{4}-\d{2}-\d{2})(?:\s+(\d{4}))?/);
+    if (!m && !isLexVoiceNote) continue;
+    let t = null;
+    if (m) {
+      const stamp = m[2] ? `${m[1]} ${m[2]}` : m[1];
+      t = moment(stamp, m[2] ? "YYYY-MM-DD HHmm" : "YYYY-MM-DD", true);
+    }
+    if (!t || !t.isValid()) {
+      // 无合法日期前缀（典型=被手动改名）→ 退回 frontmatter 时间，再退回文件 ctime/mtime。
+      const fmTime = frontmatter.time || frontmatter["时间"] || frontmatter.date || frontmatter["日期"];
+      t = fmTime ? moment(fmTime) : null;
+      if (!t || !t.isValid()) t = moment((f.stat && (f.stat.ctime || f.stat.mtime)) || undefined);
+    }
     const meta = getModeMeta(plugin.settings, mode) || MODE_META.off;
     let title = stripRecentDatePrefix(f.basename);
     if (meta && meta.prefix) {
@@ -2594,7 +2606,7 @@ function getRecentNotes(plugin, limit) {
       groupTitle: weekday,
       axisPrimary: sameYear ? t.format("DD") : t.format("YYYY"),
       axisSecondary: sameYear ? t.format("M月") : t.format("M月D日"),
-      displayTime: t.format(m[2] ? "HH:mm" : "MM-DD"),
+      displayTime: t.format(m && m[2] ? "HH:mm" : "MM-DD"),
       durationLabel,
     });
   }
@@ -3731,26 +3743,14 @@ function isLexVoiceCalloutBoundary(line) {
 
 function ensureLexVoiceCalloutGapBeforeHeader(out) {
   if (!Array.isArray(out) || !out.length) return;
-  let lastContentIndex = -1;
-  for (let i = out.length - 1; i >= 0; i--) {
-    if (String(out[i] || "").trim()) { lastContentIndex = i; break; }
-  }
-  if (lastContentIndex < 0) return;
-  if (!/^\s*>/.test(String(out[lastContentIndex] || ""))) return;
-  let quoteBlankCount = 0;
-  for (let i = out.length - 1; i >= 0; i--) {
-    const line = String(out[i] || "");
-    if (/^\s*>\s*$/.test(line)) {
-      quoteBlankCount++;
-      continue;
-    }
-    if (!line.trim()) continue;
+  // 删除上一块尾部的空行与「>」空引用行——它们是 blockquote 续行，会让 Obsidian 把相邻 callout 合并成一个块
+  while (out.length) {
+    const last = String(out[out.length - 1] || "");
+    if (!last.trim() || /^\s*>\s*$/.test(last)) { out.pop(); continue; }
     break;
   }
-  while (quoteBlankCount < 2) {
-    out.push(">");
-    quoteBlankCount++;
-  }
+  // 用一个「真正的空行」(行首无 >) 断开，使下一个 callout 成为独立块；位于开头时不补前导空行
+  if (out.length) out.push("");
 }
 
 function normalizeLexVoiceCallouts(markdown) {
@@ -6067,6 +6067,7 @@ class OutlineView extends obsidian.ItemView {
     this.recentFilters = { time: "week", mode: "all" };
     this.sedimentGroup = "person";
     this.sedimentSwitcherOpen = false;
+    this.sedimentExpandedGroups = new Set(); // 哪些候选分组已"展开全部"（默认只显示前 8 条）
     this.sedimentCandidatesByPath = {};
     this.notePanelCacheKey = "";
     this.notePanelCacheData = undefined;
@@ -6095,6 +6096,21 @@ class OutlineView extends obsidian.ItemView {
       this.showRecentHome = true;
       this.idlePanelTab = "";
       this.scheduleUpdate();
+    }));
+    // 文件改名/删除（无论从面板内还是 Obsidian 文件管理器触发）→ 让最近纪要面板跟着刷新：
+    // 改名后名字同步、删除后从列表消失。computeSignature 不含最近笔记文件名，必须清掉
+    // _lastSig 才会真重渲染（否则签名没变只会 updateLiveStats，看起来"没反应"）。
+    // 不监听 create：Obsidian 启动时会对所有文件补发 create，易造成风暴；新建纪要本就经
+    // recorder/finalize 触发刷新。
+    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+      if (file instanceof obsidian.TFile && (this.isRecentNotePath(file.path) || this.isRecentNotePath(oldPath))) {
+        this.forceRecentRender();
+      }
+    }));
+    this.registerEvent(this.app.vault.on("delete", (file) => {
+      if (file && file.path && this.isRecentNotePath(file.path)) {
+        this.forceRecentRender();
+      }
     }));
     if ((this.plugin.settings.enableRealtimeOutline
           || (this.plugin.session && this.plugin.session.mode === "recruit-needs"))
@@ -6866,12 +6882,32 @@ class OutlineView extends obsidian.ItemView {
     actions.createEl("button", { text: "取消扫描", cls: "lexvoice-sediment-button is-secondary", attr: { type: "button" } }).onclick = () => this.cancelSedimentExtraction(file);
   }
 
+  // "还有 N 条"改成可点击展开/收起：默认只显示前 8 条保持紧凑，点一下渲染全部（面板自然滚动），
+  // 否则后面的候选既滚不到也无法逐条改名/取消选中 —— 即"操作上卡死"。
+  renderSedimentMoreToggle(list, key, hiddenCount, expanded) {
+    const more = list.createDiv({
+      cls: "lexvoice-sediment-more is-clickable",
+      text: expanded ? "收起" : `还有 ${hiddenCount} 条 · 点击展开`,
+      attr: { role: "button", tabindex: "0", title: expanded ? "收起列表" : "展开全部候选" },
+    });
+    const toggle = (evt) => {
+      if (evt) evt.stopPropagation();
+      if (this.sedimentExpandedGroups.has(key)) this.sedimentExpandedGroups.delete(key);
+      else this.sedimentExpandedGroups.add(key);
+      this.render();
+    };
+    more.onclick = toggle;
+    more.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(e); } };
+  }
+
   renderSedimentPeople(parent, file, state) {
     if (state.currentPeople.length) {
       const list = parent.createDiv({ cls: "lexvoice-sediment-list" });
-      for (const item of state.currentPeople.slice(0, 8)) this.renderSedimentPeopleItem(list, file, item);
+      const expanded = this.sedimentExpandedGroups.has("person");
+      const shown = expanded ? state.currentPeople : state.currentPeople.slice(0, 8);
+      for (const item of shown) this.renderSedimentPeopleItem(list, file, item);
       if (state.currentPeople.length > 8) {
-        list.createDiv({ cls: "lexvoice-sediment-more", text: `还有 ${state.currentPeople.length - 8} 条` });
+        this.renderSedimentMoreToggle(list, "person", state.currentPeople.length - 8, expanded);
       }
       this.renderSedimentFooter(parent, state.groups.find(item => item.key === "person"), state.currentPeople.length, {
         secondaryText: "全部忽略",
@@ -6897,8 +6933,10 @@ class OutlineView extends obsidian.ItemView {
     if (!items.length) {
       this.renderSedimentEmptyList(list);
     } else {
-      for (const item of items.slice(0, 8)) this.renderSedimentObjectItem(list, file, groupKey, item, selected.has(item.id));
-      if (items.length > 8) list.createDiv({ cls: "lexvoice-sediment-more", text: `还有 ${items.length - 8} 条` });
+      const expanded = this.sedimentExpandedGroups.has(groupKey);
+      const shown = expanded ? items : items.slice(0, 8);
+      for (const item of shown) this.renderSedimentObjectItem(list, file, groupKey, item, selected.has(item.id));
+      if (items.length > 8) this.renderSedimentMoreToggle(list, groupKey, items.length - 8, expanded);
     }
     const selectedCount = Array.from(selected).filter(id => items.some(item => item.id === id)).length;
     const unselectedCount = Math.max(0, items.length - selectedCount);
@@ -10380,18 +10418,28 @@ class OutlineView extends obsidian.ItemView {
       row.addEventListener("contextmenu", (evt) => {
         evt.preventDefault();
         evt.stopPropagation();
-        this.showRecentNoteContextMenu(evt, r.file);
+        // nameEl 在本次迭代后续才声明；闭包在右键时才执行，届时已初始化（TDZ 安全）。
+        this.showRecentNoteContextMenu(evt, r.file, () => this.beginRecentNoteRename(nameEl, r.file, r.title));
       });
       const meta = getModeMeta(this.plugin.settings, r.mode) || MODE_META.off;
       const chip = row.createDiv({ cls: "lexvoice-outline-recent-chip", attr: { title: meta.label || meta.prefix || "录音" } });
       try { obsidian.setIcon(chip, meta.icon || "mic"); } catch { chip.setText((meta.prefix || "录音").slice(0, 1)); }
       const body = row.createDiv({ cls: "lexvoice-outline-recent-body" });
       const titleLine = body.createDiv({ cls: "lexvoice-outline-recent-title-line" });
-      titleLine.createDiv({ cls: "lexvoice-outline-recent-name", text: r.title || r.file.basename });
+      const nameEl = titleLine.createDiv({ cls: "lexvoice-outline-recent-name", text: r.title || r.file.basename });
+      // 改名进行中（contentEditable）时，点击姓名只移动光标，别冒泡到整行去打开笔记。
+      nameEl.addEventListener("click", (e) => { if (nameEl.isContentEditable) e.stopPropagation(); });
       const metaText = [r.displayTime, meta.prefix, r.durationLabel].filter(Boolean).join(" · ");
       body.createDiv({ cls: "lexvoice-outline-recent-meta", text: metaText });
       const failedTasks = getQueueTasksForMarkdown(this.plugin, r.file, { types: ["transcribe"], failedOnly: true });
       const actions = body.createDiv({ cls: "lexvoice-outline-recent-actions" });
+      // 改名入口：可见铅笔按钮（桌面悬停浮现、移动端常显，触屏也能点），点击进入就地编辑。
+      this.createRecentActionButton(actions, {
+        icon: "pencil",
+        title: "重命名",
+        cls: "is-rename",
+        onClick: () => this.beginRecentNoteRename(nameEl, r.file, r.title),
+      });
       const queueState = getRecentQueueProcessingState(this.plugin, r.file);
       if (queueState) this.setRecentProcessingStatus(row, actions, queueState);
       if (failedTasks.length) {
@@ -10467,8 +10515,14 @@ class OutlineView extends obsidian.ItemView {
     menu.showAtMouseEvent(evt);
   }
 
-  showRecentNoteContextMenu(evt, file) {
+  showRecentNoteContextMenu(evt, file, beginRename) {
     const menu = new obsidian.Menu();
+    if (typeof beginRename === "function") {
+      menu.addItem((item) => {
+        item.setTitle("重命名").setIcon("pencil").onClick(() => beginRename());
+      });
+      menu.addSeparator();
+    }
     const detectedMode = this.plugin.detectModeFromMarkdown(file);
     const retryTasks = getQueueTasksForMarkdown(this.plugin, file, { types: ["transcribe"], failedOnly: true });
     if (retryTasks.length) {
@@ -10560,6 +10614,73 @@ class OutlineView extends obsidian.ItemView {
   async retryRecentTranscription(file) {
     await this.plugin.retryTranscribeTasksForMarkdown(file);
     this.render();
+  }
+
+  // 判断某路径是否属于"最近纪要面板"的范畴（mdFolder 下的 .md），用于决定要不要刷新面板。
+  isRecentNotePath(path) {
+    const p = obsidian.normalizePath(String(path || ""));
+    if (!p || !/\.md$/i.test(p)) return false;
+    const folder = obsidian.normalizePath(String(this.plugin.settings.mdFolder || ""));
+    // 空/根 mdFolder 时最近列表本就扫全库（getRecentNotes 同样行为），任何 .md 变动都算相关。
+    if (!folder || folder === "/" || folder === ".") return true;
+    // 只认 folder 之下的文件；不认与文件夹同名的兄弟文件（如 docs.md 之于 docs/）。
+    return p.startsWith(`${folder}/`);
+  }
+
+  // 强制重渲染最近面板：computeSignature 不含最近笔记文件名，必须清掉 _lastSig 才会真重建 DOM
+  // （见 scheduleUpdate）。集中成一处，避免各调用点漏清 _lastSig 导致"看着没反应"。
+  forceRecentRender() {
+    this._lastSig = "";
+    this.scheduleUpdate();
+  }
+
+  // 在面板里就地改名：复用沉淀候选那套 contentEditable 编辑器（Enter/失焦提交、Esc 取消、禁空）。
+  beginRecentNoteRename(nameEl, file, displayTitle) {
+    if (!nameEl || !(file instanceof obsidian.TFile)) return;
+    const original = String(displayTitle != null && displayTitle !== "" ? displayTitle : (nameEl.textContent || "")).trim();
+    this.enterSedimentInlineTitleEdit(nameEl, original, (next) => this.renameRecentNoteFromPanel(file, next));
+  }
+
+  // 提交改名：反向复刻 getRecentNotes 的标题派生——保留文件名里的「日期前缀 + 模式前缀」，
+  // 只替换其后的人类标题；这样结构零损失、面板显示与文件名前后一致。用 fileManager.renameFile
+  // 保留反向链接，sanitizeFilename 去非法字符，getAvailableMarkdownPath 防重名。
+  async renameRecentNoteFromPanel(file, rawNext) {
+    if (!(file instanceof obsidian.TFile)) return false;
+    const nextTitle = sanitizeFilename(rawNext);
+    if (!nextTitle) {
+      new obsidian.Notice("名称无效（为空或仅含非法字符）", 5000);
+      this.forceRecentRender(); // 复原显示
+      return false;
+    }
+    const base = file.basename;
+    const dateMatch = base.match(/^\d{4}-\d{2}-\d{2}(?:\s+\d{4})?\s*/);
+    let prefix = dateMatch ? dateMatch[0] : "";
+    const fm = (this.app.metadataCache.getFileCache(file) || {}).frontmatter || {};
+    const mode = detectRecentNoteMode(this.plugin, file, fm);
+    const meta = getModeMeta(this.plugin.settings, mode) || MODE_META.off;
+    if (meta && meta.prefix) {
+      const mm = base.slice(prefix.length).match(new RegExp("^" + escapeRegExp(meta.prefix) + "[-·\\s]*"));
+      if (mm) prefix += mm[0];
+    }
+    const nextBase = `${prefix}${nextTitle}`.trim();
+    if (!nextBase) { this.forceRecentRender(); return false; }
+    const dir = file.parent && file.parent.path ? file.parent.path : "";
+    const target = obsidian.normalizePath(dir && dir !== "/" ? `${dir}/${nextBase}.md` : `${nextBase}.md`);
+    const finalPath = this.plugin.getAvailableMarkdownPath(target, file.path);
+    if (!finalPath || obsidian.normalizePath(finalPath) === obsidian.normalizePath(file.path)) {
+      this.forceRecentRender(); // 无实际变化 → 复原显示
+      return false;
+    }
+    try {
+      await this.app.fileManager.renameFile(file, finalPath);
+      this.forceRecentRender();
+      return true;
+    } catch (e) {
+      console.error("[LexVoice] rename recent note failed", e);
+      new obsidian.Notice(`重命名失败：${(e && e.message) || e}`, 8000);
+      this.forceRecentRender();
+      return false;
+    }
   }
 
   confirmDeleteRecentNote(file) {

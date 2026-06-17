@@ -3987,6 +3987,18 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   line-height: 1.45;
 }
 
+/* "还有 N 条 · 点击展开" / "收起" —— 可点击：给指针 + 悬停高亮，明确它能操作。 */
+.lexvoice-sediment-more.is-clickable {
+  cursor: pointer;
+  padding: 6px 0 2px;
+  font-weight: var(--font-medium);
+  color: var(--lv-sediment-accent);
+  user-select: none;
+}
+.lexvoice-sediment-more.is-clickable:hover {
+  text-decoration: underline;
+}
+
 .lexvoice-sediment-item-evidence {
   color: color-mix(in srgb, var(--lv-sediment-muted) 84%, var(--lv-sediment-text));
 }
@@ -4026,6 +4038,11 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
 }
 
 .lexvoice-sediment-checkbox {
+  /* 它是 <button>，iOS/iPadOS Safari 会给原生按钮加 chrome → 变成实心方块。
+     必须清掉原生外观，box-sizing 让 14px 含边框不被撑大。 */
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
   width: 14px;
   height: 14px;
   flex: 0 0 14px;
@@ -4613,6 +4630,19 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   text-overflow: ellipsis;
 }
 
+/* 就地改名编辑态：取消省略号裁剪让全名可见，给清晰的可编辑边框。 */
+.lexvoice-outline-recent-name.is-editing {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  cursor: text;
+  padding: 0 4px;
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  outline: 1.5px solid var(--interactive-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 18%, transparent);
+}
+
 .lexvoice-outline-recent-current {
   display: none;
 }
@@ -4686,6 +4716,25 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   height: 13px;
   flex: 0 0 auto;
   stroke-width: 1.9;
+}
+
+/* 改名铅笔：桌面悬停整行才克制浮现（隐藏时不拦点击，避免误触）；移动端无悬停 → 常显、触屏可点。 */
+.lexvoice-outline-recent-action.is-rename {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.lexvoice-outline-recent-row:hover .lexvoice-outline-recent-action.is-rename,
+.lexvoice-outline-recent-action.is-rename:focus-visible {
+  opacity: 0.6;
+  pointer-events: auto;
+}
+.lexvoice-outline-recent-action.is-rename:hover {
+  opacity: 1;
+}
+.lexvoice-outline.is-mobile .lexvoice-outline-recent-action.is-rename {
+  opacity: 0.6;
+  pointer-events: auto;
 }
 
 .lexvoice-outline-recent-action.is-retry {
@@ -5304,7 +5353,7 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
 
 .lexvoice-audio-input-grid {
   display: grid;
-  grid-template-columns: minmax(220px, 0.8fr) minmax(260px, 1.2fr);
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
   gap: var(--size-4-3);
 }
 
@@ -5354,6 +5403,22 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   .lexvoice-audio-input-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* 移动端运行时（isLexVoiceMobileRuntime → .is-mobile）：不依赖视口宽度，
+   直接把音频输入区强制单列堆叠。手机设置面板有时报告的 CSS 宽度 > 760px，
+   仅靠上面的 @media 会漏，导致两列挤成一坨、排版异常。 */
+.lexvoice-settings-content.is-mobile .lexvoice-audio-input-grid {
+  grid-template-columns: 1fr;
+}
+
+.lexvoice-settings-content.is-mobile .lexvoice-audio-input-head {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.lexvoice-settings-content.is-mobile .lexvoice-audio-input-actions {
+  justify-content: flex-start;
 }
 
 
