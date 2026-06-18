@@ -11288,7 +11288,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       new obsidian.Notice(`LexVoice：发现 ${this.queue.tasks.length} 个待处理任务，后台重试中…`);
       window.setTimeout(() => { void this.retryQueue(); }, 2500);
     }
-    this.app.workspace.onLayoutReady(() => this.checkForUpdatesOnStartup());
+    this.app.workspace.onLayoutReady(() => { this.warnIfBuildManifestSkew(); this.checkForUpdatesOnStartup(); });
   }
 
   async onunload() {
@@ -11941,28 +11941,33 @@ class LexVoicePlugin extends obsidian.Plugin {
     // README.md 不是 Release 资产，会自动回落到 raw 分支（它已提交）。这修复"更新 main.js 失败：所有更新源都不可用（404）"。
     const releaseBase = info.version ? (LEXVOICE_UPDATE_REPO_URL.replace(/\/+$/, "") + "/releases/download/" + info.version) : "";
     const rawBases = [releaseBase, info.rawBaseUrl].concat(this.getUpdateRawBases()).filter(Boolean);
+
+    // 两阶段，防「版本错位」：① 先把所有文件抓进内存——任一必需文件(manifest/main.js/styles)抓失败就整体放弃、一个字节都不写；
+    // ② 写入时把 manifest.json 放最后，main.js/styles 成功落盘后才写 manifest。
+    // 旧逻辑边抓边写、且 manifest 排在 main.js 之前——main.js 抓失败时 manifest 已被写成新版本号，
+    // 造成「版本号涨了、代码没换」的静默错位（正是 1.7.x 一键更新 404 后用户卡在旧 main.js 的根因）。
+    const fetchedFiles = {};
     for (const fileName of UPDATE_PLUGIN_FILES) {
-      const target = basePath + "/" + fileName;
       try {
         const fetched = await fetchUpdateTextFromSources(rawBases, fileName);
         if (fileName === "manifest.json") info.rawBaseUrl = fetched.rawBaseUrl;
-        const next = fetched.text;
-        const current = (await adapter.exists(target)) ? await adapter.read(target) : "";
-        if (current === next) {
-          skipped.push(fileName);
-          continue;
-        }
-        await adapter.write(target, next);
-        const verified = await adapter.read(target);
-        if (verified !== next) throw new Error("写入后校验失败，请检查插件目录写入权限。");
-        changed.push(fileName);
+        fetchedFiles[fileName] = fetched.text;
       } catch (e) {
-        if (fileName === "README.md") {
-          skipped.push(fileName);
-          continue;
-        }
-        throw new Error("更新 " + fileName + " 失败：" + ((e && e.message) || e));
+        if (fileName === "README.md") { skipped.push(fileName); continue; } // README 非 Release 资产，缺了不阻断
+        throw new Error("更新 " + fileName + " 失败：" + ((e && e.message) || e) + "（未改动任何本地文件，可稍后重试）");
       }
+    }
+    const writeOrder = UPDATE_PLUGIN_FILES.filter(f => f !== "manifest.json" && fetchedFiles[f] != null)
+      .concat(fetchedFiles["manifest.json"] != null ? ["manifest.json"] : []);
+    for (const fileName of writeOrder) {
+      const target = basePath + "/" + fileName;
+      const next = fetchedFiles[fileName];
+      const current = (await adapter.exists(target)) ? await adapter.read(target) : "";
+      if (current === next) { skipped.push(fileName); continue; }
+      await adapter.write(target, next);
+      const verified = await adapter.read(target);
+      if (verified !== next) throw new Error("写入 " + fileName + " 后校验失败，请检查插件目录写入权限。");
+      changed.push(fileName);
     }
 
     this.settings.installedUpdateVersion = info.version;
@@ -11973,6 +11978,24 @@ class LexVoicePlugin extends obsidian.Plugin {
     const changedText = changed.length ? changed.join("、") : "无文件变化";
     const skippedText = skipped.length ? "；跳过 " + skipped.join("、") : "";
     new obsidian.Notice("LexVoice 已安装 " + info.version + "：更新 " + changedText + skippedText + "。写入目录：" + basePath + "。请重启 Obsidian 或重新启用插件生效。", 12000);
+  }
+
+  warnIfBuildManifestSkew() {
+    // LEXVOICE_BUILD_VERSION 由 esbuild 构建时注入（= 打包当时 manifest.json 的版本）。它若与运行时
+    // this.manifest.version 不一致，说明上次更新只写了 manifest、没换上 main.js（版本错位），插件实际跑的是旧代码。
+    // 把这种「静默跑旧码」变成显式、可操作的提示，引导手动重装——曾经正是它的缺失让 404 问题被假象掩盖。
+    try {
+      const built = (typeof LEXVOICE_BUILD_VERSION === "string") ? LEXVOICE_BUILD_VERSION : "";
+      const declared = (this.manifest && this.manifest.version) || "";
+      if (built && declared && built !== declared) {
+        console.warn("[LexVoice] build/manifest 版本错位：main.js=" + built + " manifest=" + declared);
+        new obsidian.Notice(
+          "LexVoice 版本错位：实际运行的 main.js 是 " + built + "，但 manifest 标的是 " + declared +
+          "。上次更新可能没成功写入 main.js，当前在跑旧代码。请到 设置 > 更新 重新更新，或从 GitHub Release 手动重装最新版后重启 Obsidian。",
+          0
+        );
+      }
+    } catch (e) { console.warn("[LexVoice] skew check failed", e); }
   }
 
   setRecordingIssue(kind, patch) {
