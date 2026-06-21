@@ -9649,3 +9649,49 @@ select.lexvoice-recruit-input.dropdown {
   justify-content: flex-end;
   gap: var(--size-2-3);
 }
+
+/* 派生版本（清稿等）：母本下的缩进子行 */
+.lexvoice-outline-recent-variant {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 30px;
+  padding: 3px 8px;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+}
+.lexvoice-outline-recent-variant::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  margin-left: 2px;
+  border-left: 1px solid var(--background-modifier-border);
+  border-bottom: 1px solid var(--background-modifier-border);
+  border-bottom-left-radius: 3px;
+  opacity: 0.7;
+  flex: 0 0 auto;
+}
+.lexvoice-outline-recent-variant:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+.lexvoice-outline-recent-variant.is-active {
+  color: var(--text-accent);
+}
+.lexvoice-outline-recent-variant-chip {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.7;
+}
+.lexvoice-outline-recent-variant-chip svg {
+  width: 13px;
+  height: 13px;
+}
+.lexvoice-outline-recent-variant-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -2724,12 +2724,16 @@ function getRecentNotes(plugin, limit) {
   const moment = window.moment;
   const currentYear = moment ? moment().year() : new Date().getFullYear();
   const items = [];
+  const variantFiles = [];
   const pendingPathSet = getRecentPendingDepositPathSet(plugin);
   for (const f of getMarkdownFilesUnderFolder(plugin.app, norm)) {
     if (!(f instanceof obsidian.TFile) || f.extension !== "md") continue;
     const frontmatter = ((plugin.app.metadataCache.getFileCache(f) || {}).frontmatter) || {};
-    // 派生版本（清稿/另存版本等）不在纪要面板当独立会议罗列——它们挂在母本下，避免列表翻倍。
-    if (frontmatter["类型"] === "LexVoice派生版本" || frontmatter.contains_raw === false) continue;
+    // 派生版本（清稿/另存版本等）不当独立会议罗列——收集起来，稍后按 source_path 挂到母本下。
+    if (frontmatter["类型"] === "LexVoice派生版本" || frontmatter.contains_raw === false) {
+      variantFiles.push({ file: f, fm: frontmatter });
+      continue;
+    }
     const mode = detectRecentNoteMode(plugin, f, frontmatter);
     // 是否 LexVoice 纪要：能识别出 mode（非 off）或 frontmatter 自带 mode / lexvoice 标记。
     // 手动改名（丢掉日期前缀）的纪要也要保留，否则在纪要面板里找不到、没法重新整理。
@@ -2773,6 +2777,24 @@ function getRecentNotes(plugin, limit) {
       displayTime: t.format(m && m[2] ? "HH:mm" : "MM-DD"),
       durationLabel,
     });
+  }
+  // 把派生版本挂到各自母本下（按 source_path 归并；母本不在列表里的派生暂不显示，仍可经反链/文件树找到）。
+  if (variantFiles.length) {
+    const byPath = new Map();
+    for (const it of items) byPath.set(obsidian.normalizePath(it.file.path), it);
+    for (const v of variantFiles) {
+      const sp = v.fm.source_path ? obsidian.normalizePath(String(v.fm.source_path)) : "";
+      const host = sp ? byPath.get(sp) : null;
+      if (!host) continue;
+      (host.variants || (host.variants = [])).push({
+        file: v.file,
+        label: String(v.fm.variant_label || v.fm.variant_kind || "派生版本"),
+        kind: String(v.fm.variant_kind || ""),
+        sourcePath: sp,
+        mtime: (v.file.stat && v.file.stat.mtime) || 0,
+      });
+    }
+    for (const it of items) if (it.variants) it.variants.sort((a, b) => a.mtime - b.mtime);
   }
   items.sort((a, b) => b.timestamp - a.timestamp);
   return items.slice(0, limit || 24);
@@ -10644,6 +10666,24 @@ class OutlineView extends obsidian.ItemView {
         });
       }
       this.syncRecentNoteProcessingState(r.file, row, actions, failedTasks.length);
+      // 派生版本（清稿等）作为母本下的缩进子行展示；点开打开派生，右键给派生专属菜单。
+      if (r.variants && r.variants.length) {
+        for (const v of r.variants) {
+          const vrow = itemsEl.createDiv({ cls: "lexvoice-outline-recent-variant" });
+          if (activePath && obsidian.normalizePath(v.file.path) === activePath) vrow.addClass("is-active");
+          const vchip = vrow.createDiv({ cls: "lexvoice-outline-recent-variant-chip" });
+          try { obsidian.setIcon(vchip, v.kind === "clean" ? "file-text" : "files"); } catch { /* intentionally empty */ }
+          vrow.createDiv({ cls: "lexvoice-outline-recent-variant-name", text: v.label || v.file.basename });
+          vrow.addEventListener("click", async () => {
+            try { await this.app.workspace.getLeaf(false).openFile(v.file); } catch (e) { console.error(e); }
+          });
+          vrow.addEventListener("contextmenu", (evt) => {
+            evt.preventDefault();
+            evt.stopPropagation();
+            this.showVariantContextMenu(evt, v.file, v.sourcePath);
+          });
+        }
+      }
     }
   }
 
@@ -10704,6 +10744,28 @@ class OutlineView extends obsidian.ItemView {
           });
       });
     }
+    menu.showAtMouseEvent(evt);
+  }
+
+  showVariantContextMenu(evt, file, sourcePath) {
+    const menu = new obsidian.Menu();
+    menu.addItem((item) => item.setTitle("打开母本").setIcon("corner-left-up").onClick(async () => {
+      const sp = sourcePath ? obsidian.normalizePath(String(sourcePath)) : "";
+      const src = sp ? this.plugin.app.vault.getAbstractFileByPath(sp) : null;
+      if (src instanceof obsidian.TFile) {
+        try { await this.plugin.app.workspace.getLeaf(false).openFile(src); } catch (e) { console.error(e); }
+      } else {
+        new obsidian.Notice("找不到母本（source_path 失效，可能母本被改名/移动）。", 6000);
+      }
+    }));
+    menu.addItem((item) => item.setTitle("重新生成清稿").setIcon("refresh-cw").onClick(() => this.plugin.generateCleanScript(file)));
+    menu.addSeparator();
+    menu.addItem((item) => item.setTitle("删除此版本").setIcon("trash").onClick(async () => {
+      const ok = await lexvoiceConfirm(this.plugin.app, "删除派生版本", `删除「${file.basename}」？母本和逐字稿不受影响。`, "删除");
+      if (!ok) return;
+      try { await trashLexVoiceFile(this.plugin.app, file); this.plugin.refreshOutlineView(); }
+      catch (e) { console.error(e); new obsidian.Notice("删除失败", 6000); }
+    }));
     menu.showAtMouseEvent(evt);
   }
 
