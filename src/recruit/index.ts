@@ -732,7 +732,7 @@ export async function extractPdfTextBestEffort(app, file) {
     const task = pdfjs.getDocument({ data: new Uint8Array(data) });
     let doc: PdfJsDocument;
     if (isPdfJsTask(task)) {
-      if (!task.promise) return "";
+      if (task.promise == null) return "";
       doc = await task.promise;
     } else {
       doc = await task;

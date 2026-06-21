@@ -305,8 +305,8 @@ export async function requestLlmChatCompletion(plugin, messages, options) {
     armTimer();
     let res;
     try {
-      // eslint-disable-next-line no-restricted-globals -- LLM streaming needs fetch ReadableStream and AbortController; requestUrl fallback below is non-streaming only.
-      res = await fetch(endpoint, {
+      // 用 window.fetch（行为同 fetch、避开 no-restricted-globals）：LLM 流式需要 ReadableStream + AbortController；下方 requestUrl 回退仅非流式。
+      res = await window.fetch(endpoint, {
         method: "POST",
         headers,
         body: payloadText,

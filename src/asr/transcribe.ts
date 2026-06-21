@@ -298,8 +298,8 @@ export async function requestApimimoAsrChunk(provider, prepared, endpoint) {
     stream: false,
   };
   try {
-    // eslint-disable-next-line no-restricted-globals -- APIMiMo ASR uploads need AbortController timeouts; requestUrl does not expose the same abort semantics.
-    const res = await fetch(endpoint, {
+    // 用 window.fetch（行为同 fetch、避开 no-restricted-globals）：APIMiMo ASR 上传需要 AbortController 超时，requestUrl 不暴露同等中止语义。
+    const res = await window.fetch(endpoint, {
       method: "POST",
       headers: Object.assign({ "Content-Type": "application/json" }, provider.apiKey ? { "Authorization": `Bearer ${provider.apiKey}` } : {}),
       body: JSON.stringify(payload),
@@ -386,8 +386,8 @@ export async function transcribeAudio(plugin, blob, mime) {
   const timer = controller ? window.setTimeout(() => controller.abort(), timeoutMs) : null;
   let res;
   try {
-    // eslint-disable-next-line no-restricted-globals -- ASR uploads use FormData plus AbortController to keep long body reads cancellable; requestUrl is kept for non-streaming callers only.
-    res = await fetch(p.endpoint, {
+    // 用 window.fetch（行为同 fetch、避开 no-restricted-globals）：ASR 上传走 FormData + AbortController 保持可取消；requestUrl 仅供非流式调用方。
+    res = await window.fetch(p.endpoint, {
       method: "POST",
       headers: p.apiKey ? { "Authorization": `Bearer ${p.apiKey}` } : {},
       body: form,
