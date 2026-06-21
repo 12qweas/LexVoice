@@ -9650,48 +9650,43 @@ select.lexvoice-recruit-input.dropdown {
   gap: var(--size-2-3);
 }
 
-/* 派生版本（清稿等）：母本下的缩进子行 */
+/* 派生版本（清稿等）：母本下的子行——沿用纪要行的设计语言，仅缩进 + 弱化以示从属 */
 .lexvoice-outline-recent-variant {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-left: 30px;
-  padding: 3px 8px;
+  gap: 8px;
+  /* 缩进到母本标题起点（母本 chip 30 + gap 9 = 39），用对齐而非连接线表达层级 */
+  padding: 2px 34px 2px 39px;
   border-radius: var(--radius-s);
   cursor: pointer;
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
-  line-height: 1.4;
+  min-width: 0;
 }
-.lexvoice-outline-recent-variant::before {
-  content: "";
-  width: 8px;
-  height: 8px;
-  margin-left: 2px;
-  border-left: 1px solid var(--background-modifier-border);
-  border-bottom: 1px solid var(--background-modifier-border);
-  border-bottom-left-radius: 3px;
-  opacity: 0.7;
-  flex: 0 0 auto;
-}
-.lexvoice-outline-recent-variant:hover {
-  color: var(--text-normal);
-  background: var(--background-modifier-hover);
-}
-.lexvoice-outline-recent-variant.is-active {
+.lexvoice-outline-recent-variant:hover .lexvoice-outline-recent-variant-name {
   color: var(--text-accent);
+}
+.lexvoice-outline-recent-variant.is-active .lexvoice-outline-recent-variant-name {
+  color: var(--lex-primary-soft, var(--text-accent));
 }
 .lexvoice-outline-recent-variant-chip {
   display: inline-flex;
   align-items: center;
-  opacity: 0.7;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--text-muted) 70%, var(--text-accent));
 }
 .lexvoice-outline-recent-variant-chip svg {
   width: 13px;
   height: 13px;
+  stroke-width: 1.8;
 }
 .lexvoice-outline-recent-variant-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.3;
+  font-weight: 560;
+  color: var(--text-muted);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
