@@ -36,6 +36,7 @@ import { MODE_BODIES } from "./prompts/mode-bodies";
 import { SHARED_DISCIPLINE, STRUCTURE_LEVEL_INSTRUCTIONS } from "./prompts/discipline";
 import { INDUSTRY_META_PROMPT } from "./prompts/industry-meta";
 import { JOBPORTRAIT_SYSTEM_PROMPT, JOBPORTRAIT_FOLLOWUP_RULES } from "./prompts/recruit-hrbp";
+import { CLEAN_TRANSCRIPT_SYSTEM, buildCleanTranscriptChunkPrompt } from "./prompts/clean-transcript";
 
 
 
@@ -2727,6 +2728,8 @@ function getRecentNotes(plugin, limit) {
   for (const f of getMarkdownFilesUnderFolder(plugin.app, norm)) {
     if (!(f instanceof obsidian.TFile) || f.extension !== "md") continue;
     const frontmatter = ((plugin.app.metadataCache.getFileCache(f) || {}).frontmatter) || {};
+    // 派生版本（清稿/另存版本等）不在纪要面板当独立会议罗列——它们挂在母本下，避免列表翻倍。
+    if (frontmatter["类型"] === "LexVoice派生版本" || frontmatter.contains_raw === false) continue;
     const mode = detectRecentNoteMode(plugin, f, frontmatter);
     // 是否 LexVoice 纪要：能识别出 mode（非 off）或 frontmatter 自带 mode / lexvoice 标记。
     // 手动改名（丢掉日期前缀）的纪要也要保留，否则在纪要面板里找不到、没法重新整理。
@@ -5777,6 +5780,41 @@ function splitSegmentsIntoGroups(segments, targetChars) {
   }
   if (cur.length) groups.push(cur);
   return groups;
+}
+
+// 清稿：把母本 raw 分段转写「清干净」成忠实可读的文字稿（非纪要、不压缩）。
+// 关键：清稿输出 ≈ 输入长度（略短），绑定约束是「输出要塞进 ceiling」→ 分段字符目标按反推 ≈ ceiling×1.5（封顶 24000）。
+// 绝不能套纪要那条 ×3.2 压缩公式——清稿不压缩，块喂太大会逐块截断、真丢内容。逐块 truncated 上报，供调用方挂警告。
+async function cleanTranscript(plugin, segments, ceiling) {
+  const list = Array.isArray(segments) ? segments.filter(s => s && String(s.text || "").trim()) : [];
+  if (!list.length) return { text: "", truncated: false };
+  const safeCeiling = Math.max(2048, Number(ceiling) || getLlmOutputCeiling(plugin.settings));
+  const targetChars = Math.min(24000, Math.max(6000, Math.floor(safeCeiling * 1.5)));
+  const groups = splitSegmentsIntoGroups(list, targetChars);
+  const runGroup = async (g, partIndex, partTotal) => {
+    const joined = g.map((s, j) => formatMergeSegmentForPrompt(s, j)).join("\n\n");
+    const start = formatElapsed(Number(g[0] && g[0].startOffsetMs) || 0);
+    const end = formatElapsed(Number(g[g.length - 1] && g[g.length - 1].endOffsetMs) || 0);
+    let up = buildCleanTranscriptChunkPrompt(joined, partIndex, partTotal, `${start}–${end}`);
+    up = applyBriefingLanguageInstruction(up, plugin.settings);
+    const { text, truncated } = await callBriefingMergeLlm(
+      plugin, CLEAN_TRANSCRIPT_SYSTEM, up,
+      { stream: true, payload: { max_tokens: safeCeiling } },
+      { mode: "cleanscript", chunked: partTotal > 1, part: partIndex, partTotal },
+    );
+    return { text: String(text || "").trim(), truncated: !!truncated };
+  };
+  if (groups.length < 2) {
+    return await runGroup(list, 1, 1);
+  }
+  const parts = [];
+  let anyTruncated = false;
+  for (let i = 0; i < groups.length; i++) {
+    const r = await runGroup(groups[i], i + 1, groups.length);
+    if (r.truncated) anyTruncated = true;
+    parts.push(r.text || "_[本部分无可整理内容]_");
+  }
+  return { text: parts.join("\n\n"), truncated: anyTruncated };
 }
 
 // 分段整理用的「部分」提示词：只产出本部分正文片段（无 YAML、无顶部总览），末尾给人物/标签/小结机器注释。
@@ -10698,6 +10736,11 @@ class OutlineView extends obsidian.ItemView {
         .onClick(() => this.plugin.mergeMarkdownFileWithPrevious(file));
     });
     menu.addSeparator();
+    menu.addItem((item) => {
+      item.setTitle("生成清稿")
+        .setIcon("file-text")
+        .onClick(() => this.plugin.generateCleanScript(file));
+    });
     menu.addItem((item) => {
       item.setTitle(detectedMode ? "重新整理为" : "整理为")
         .setIcon("refresh-cw");
@@ -16191,6 +16234,83 @@ ${source}`;
     ].filter(v => v !== null).join("\n");
 
     await this.app.vault.modify(file, currentBlock.replace(/\n{4,}/g, "\n\n\n"));
+  }
+
+  // 生成清稿（派生版本·只读快照）：从母本逐字稿忠实清理成可读稿，写成独立文件、双链回指母本。
+  // 永远从母本 raw 读（在派生上触发会先跳回母本）；清稿不含 raw、不参与「重新整理」回写。
+  async generateCleanScript(file) {
+    if (!(file instanceof obsidian.TFile) || file.extension !== "md") return;
+    try {
+      // 在派生文件上触发 → 先跳回母本（派生 contains_raw:false，本身没有 raw 可读）。
+      let sourceFile = file;
+      let content = await this.app.vault.read(file);
+      const fm = ((this.app.metadataCache.getFileCache(file) || {}).frontmatter) || {};
+      if (fm["类型"] === "LexVoice派生版本" || fm.contains_raw === false) {
+        const srcPath = fm.source_path ? obsidian.normalizePath(String(fm.source_path)) : "";
+        const resolved = srcPath ? this.app.vault.getAbstractFileByPath(srcPath) : null;
+        if (resolved instanceof obsidian.TFile) {
+          sourceFile = resolved;
+          content = await this.app.vault.read(resolved);
+        } else {
+          new obsidian.Notice("这是派生版本，且找不到母本（source_path 失效）。请在录音母本笔记上生成清稿。", 8000);
+          return;
+        }
+      }
+      const segments = extractLexVoiceTranscriptSegments(content);
+      if (!segments.length) {
+        new obsidian.Notice("未找到原始转写（逐字稿）。请在含「分段原始转写」的录音母本上生成清稿。", 8000);
+        return;
+      }
+      const baseTitle = sourceFile.basename;
+      const cleanName = sanitizeFilename(`清稿-${baseTitle}`) || "清稿";
+      const folder = sourceFile.parent && sourceFile.parent.path && sourceFile.parent.path !== "/" ? sourceFile.parent.path + "/" : "";
+      const targetPath = obsidian.normalizePath(folder + cleanName + ".md");
+      const existing = this.app.vault.getAbstractFileByPath(targetPath);
+      if (existing instanceof obsidian.TFile) {
+        const ok = await lexvoiceConfirm(this.app, "清稿已存在", `「${cleanName}」已存在，重新生成会覆盖它（清稿是母本的只读派生，要改请改母本而非清稿）。继续？`, "覆盖生成");
+        if (!ok) return;
+      }
+      this._busyLabel = "清稿生成中…";
+      this.updateBusyStatus();
+      new obsidian.Notice("LexVoice：正在从母本逐字稿生成清稿…");
+      const { text: cleaned, truncated } = await cleanTranscript(this, segments, getLlmOutputCeiling(this.settings));
+      if (!cleaned) { new obsidian.Notice("清稿生成失败：模型无输出", 8000); return; }
+      const sidMatch = content.match(/<!--\s*lexvoice-session:\s*([^\s>]+)\s*-->/);
+      const sourceId = sidMatch ? sidMatch[1] : "";
+      const stamp = window.moment ? window.moment().format("YYYY-MM-DD HH:mm:ss") : new Date().toISOString();
+      const warn = truncated
+        ? "> [!warning] 清稿可能被截断：部分内容或因模型输出上限未完整。建议换更大输出上限的模型后重新生成。\n\n"
+        : "";
+      const fmLines = [
+        "---",
+        "类型: LexVoice派生版本",
+        "variant_kind: clean",
+        "variant_label: 清稿",
+        `source_note: "[[${baseTitle}]]"`,
+        `source_path: "${sourceFile.path}"`,
+        `source_id: "${sourceId}"`,
+        "contains_raw: false",
+        `created: ${stamp}`,
+        "---",
+      ].join("\n");
+      const noteBody = `${fmLines}\n\n# 清稿 · ${baseTitle}\n\n> [!note] 从母本逐字稿忠实清理的可读稿（非纪要、不摘要）。母本（事实源 / 逐字稿）：[[${baseTitle}]]\n\n${warn}${cleaned}\n`;
+      let outFile;
+      if (existing instanceof obsidian.TFile) {
+        await this.app.vault.modify(existing, noteBody);
+        outFile = existing;
+      } else {
+        outFile = await this.app.vault.create(targetPath, noteBody);
+      }
+      new obsidian.Notice(`LexVoice：清稿已生成 → ${cleanName}`, 6000);
+      try { this.logCompletedWork("生成清稿", (outFile && outFile.path) || ""); } catch { /* intentionally empty */ }
+      try { await this.app.workspace.getLeaf(false).openFile(outFile); } catch { /* intentionally empty */ }
+    } catch (e) {
+      console.error("[LexVoice] generate clean script failed", e);
+      new obsidian.Notice(`清稿生成失败：${(e && e.message) || e}`, 8000);
+    } finally {
+      this._busyLabel = null;
+      this.updateBusyStatus();
+    }
   }
 
   async handleInboxFile(file) {
