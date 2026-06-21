@@ -4,8 +4,10 @@ import * as obsidian from "obsidian";
 import { VOCABULARY_SECTIONS } from '../shared/catalog-sediment';
 import { escapeRegExp } from '../shared/util-common';
 
-export function createVocabularyGroups() {
-  const groups = {};
+export type VocabularyGroups = Record<string, string[]>;
+
+export function createVocabularyGroups(): VocabularyGroups {
+  const groups: VocabularyGroups = {};
   for (const def of VOCABULARY_SECTIONS) groups[def.key] = [];
   return groups;
 }

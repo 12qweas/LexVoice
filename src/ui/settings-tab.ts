@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- LexVoice's settings/data layer is intentionally dynamically typed (files use @ts-nocheck and read untyped JSON from loadData); these type-only rules yield no actionable findings here and are tracked for incremental typing */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-deprecated -- LexVoice's settings tab is a custom dynamic UI; replacing PluginSettingTab.display() with getSettingDefinitions() would require a dedicated settings-page rewrite */
 // @ts-nocheck — PluginSettingTab class（this.plugin.* / 大量 setting builder 无 TS 字段声明）；已用 tsc 确认无漏引用(TS2304=0)，余者皆类字段类型噪音，故与 main.ts 同档跳过。
 // 由 main.ts 抽出（模块化拆解，提升工程稳定性；纯搬迁、零行为改动）。
 import * as obsidian from "obsidian";
@@ -774,7 +774,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     catch (e) { asrPart = `转写 ✗：${(e && e.message) || e}`; }
     try { const r = await testLlmConnection(this.plugin); llmPart = `大模型 ✓（${r.model || "?"}）`; }
     catch (e) { llmPart = `大模型 ✗：${(e && e.message) || e}`; }
-    return `${asrPart}　|　${llmPart}`;
+    return `${asrPart}\u3000|\u3000${llmPart}`;
   }
 
   renderApiSchemeSelector(c) {
@@ -1304,6 +1304,23 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       .addButton(b => b.setButtonText("查看待确认").setDisabled(!pendingPeopleSuggestions.length).onClick(async () => { await this.plugin.openCachedPeopleDirectorySuggestions(); this.display(); }))
       .addButton(b => b.setButtonText("查看已忽略").setDisabled(!ignoredPeopleSuggestions.length).onClick(async () => { await this.plugin.openIgnoredPeopleDirectorySuggestions(); this.display(); }));
 
+    new obsidian.Setting(c).setName("重复人员合并")
+      .setDesc("按人员 frontmatter 的「姓名」识别历史重复页（如 王传鹏 / 王传鹏-2），合并资料、改写纪要引用，并把重复页移到 LexVoice/归档/重复人员。")
+      .addButton(b => b.setButtonText("合并重复人员").onClick(async () => {
+        const ok = await lexvoiceConfirm(this.app, "合并重复人员档案？", "LexVoice 会把同名人员页合并到主档案，改写所有指向重复页的 wiki 链接，并将重复页移到归档目录。建议先确保同步已完成。", "开始合并");
+        if (!ok) return;
+        try {
+          const result = await this.plugin.mergeDuplicatePeopleDirectory();
+          new obsidian.Notice(result.merged
+            ? `已合并 ${result.merged} 个重复人员页，更新 ${result.updatedLinks} 篇引用`
+            : "没有发现需要合并的重复人员页");
+          this.display();
+        } catch (e) {
+          console.error("[LexVoice] merge duplicate people failed", e);
+          new obsidian.Notice(`合并重复人员失败：${(e && e.message) || e}`, 8000);
+        }
+      }));
+
     new obsidian.Setting(c).setName("对象保存位置").setHeading();
     c.createDiv({ cls: "setting-item-description lexvoice-section-hint" })
       .setText("这些路径都是当前 Obsidian 库内的相对路径。建议让纪要、对象和视图分层保存：纪要用于追溯，对象用于复用，视图用于浏览。");
@@ -1360,25 +1377,34 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
 
     new obsidian.Setting(c).setName("浏览与检索").setHeading();
     c.createDiv({ cls: "setting-item-description lexvoice-section-hint" })
-      .setText("学习卡片墙、概念墙和待办墙是主要浏览入口；Base 保留为明细筛选和人员资料表格，不作为主功能呈现。");
+      .setText("主入口只保留内容墙；Base 只用于高级筛选、核对和批量表格，不再作为学习 / 概念 / 待办的重复入口。");
 
-    new obsidian.Setting(c).setName("对象墙")
-      .setDesc("打开或创建对应的 Markdown 墙面视图。墙面样式由 LexVoice 插件内置 CSS 提供。")
-      .addButton(b => b.setButtonText("学习卡片墙").setCta().onClick(() => this.plugin.openLearningWall("learning")))
-      .addButton(b => b.setButtonText("概念墙").onClick(() => this.plugin.openLearningWall("concept")))
-      .addButton(b => b.setButtonText("待办墙").onClick(() => this.plugin.openTodoWall()));
+    new obsidian.Setting(c).setName("内容墙（主入口）")
+      .setDesc("用于日常浏览和回看沉淀对象。学习卡片、概念和待办都以 Markdown 墙呈现，不再单独维护同名 Base。")
+      .addButton(b => b.setButtonText("对象总览").setCta().onClick(() => this.plugin.openObjectWall()))
+      .addButton(b => b.setButtonText("学习卡片").onClick(() => this.plugin.openLearningWall("learning")))
+      .addButton(b => b.setButtonText("概念").onClick(() => this.plugin.openLearningWall("concept")))
+      .addButton(b => b.setButtonText("待办").onClick(() => this.plugin.openTodoWall()));
 
-    new obsidian.Setting(c).setName("明细视图")
-      .setDesc("Base 是 Obsidian 自带的表格视图。用于筛选、核对和批量浏览；保持接近 Obsidian Base 原生样式，降低主题冲突。")
-      .addButton(b => b.setButtonText("人员资料 Base").onClick(() => this.plugin.openPeopleBase()))
-      .addButton(b => b.setButtonText("纪要明细 Base").onClick(() => this.plugin.openLexVoiceDetailBase()))
-      .addButton(b => b.setButtonText("补齐表格视图").onClick(async () => {
+    new obsidian.Setting(c).setName("高级表格（Base）")
+      .setDesc("只保留需要表格能力的入口：人员资料和全部纪要明细。适合筛选、核对、批量检查，不承担对象墙展示。")
+      .addButton(b => b.setButtonText("人员资料").onClick(() => this.plugin.openPeopleBase()))
+      .addButton(b => b.setButtonText("全部纪要").onClick(() => this.plugin.openLexVoiceDetailBase()))
+      .addButton(b => b.setButtonText("补齐 Base").onClick(async () => {
         try {
           const r = await this.plugin.createLexVoiceBases({ overwrite: false });
-          new obsidian.Notice(`视图创建完成：新建 ${r.created} 个，跳过 ${r.skipped} 个`);
+          new obsidian.Notice(`Base 创建完成：新建 ${r.created} 个，跳过 ${r.skipped} 个`);
         } catch (e) {
           console.error(e);
           new obsidian.Notice(`创建失败：${e.message || e}`);
+        }
+      }))
+      .addButton(b => b.setButtonText("归档旧对象 Base").onClick(async () => {
+        try {
+          await this.plugin.archiveLegacyObjectBaseViews();
+        } catch (e) {
+          console.error(e);
+          new obsidian.Notice(`归档失败：${e.message || e}`);
         }
       }));
 
@@ -1789,7 +1815,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
 
     new obsidian.Setting(c).setName("清理空白短录音")
       .setDesc("扫描转写纪要文件夹，将时长不超过 10 秒且没有有效转写文本的 LexVoice 条目移入系统废纸篓，并同步处理其引用的录音文件。误删可从系统废纸篓恢复。")
-      .addButton(b => b.setButtonText("扫描并清理").setWarning().onClick(() => this.plugin.cleanupEmptyShortRecordings()));
+      .addButton(b => b.setButtonText("扫描并清理").setDestructive().onClick(() => this.plugin.cleanupEmptyShortRecordings()));
 
     // ---- 失败重试 ----
     new obsidian.Setting(c).setName("失败重试").setHeading();
@@ -1881,43 +1907,8 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     summary.createDiv({ text: `当前音频输入：${audioInputModeLabel(mode)}`, cls: "lexvoice-diag-summary-mode" });
     summary.createDiv({ text: modeStatus, cls: `lexvoice-diag-summary-status ${modeOk ? "is-ok" : "is-warn"}` });
 
-    const allDiagInputs = allInputs;
-    if (allDiagInputs.length > 0) {
-      const micSel = card.createDiv({ cls: "lexvoice-diag-vc-select" });
-      micSel.createDiv({ text: "麦克风：", cls: "lexvoice-diag-label" });
-      const micDropdown = micSel.createEl("select", { cls: "dropdown" });
-      const placeholderMic = micDropdown.createEl("option", { value: "", text: "— 请选择麦克风 —" });
-      if (!this.plugin.settings.selectedMicrophoneDevice) placeholderMic.selected = true;
-      // 列出所有输入设备，不过滤；虚拟/远程的标个提示但允许选
-      for (const d of allDiagInputs) {
-        const suffix = isVirtualCableLabel(d.label) ? "（可能是虚拟/远程）" : "";
-        const opt = micDropdown.createEl("option", { value: d.deviceId, text: (d.label || "未授权读取") + suffix });
-        if (this.plugin.settings.selectedMicrophoneDevice === d.deviceId) opt.selected = true;
-      }
-      micDropdown.addEventListener("change", async () => {
-        this.plugin.settings.selectedMicrophoneDevice = micDropdown.value;
-        await this.plugin.saveSettings();
-        new obsidian.Notice(micDropdown.value ? "麦克风选择已保存" : "请选择一个麦克风");
-      });
-    }
-
-    if (allDiagInputs.length > 0) {
-      const sel = card.createDiv({ cls: "lexvoice-diag-vc-select" });
-      sel.createDiv({ text: "电脑音频输入：", cls: "lexvoice-diag-label" });
-      const dropdown = sel.createEl("select", { cls: "dropdown" });
-      const placeholderVc = dropdown.createEl("option", { value: "", text: "— 请选择电脑音频输入 —" });
-      if (!this.plugin.settings.selectedVirtualDevice) placeholderVc.selected = true;
-      for (const d of allDiagInputs) {
-        const suffix = isVirtualCableLabel(d.label) ? "（推荐 · 虚拟声卡）" : "";
-        const opt = dropdown.createEl("option", { value: d.deviceId, text: (d.label || "未授权读取") + suffix });
-        if (this.plugin.settings.selectedVirtualDevice === d.deviceId) opt.selected = true;
-      }
-      dropdown.addEventListener("change", async () => {
-        this.plugin.settings.selectedVirtualDevice = dropdown.value;
-        await this.plugin.saveSettings();
-        new obsidian.Notice(dropdown.value ? "电脑音频输入选择已保存" : "请选择一个电脑音频输入");
-      });
-    }
+    const editHint = card.createDiv({ cls: "lexvoice-diag-edit-hint" });
+    editHint.setText("设备检测只做诊断；如需更换麦克风或电脑音频输入，请在上方「音频输入」区域调整。");
   }
 }
 /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- end of LexVoice dynamic-typing region */

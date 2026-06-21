@@ -8,14 +8,25 @@ export const STANDARD_POLISH_MODES = ["meeting", "seminar", "interview", "monolo
 
 export const ALL_POLISH_MODES = ["meeting", "seminar", "interview", "monologue", "learning", "recruit", "recruit-needs"];
 
+type CustomPromptModeTemplate = {
+  id: string;
+  mode: string;
+  name?: string;
+  description?: string;
+  baseMode?: string;
+  customMode?: boolean;
+};
+
 export function isKnownPolishMode(settings, mode) {
   if (mode === "off") return true;
   if (mode === "recruit" && !isRecruitFeatureUnlocked(settings)) return false;
   return !!(MODE_META[mode] || getCustomPromptModeTemplate(settings, mode));
 }
 
-export function isCustomPromptModeTemplate(t) {
-  return !!(t && t.customMode === true && typeof t.id === "string" && typeof t.mode === "string" && t.id === t.mode);
+export function isCustomPromptModeTemplate(t: unknown): t is CustomPromptModeTemplate {
+  if (!t || typeof t !== "object") return false;
+  const item = t as Partial<CustomPromptModeTemplate>;
+  return !!(item.customMode === true && typeof item.id === "string" && typeof item.mode === "string" && item.id === item.mode);
 }
 
 export function makeCustomPromptModeId(seed) {
@@ -38,7 +49,7 @@ export function getCustomPromptModeTemplates(settings) {
   const tpls = settings && settings.promptTemplates && typeof settings.promptTemplates === "object" ? settings.promptTemplates : {};
   return Object.values(tpls)
     .filter(isCustomPromptModeTemplate)
-    .sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "", "zh"));
+    .sort((a, b) => (a.name || "").localeCompare(b.name || "", "zh"));
 }
 
 export function getBuiltInVisiblePolishModeKeys(settings) {
@@ -46,7 +57,7 @@ export function getBuiltInVisiblePolishModeKeys(settings) {
 }
 
 export function getVisiblePolishModeKeys(settings) {
-  const custom = getCustomPromptModeTemplates(settings).map((t: any) => t.id);
+  const custom = getCustomPromptModeTemplates(settings).map((t) => t.id);
   return [...getBuiltInVisiblePolishModeKeys(settings), ...custom];
 }
 

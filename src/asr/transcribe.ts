@@ -220,7 +220,7 @@ export function normalizeApimimoAsrEndpoint(endpoint) {
 }
 
 export function apimimoPermanentError(message) {
-  const err: any = new Error(message);
+  const err = new Error(message) as Error & { nonRetryable?: boolean };
   err.nonRetryable = true;
   return err;
 }
@@ -298,6 +298,7 @@ export async function requestApimimoAsrChunk(provider, prepared, endpoint) {
     stream: false,
   };
   try {
+    // eslint-disable-next-line no-restricted-globals -- APIMiMo ASR uploads need AbortController timeouts; requestUrl does not expose the same abort semantics.
     const res = await fetch(endpoint, {
       method: "POST",
       headers: Object.assign({ "Content-Type": "application/json" }, provider.apiKey ? { "Authorization": `Bearer ${provider.apiKey}` } : {}),
@@ -306,7 +307,7 @@ export async function requestApimimoAsrChunk(provider, prepared, endpoint) {
     });
     if (!res.ok) {
       const msg = await res.text().catch(() => "");
-      const httpErr: any = new Error(buildTranscribeHttpError(res, msg, provider, prepared.blob, prepared.mime));
+      const httpErr = new Error(buildTranscribeHttpError(res, msg, provider, prepared.blob, prepared.mime)) as Error & { nonRetryable?: boolean };
       // MiMo 错误码语义：400 格式/大小、401 密钥、402 余额、403 风控、404 能力、421 内容审核——都不是重试能解决的。
       if ([400, 401, 402, 403, 404, 421].includes(res.status)) httpErr.nonRetryable = true;
       throw httpErr;
@@ -326,7 +327,7 @@ export async function requestApimimoAsrChunk(provider, prepared, endpoint) {
       throw new Error(`APIMiMo 返回错误：${apiErr.trim()}`);
     }
     if (apiErr && (apiErr.message || apiErr.code)) {
-      const bodyErr: any = new Error(`APIMiMo 返回错误${apiErr.code ? `（${apiErr.code}）` : ""}：${apiErr.message || "未知错误"}`);
+      const bodyErr = new Error(`APIMiMo 返回错误${apiErr.code ? `（${apiErr.code}）` : ""}：${apiErr.message || "未知错误"}`) as Error & { nonRetryable?: boolean };
       if (/^4/.test(String(apiErr.code || ""))) bodyErr.nonRetryable = true;
       throw bodyErr;
     }
@@ -385,6 +386,7 @@ export async function transcribeAudio(plugin, blob, mime) {
   const timer = controller ? window.setTimeout(() => controller.abort(), timeoutMs) : null;
   let res;
   try {
+    // eslint-disable-next-line no-restricted-globals -- ASR uploads use FormData plus AbortController to keep long body reads cancellable; requestUrl is kept for non-streaming callers only.
     res = await fetch(p.endpoint, {
       method: "POST",
       headers: p.apiKey ? { "Authorization": `Bearer ${p.apiKey}` } : {},

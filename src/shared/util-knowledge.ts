@@ -2,14 +2,24 @@
 // 由 main.ts 抽出（模块化拆解，提升工程稳定性；纯搬迁、零行为改动）。
 import * as obsidian from "obsidian";
 
+type KnowledgeHistoryRecord = {
+  mtime: number;
+  size: number;
+  scannedAt: string;
+};
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
 export function normalizeKnowledgeExtractionHistory(value) {
-  const normalizeBucket = (bucket) => {
-    const out = {};
-    if (!bucket || typeof bucket !== "object" || Array.isArray(bucket)) return out;
-    for (const [path, raw] of Object.entries(bucket) as [string, any][]) {
+  const normalizeBucket = (bucket: unknown): Record<string, KnowledgeHistoryRecord> => {
+    const out: Record<string, KnowledgeHistoryRecord> = {};
+    if (!isPlainRecord(bucket)) return out;
+    for (const [path, raw] of Object.entries(bucket)) {
       const key = obsidian.normalizePath(path || "");
       if (!key) continue;
-      if (raw && typeof raw === "object") {
+      if (isPlainRecord(raw)) {
         out[key] = {
           mtime: Number(raw.mtime) || 0,
           size: Number(raw.size) || 0,

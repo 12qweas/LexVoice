@@ -12,6 +12,33 @@ import { callLlm } from '../llm/core';
 
 export const PEOPLE_SUGGESTION_CACHE_LIMIT = 500;
 
+type PeopleDirectoryLoadOptions = {
+  force?: boolean;
+};
+
+type PeopleSuggestion = {
+  name: string;
+  aliases: string[];
+  role: string;
+  organization: string;
+  note: string;
+  confidence: string;
+  evidence: string[];
+  relation?: string;
+  sourcePath?: string;
+  sourceBasename?: string;
+  sourceMtime?: number;
+  sourceSize?: number;
+  cacheKey?: string;
+  matchPath?: string;
+  ignoreKey?: string;
+  ignoreTerms?: string[];
+  ignoredAt?: string;
+  selected?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 export function normalizePeopleContextMode(value) {
   return ["privacy", "hotwords", "localFull"].includes(value) ? value : "privacy";
 }
@@ -99,7 +126,7 @@ export function dedupePeopleEntries(entries) {
   return out;
 }
 
-export async function loadPeopleDirectory(plugin, options: any = {}) {
+export async function loadPeopleDirectory(plugin, options: PeopleDirectoryLoadOptions = {}) {
   const folder = obsidian.normalizePath(plugin.settings.peopleDirectoryFolder || DEFAULT_SETTINGS.peopleDirectoryFolder);
   const files = plugin.app.vault.getMarkdownFiles()
     .filter(file => {
@@ -216,6 +243,8 @@ export function formatPersonRelatedBriefingsBase(mdFolder) {
   const folder = escapeBaseString(obsidian.normalizePath(mdFolder || DEFAULT_SETTINGS.mdFolder));
   return `## 相关纪要
 
+> LexVoice 会把已确认的人物归属写回纪要。这里聚合的是和此人相关的会议、被提及记录与待办责任。
+
 \`\`\`base
 filters:
   and:
@@ -246,7 +275,20 @@ views:
         direction: DESC
 \`\`\`
 
-上方视图由 Obsidian Bases 根据纪要里的「相关人员」链接自动聚合；LexVoice 只在用户确认人员建议后维护这些本地链接。
+## 相关待办
+
+\`\`\`dataview
+TASK
+FROM "${folder}"
+WHERE contains(text, this.file.name) OR contains(string(file.frontmatter.todo_owners), this.file.name)
+SORT file.mtime DESC
+\`\`\`
+
+## 提及片段
+
+此处适合手动补充需要长期回看的原文片段。自动聚合以「相关纪要」为准，避免把每次会议里的偶发提及都硬写进人员页。
+
+上方视图由 Obsidian Bases 根据纪要里的「相关人员 / participants / mentioned_people / todo_owners」链接自动聚合；LexVoice 只在用户确认人员归属后维护这些本地链接。
 `;
 }
 
@@ -374,9 +416,84 @@ export function normalizePeopleSuggestion(item) {
   const role = String(item.role || item["角色"] || item.position || item["职能"] || "").trim().slice(0, 80);
   const organization = String(item.organization || item["组织"] || item.company || item["部门"] || "").trim().slice(0, 80);
   const note = String(item.note || item["备注"] || item.summary || "").trim().replace(/\s+/g, " ").slice(0, 180);
+  const relation = normalizePeopleRelation(item.relation || item["关系"] || item["人员关系"] || item.kind || item["类型"]);
   const confidenceRaw = String(item.confidence || item["置信度"] || "").trim();
   const confidence = /high|高/i.test(confidenceRaw) ? "高" : (/low|低/i.test(confidenceRaw) ? "低" : "中");
-  return { name, aliases, role, organization, note, confidence, evidence } as Record<string, any>;
+  return { name, aliases, role, organization, note, confidence, evidence, relation } as PeopleSuggestion;
+}
+
+export function normalizePeopleRelation(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return "";
+  if (/参会|与会|出席|speaker|participant|attendee/.test(text)) return "participant";
+  if (/责任|负责人|待办|owner|assignee|todo/.test(text)) return "todo_owner";
+  if (/提到|提及|mentioned|mention/.test(text)) return "mentioned";
+  return "";
+}
+
+export function getPeopleSuggestionLookupTerms(suggestion) {
+  const normalized = normalizePeopleSuggestion(suggestion);
+  if (!normalized) return [];
+  return mergeUniqueStrings([normalized.name], normalized.aliases || [])
+    .map(normalizePersonLookupText)
+    .filter(t => t && t.length >= 2);
+}
+
+export function arePeopleSuggestionsRelated(a, b) {
+  const left = getPeopleSuggestionLookupTerms(a);
+  const right = getPeopleSuggestionLookupTerms(b);
+  if (!left.length || !right.length) return false;
+  return left.some(l => right.some(r => {
+    if (l === r) return true;
+    const min = Math.min(l.length, r.length);
+    const max = Math.max(l.length, r.length);
+    if (min < 2) return false;
+    if (max - min > 4) return false;
+    return l.includes(r) || r.includes(l);
+  }));
+}
+
+function choosePeopleSuggestionName(a, b) {
+  const left = String(a || "").trim();
+  const right = String(b || "").trim();
+  if (!left) return right;
+  if (!right) return left;
+  const lk = normalizePersonLookupText(left);
+  const rk = normalizePersonLookupText(right);
+  if (lk && rk && lk !== rk && (lk.includes(rk) || rk.includes(lk))) {
+    return lk.length >= rk.length ? left : right;
+  }
+  return left;
+}
+
+export function mergePeopleSuggestions(base, extra) {
+  const left = normalizePeopleSuggestion(base);
+  const right = normalizePeopleSuggestion(extra);
+  if (!left) return right;
+  if (!right) return left;
+  const name = choosePeopleSuggestionName(left.name, right.name);
+  const aliasCandidates = [];
+  if (left.name && normalizePersonLookupText(left.name) !== normalizePersonLookupText(name)) aliasCandidates.push(left.name);
+  if (right.name && normalizePersonLookupText(right.name) !== normalizePersonLookupText(name)) aliasCandidates.push(right.name);
+  aliasCandidates.push(...(left.aliases || []), ...(right.aliases || []));
+  const merged = Object.assign({}, left, right, {
+    name,
+    aliases: mergeUniqueStrings([], aliasCandidates),
+    role: left.role || right.role || "",
+    organization: left.organization || right.organization || "",
+    confidence: left.confidence === "高" || right.confidence === "高" ? "高" : (left.confidence || right.confidence || "中"),
+    relation: left.relation || right.relation || "",
+    evidence: mergeUniqueStrings(left.evidence || [], right.evidence || []).slice(0, 8),
+  });
+  const notes = mergeUniqueStrings(left.note ? [left.note] : [], right.note ? [right.note] : []);
+  if (notes.length) merged.note = notes.join("；").slice(0, 180);
+  merged.matchPath = left.matchPath || right.matchPath || "";
+  merged.sourcePath = left.sourcePath || right.sourcePath || "";
+  merged.sourceBasename = left.sourceBasename || right.sourceBasename || "";
+  merged.cacheKey = left.cacheKey || right.cacheKey || "";
+  merged.ignoreKey = left.ignoreKey || right.ignoreKey || "";
+  merged.ignoreTerms = mergeUniqueStrings(left.ignoreTerms || [], right.ignoreTerms || []);
+  return merged;
 }
 
 export function normalizePeopleSuggestionsModel(model) {
@@ -669,6 +786,7 @@ export function buildPeopleDirectorySuggestionPrompt(fileName, markdown) {
 - 不要编造真实姓名、组织、职位或关系；证据不足就不要输出。
 - “某负责人”“某工程师”“产品负责人”这类称呼可以作为 aliases 或 role，但不要把泛称当作姓名。
 - 输出用于给用户确认入库，所以要保守、短句、可编辑。
+- relation 用来表示本次纪要里的人员归属：参会人 participant、被提到 mentioned、待办责任人 todo_owner。不确定时留空，默认按被提到处理。
 - 只输出 JSON，不要 Markdown，不要代码块。
 
 JSON 结构：
@@ -680,6 +798,7 @@ JSON 结构：
       "role": "角色/职责",
       "organization": "组织/部门/公司",
       "note": "为什么值得入库或需要补充什么",
+      "relation": "participant/mentioned/todo_owner/空",
       "confidence": "高/中/低",
       "evidence": ["纪要中支持该判断的短句"]
     }
@@ -692,12 +811,36 @@ ${source}`;
 
 export function mergeSourceNoteRelatedPeopleFrontmatter(frontmatter, personFiles) {
   const fm = Object.assign({}, frontmatter || {});
-  const links = (personFiles || [])
-    .filter(file => file instanceof obsidian.TFile)
-    .map(file => makeFileWikiLink(file))
+  const records = (personFiles || [])
+    .map(item => {
+      if (item instanceof obsidian.TFile) return { file: item, relation: "mentioned" };
+      if (item && item.file instanceof obsidian.TFile) return { file: item.file, relation: normalizePeopleRelation(item.relation) || "mentioned" };
+      return null;
+    })
+    .filter(Boolean);
+  const links = records
+    .map(item => makeFileWikiLink(item.file))
     .filter(Boolean);
   const merged = mergeUniqueStrings(fm["相关人员"] || fm.relatedPeople || fm.people || [], links);
   if (merged.length) fm["相关人员"] = merged;
+  const byRelation = {
+    participants: [],
+    mentioned_people: [],
+    todo_owners: [],
+  };
+  for (const item of records) {
+    const link = makeFileWikiLink(item.file);
+    if (!link) continue;
+    if (item.relation === "participant") byRelation.participants.push(link);
+    else if (item.relation === "todo_owner") byRelation.todo_owners.push(link);
+    else byRelation.mentioned_people.push(link);
+  }
+  const participants = mergeUniqueStrings(fm.participants || fm["参会人"] || [], byRelation.participants);
+  const mentioned = mergeUniqueStrings(fm.mentioned_people || fm["被提到的人"] || [], byRelation.mentioned_people);
+  const owners = mergeUniqueStrings(fm.todo_owners || fm["待办责任人"] || [], byRelation.todo_owners);
+  if (participants.length) fm.participants = participants;
+  if (mentioned.length) fm.mentioned_people = mentioned;
+  if (owners.length) fm.todo_owners = owners;
   delete fm.relatedPeople;
   delete fm.people;
   return fm;
@@ -740,12 +883,29 @@ export async function generatePeopleDirectorySuggestions(plugin, file, markdown)
   const people = await loadPeopleDirectory(plugin);
   const sys = "你是严谨的信息抽取助手，只根据用户提供的纪要提取人员资料建议。不要编造，不要输出非 JSON。";
   const raw = await callLlm(plugin, sys, buildPeopleDirectorySuggestionPrompt(file && file.basename ? file.basename : "当前笔记", markdown), { timeoutMs: 60000 });
-  const suggestions = normalizePeopleSuggestionsModel(extractJsonObject(raw))
+  const extracted = normalizePeopleSuggestionsModel(extractJsonObject(raw))
     .filter(item => !isPeopleSuggestionIgnored(plugin.settings, item));
-  for (const item of suggestions) {
+  const suggestions = [];
+  for (const item of extracted) {
     item.match = findMatchingPersonEntry(people, item);
     item.sourcePath = file && file.path ? file.path : "";
     item.sourceBasename = file && file.basename ? file.basename : "";
+    const existing = suggestions.find(prev => {
+      const prevPath = prev && prev.match && prev.match.path || prev.matchPath || "";
+      const itemPath = item && item.match && item.match.path || item.matchPath || "";
+      return (prevPath && itemPath && prevPath === itemPath) || arePeopleSuggestionsRelated(prev, item);
+    });
+    if (existing) {
+      const merged = mergePeopleSuggestions(existing, item);
+      Object.assign(existing, merged, {
+        match: existing.match || item.match || null,
+        matchPath: existing.matchPath || item.matchPath || "",
+        sourcePath: existing.sourcePath || item.sourcePath || "",
+        sourceBasename: existing.sourceBasename || item.sourceBasename || "",
+      });
+    } else {
+      suggestions.push(item);
+    }
   }
   return suggestions;
 }

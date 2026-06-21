@@ -129,7 +129,7 @@ export function getSedimentSourceDateLabel(sourceFile) {
 
 export function normalizeSedimentExtractionModel(model) {
   const raw = model && typeof model === "object" ? model : {};
-  const out: Record<string, any> = {
+  const out = {
     people: normalizePeopleSuggestionsModel(raw.people || raw.persons || raw.peopleSuggestions || []),
     hotwords: createVocabularyGroups(),
     learningCards: [],

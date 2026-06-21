@@ -5503,15 +5503,13 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
 .lexvoice-diag-summary-status.is-ok   { color: var(--color-green); }
 .lexvoice-diag-summary-status.is-warn { color: var(--color-orange); }
 
-.lexvoice-diag-vc-select {
+.lexvoice-diag-edit-hint {
   margin-top: var(--size-2-3);
   padding-top: var(--size-2-3);
   border-top: 1px solid var(--background-modifier-border);
-}
-
-.lexvoice-diag-vc-select select {
-  margin-top: var(--size-2-2);
-  width: 100%;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.5;
 }
 
 /* ============================================================
@@ -7070,6 +7068,127 @@ select.lexvoice-recruit-input.dropdown {
   color: var(--text-muted);
 }
 
+.lvwall-shell {
+  width: 100%;
+  max-width: none;
+}
+
+.lvwall-filterbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 18px 24px 0;
+}
+
+.lvwall-filter {
+  border: none;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  line-height: 1.2;
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
+  box-shadow: inset 0 0 0 1px var(--background-modifier-border);
+  cursor: pointer;
+}
+
+.lvwall-filter:hover {
+  color: var(--text-normal);
+  box-shadow: inset 0 0 0 1px var(--background-modifier-border-hover);
+}
+
+.lvwall-filter.is-active {
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  box-shadow: none;
+}
+
+.lvwall.lvwall-todos {
+  --lvwall-columns: 2;
+}
+
+.lvwall .lvwall-todo-card {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  column-gap: 12px;
+  padding: 18px 18px 17px;
+}
+
+.lvwall .lvwall-todo-card.is-completed {
+  opacity: .66;
+}
+
+.lvwall .lvwall-todo-card.is-completed .lvwall-title {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.lvwall-todo-check {
+  display: inline-flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 2px;
+  cursor: pointer;
+}
+
+.lvwall-todo-check input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.lvwall-todo-check span {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--text-faint);
+}
+
+.lvwall-todo-check input:checked + span {
+  background: var(--interactive-accent);
+  box-shadow: none;
+}
+
+.lvwall-todo-check input:checked + span::after {
+  content: "";
+  display: block;
+  width: 8px;
+  height: 4px;
+  margin: 5px 0 0 5px;
+  border-left: 2px solid var(--text-on-accent);
+  border-bottom: 2px solid var(--text-on-accent);
+  transform: rotate(-45deg);
+}
+
+.lvwall-todo-body {
+  min-width: 0;
+}
+
+.lvwall .lvwall-todo-card .lvwall-head {
+  margin-bottom: 12px;
+}
+
+.lvwall .lvwall-todo-card .lvwall-title {
+  margin-bottom: 10px;
+  font-size: 17px;
+}
+
+.lvwall .lvwall-todo-card .lvwall-sum {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.lvwall-subtasks {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .lvwall .lvwall-card:hover .lvwall-title {
   color: var(--text-accent);
   transform: translateY(-1px);
@@ -7143,6 +7262,14 @@ select.lexvoice-recruit-input.dropdown {
   .lvwall {
     --lvwall-gutter: 18px;
     padding: var(--lvwall-gutter);
+  }
+
+  .lvwall-filterbar {
+    padding: 14px 18px 0;
+  }
+
+  .lvwall.lvwall-todos {
+    --lvwall-columns: 1;
   }
 }
 
@@ -9259,27 +9386,96 @@ select.lexvoice-recruit-input.dropdown {
   line-height: 1.5;
 }
 
-/* F7 招聘主页 code block 渲染 */
+/* F7 招聘主页 code block 渲染：参考 PaperBell 主页的工作台密度，但只作用于招聘主页。 */
+.workspace-leaf-content[data-mode="preview"] .markdown-preview-view.lexvoice-recruit-home .metadata-container {
+  display: none;
+}
+.markdown-preview-view.lexvoice-recruit-home {
+  --lex-hr-bg: color-mix(in srgb, var(--background-primary) 88%, var(--interactive-accent) 12%);
+  --lex-hr-panel: color-mix(in srgb, var(--background-primary) 92%, var(--interactive-accent) 8%);
+  --lex-hr-panel-strong: color-mix(in srgb, var(--background-primary) 84%, var(--interactive-accent) 16%);
+  --lex-hr-border: color-mix(in srgb, var(--background-modifier-border) 70%, var(--interactive-accent) 30%);
+  --lex-hr-heading: color-mix(in srgb, var(--text-accent) 70%, var(--text-normal) 30%);
+  --lex-hr-link-bg: color-mix(in srgb, var(--interactive-accent) 72%, var(--background-primary) 28%);
+  --lex-hr-link-bg-hover: var(--interactive-accent-hover);
+  background: var(--lex-hr-bg);
+}
+.markdown-preview-view.lexvoice-recruit-home .markdown-preview-sizer {
+  max-width: 980px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-top: var(--size-4-6);
+  padding-bottom: var(--size-4-12);
+}
+.lexvoice-recruit-hero {
+  text-align: center;
+  margin: 0 0 var(--size-4-6);
+}
+.lexvoice-recruit-kicker {
+  margin-bottom: var(--size-2-2);
+  color: var(--text-accent);
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+}
+.lexvoice-recruit-hero h1 {
+  margin: 0;
+  color: var(--text-normal);
+  font-size: clamp(2rem, 6vw, 3.4rem);
+  line-height: 1.05;
+  letter-spacing: 0;
+}
+.lexvoice-recruit-home-tagline {
+  margin: var(--size-4-3) auto 0;
+  color: var(--text-normal);
+  font-size: 1.05em;
+  font-weight: var(--font-semibold);
+  text-align: center;
+}
+.lexvoice-recruit-home-script {
+  margin-top: var(--size-2-3);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-style: italic;
+}
+.markdown-preview-view.lexvoice-recruit-home h2 {
+  margin-top: var(--size-4-8);
+  margin-bottom: var(--size-4-3);
+  color: var(--lex-hr-heading);
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-bold);
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+.markdown-preview-view.lexvoice-recruit-home .callout {
+  border: 1px solid var(--lex-hr-border);
+  border-radius: var(--radius-m);
+  background: var(--lex-hr-panel);
+}
 .lexvoice-hr-actions {
   display: flex;
+  justify-content: center;
   gap: var(--size-4-2);
   flex-wrap: wrap;
-  margin: var(--size-2-2) 0;
+  margin: var(--size-4-4) 0 var(--size-4-6);
+}
+.lexvoice-hr-actions button {
+  min-width: 120px;
 }
 .lexvoice-hr-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--size-4-2);
-  margin: var(--size-2-2) 0;
+  margin: var(--size-4-5) 0 var(--size-4-6);
 }
 .lexvoice-hr-stat-card {
-  background: var(--background-secondary);
-  border-radius: var(--radius-m);
-  padding: var(--size-4-3);
+  background: transparent;
+  border: 1px solid var(--lex-hr-border);
+  border-radius: var(--radius-s);
+  padding: var(--size-4-2) var(--size-4-3);
   text-align: center;
 }
 .lexvoice-hr-stat-value {
-  font-size: 1.7em;
+  font-size: 1.45em;
   font-weight: var(--font-bold);
   color: var(--text-normal);
   line-height: 1.2;
@@ -9289,21 +9485,70 @@ select.lexvoice-recruit-input.dropdown {
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
 }
+.lexvoice-hr-links {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--size-4-4);
+  margin: var(--size-4-5) 0 var(--size-4-7);
+}
+.lexvoice-hr-link-title {
+  margin-bottom: var(--size-2-2);
+  color: var(--lex-hr-heading);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-bold);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.lexvoice-hr-link-button {
+  width: 100%;
+  min-height: 30px;
+  margin: 0 0 var(--size-2-1);
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: var(--lex-hr-link-bg);
+  color: var(--text-on-accent);
+  font-size: var(--font-ui-small);
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+}
+.lexvoice-hr-link-button:hover {
+  background: var(--lex-hr-link-bg-hover);
+  color: var(--text-on-accent);
+}
 .lexvoice-hr-table {
   width: 100%;
   border-collapse: collapse;
+  border: 1px solid var(--lex-hr-border);
   font-size: var(--font-ui-small);
 }
 .lexvoice-hr-table th,
 .lexvoice-hr-table td {
   text-align: left;
-  padding: var(--size-2-2) var(--size-2-3);
+  padding: 8px 10px;
   border-bottom: 1px solid var(--background-modifier-border);
+  border-right: 1px solid var(--background-modifier-border);
+  vertical-align: top;
+}
+.lexvoice-hr-table th:last-child,
+.lexvoice-hr-table td:last-child {
+  border-right: 0;
 }
 .lexvoice-hr-table th {
+  background: var(--lex-hr-panel);
   font-weight: var(--font-semibold);
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
+}
+.lexvoice-hr-candidate-table td:first-child {
+  min-width: 9em;
+}
+.lexvoice-hr-subtext {
+  margin-top: 2px;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.35;
+  color: var(--text-faint);
 }
 .lexvoice-hr-row {
   cursor: pointer;
@@ -9313,7 +9558,10 @@ select.lexvoice-recruit-input.dropdown {
 }
 .lexvoice-hr-latest {
   margin: var(--size-2-2) 0;
-  padding-left: var(--size-4-4);
+  padding: var(--size-4-3) var(--size-4-4);
+  border: 1px solid var(--lex-hr-border);
+  border-radius: var(--radius-m);
+  background: var(--lex-hr-panel);
 }
 .lexvoice-hr-latest li {
   margin: var(--size-2-1) 0;
@@ -9330,8 +9578,24 @@ select.lexvoice-recruit-input.dropdown {
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
   padding: var(--size-2-2) var(--size-2-3);
-  background: var(--background-secondary);
+  background: var(--lex-hr-panel);
   border-radius: var(--radius-s);
+}
+@media (max-width: 760px) {
+  .lexvoice-hr-stats,
+  .lexvoice-hr-links {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .lexvoice-hr-table {
+    display: block;
+    overflow-x: auto;
+  }
+}
+@media (max-width: 480px) {
+  .lexvoice-hr-stats,
+  .lexvoice-hr-links {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* 报告配色选择器 Modal */

@@ -719,12 +719,24 @@ export async function parseJdProject(app, jdFilePath) {
 export async function extractPdfTextBestEffort(app, file) {
   try {
     if (!(file instanceof obsidian.TFile) || String(file.extension || "").toLowerCase() !== "pdf") return "";
-    const w: any = (typeof window !== "undefined") ? window : {};
+    type PdfJsPage = { getTextContent: () => Promise<{ items?: Array<{ str?: string }> }> };
+    type PdfJsDocument = { numPages?: number; getPage: (pageNumber: number) => Promise<PdfJsPage> | PdfJsPage; destroy?: () => void };
+    type PdfJsTask = { promise?: Promise<PdfJsDocument> };
+    type PdfJsLike = { getDocument: (options: { data: Uint8Array }) => PdfJsTask | Promise<PdfJsDocument> };
+    const isPdfJsTask = (value: PdfJsTask | Promise<PdfJsDocument>): value is PdfJsTask =>
+      !!value && typeof value === "object" && "promise" in value;
+    const w = (typeof window !== "undefined" ? window : {}) as Window & { pdfjsLib?: PdfJsLike; pdfjs?: { pdfjsLib?: PdfJsLike } };
     const pdfjs = w.pdfjsLib || (w.pdfjs && w.pdfjs.pdfjsLib) || null;
     if (!pdfjs || typeof pdfjs.getDocument !== "function") return "";
     const data = await app.vault.readBinary(file);
     const task = pdfjs.getDocument({ data: new Uint8Array(data) });
-    const doc = await (task.promise || task);
+    let doc: PdfJsDocument;
+    if (isPdfJsTask(task)) {
+      if (!task.promise) return "";
+      doc = await task.promise;
+    } else {
+      doc = await task;
+    }
     const pageCount = Math.min(Number(doc.numPages) || 0, 50);
     const pages = [];
     for (let i = 1; i <= pageCount; i++) {
@@ -944,13 +956,60 @@ export async function createRecruitProject(app, jdFolderPath, rawName, fm, jdBod
 
 export function renderRecruitHomepageTemplate() {
   return [
-    "---", "类型: 招聘主页", "---",
-    "# 招聘总览", "",
-    "```lexvoice-hr-actions", "```", "",
-    "```lexvoice-hr-stats", "```", "",
-    "## 在招项目", "", "![[招聘项目.base#招聘中]]", "",
-    "## 本周面试", "", "```lexvoice-hr-recent", "days: 7", "```", "",
-    "## 最近纪要", "", "```lexvoice-hr-latest-notes", "count: 10", "```", "",
+    "---",
+    "类型: 招聘主页",
+    "cssclasses:",
+    "  - lexvoice-recruit-home",
+    "---",
+    "",
+    "<div class=\"lexvoice-recruit-hero\">",
+    "  <div class=\"lexvoice-recruit-kicker\">LexVoice Recruit</div>",
+    "  <h1>招聘工作台</h1>",
+    "  <div class=\"lexvoice-recruit-home-tagline\">把 JD、候选人、面试纪要和录用判断接成一张招聘星图。</div>",
+    "  <div class=\"lexvoice-recruit-home-script\">Interview, evidence, decision, connected.</div>",
+    "</div>",
+    "",
+    "```lexvoice-hr-stats",
+    "```",
+    "",
+    "```lexvoice-hr-links",
+    "```",
+    "",
+    "```lexvoice-hr-actions",
+    "```",
+    "",
+    "> [!summary] 对象边界",
+    "> **候选人**来自招聘评估纪要的 `候选人` 字段，用于面试轮次、录用建议和招聘项目聚合。",
+    "> **人员资料**来自会议沉淀的人员库，用于普通会议里参会人、被提到的人和待办责任人。两者不混用，避免把候选人误塞进日常会议人员库。",
+    "",
+    "## PROJECT TRACKING",
+    "",
+    "![[招聘项目.base#招聘中]]",
+    "",
+    "## CANDIDATE POOL",
+    "",
+    "```lexvoice-hr-candidates",
+    "count: 30",
+    "```",
+    "",
+    "## THIS WEEK",
+    "",
+    "```lexvoice-hr-recent",
+    "days: 7",
+    "```",
+    "",
+    "## RECENT INTERVIEWS",
+    "",
+    "```lexvoice-hr-latest-notes",
+    "count: 10",
+    "```",
+    "",
+    "## WORKFLOW",
+    "",
+    "- 新建招聘项目 → 创建面试提纲 → 录音 / 导入 → 生成评估 → 项目统计自动更新",
+    "- 候选人池按候选人聚合多轮面试；岗位文件夹里的 `.base` 只看该岗位候选人。",
+    "- 董事长 / 终面 / 招聘负责人等不同面试场景，可以通过招聘上下文里的轮次和面试官生成不同问题。",
+    "",
   ].join("\n");
 }
 
@@ -972,6 +1031,7 @@ export function listRecruitCandidateNotes(app) {
         path: f.path,
         项目: f.parent ? f.parent.name : "",
         候选人: String(fm.候选人 || "").trim(),
+        联系方式: String(fm.联系方式 || fm.email || fm["电话"] || "").trim(),
         轮次: String(fm.轮次 || "").trim(),
         录用建议: String(fm.录用建议 || "").trim(),
         一句话评价: String(fm.一句话评价 || "").trim(),

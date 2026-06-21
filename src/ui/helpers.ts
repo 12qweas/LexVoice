@@ -246,6 +246,7 @@ export function openLexVoiceExternalUrl(url) {
   // 桌面端优先走 Electron shell.openExternal —— 强制用系统默认浏览器，
   // 避免在 Obsidian 内嵌 webview 打开外部链接。
   try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- Desktop Obsidian exposes Electron shell at runtime; mobile/browser fallback uses window.open.
     const electron = require("electron");
     if (electron && electron.shell && typeof electron.shell.openExternal === "function") {
       electron.shell.openExternal(url);
@@ -294,14 +295,14 @@ export async function trashLexVoiceFile(app, file) {
 }
 
 export function pluginBasePath(plugin) {
-  const configDir = plugin.app.vault.configDir || ".obsidian";
+  const configDir = String(plugin.app.vault.configDir || "");
   const dir = plugin && plugin.manifest && plugin.manifest.dir
     ? String(plugin.manifest.dir)
     : String(plugin.manifest.id || "");
   const normalizedDir = obsidian.normalizePath(dir);
-  const pluginRoot = obsidian.normalizePath(configDir + "/plugins");
-  if (normalizedDir.startsWith(pluginRoot + "/")) return normalizedDir;
-  if (normalizedDir.startsWith(".obsidian/plugins/")) return normalizedDir;
+  const pluginRoot = configDir ? obsidian.normalizePath(configDir + "/plugins") : "";
+  if (pluginRoot && normalizedDir.startsWith(pluginRoot + "/")) return normalizedDir;
+  if (!pluginRoot) return normalizedDir;
   return obsidian.normalizePath(pluginRoot + "/" + normalizedDir);
 }
 

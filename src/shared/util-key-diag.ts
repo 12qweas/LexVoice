@@ -1,12 +1,28 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- LexVoice's settings/data layer is intentionally dynamically typed (files use @ts-nocheck and read untyped JSON from loadData); these type-only rules yield no actionable findings here and are tracked for incremental typing */
 // 由 main.ts 抽出（模块化拆解，提升工程稳定性；纯搬迁、零行为改动）。
+function utf8ToBase64(text) {
+  const bytes = new TextEncoder().encode(String(text || ""));
+  let binary = "";
+  const size = 0x8000;
+  for (let i = 0; i < bytes.length; i += size) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + size));
+  }
+  return btoa(binary);
+}
+
+function base64ToUtf8(value) {
+  const binary = atob(String(value || ""));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder("utf-8").decode(bytes);
+}
 
 export function obfuscateApiKey(plain) {
   const s = String(plain == null ? "" : plain);
   if (!s) return "";
   if (s.startsWith(LEXVOICE_KEY_OBFUSCATION_MARKER)) return s; // 已混淆，幂等
   try {
-    return LEXVOICE_KEY_OBFUSCATION_MARKER + btoa(unescape(encodeURIComponent(lexvoiceXorTransform(s))));
+    return LEXVOICE_KEY_OBFUSCATION_MARKER + utf8ToBase64(lexvoiceXorTransform(s));
   } catch { return s; }
 }
 
@@ -14,7 +30,7 @@ export function deobfuscateApiKey(stored) {
   const s = String(stored == null ? "" : stored);
   if (!s.startsWith(LEXVOICE_KEY_OBFUSCATION_MARKER)) return s; // 明文（旧数据迁移）→ 原样返回
   try {
-    return lexvoiceXorTransform(decodeURIComponent(escape(atob(s.slice(LEXVOICE_KEY_OBFUSCATION_MARKER.length)))));
+    return lexvoiceXorTransform(base64ToUtf8(s.slice(LEXVOICE_KEY_OBFUSCATION_MARKER.length)));
   } catch { return s; }
 }
 

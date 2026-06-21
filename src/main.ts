@@ -16,7 +16,7 @@ import { parseElapsedMsToken, parseLexVoiceDurationLabel, TEXT_IMPORT_PRE_SUMMAR
 import { JOBPORTRAIT_DIMENSIONS, DEFAULT_RECRUIT_QUALITIES, isRecruitFeatureUnlocked, buildRecruitContextPrefix, getRecruitInterviewOutline, parseRecruitQualitiesFromOutput, buildCompactRecruitContextPrefix, buildRecruitTextImportMergePrompt, generateJobPortrait, normalizeRecruitContext, hasRecruitContextContent, parseJdProject, renderRecruitCandidateBase, renderRecruitAggregateBase, ensureRecruitAggregateBase, createRecruitProject, renderRecruitHomepageTemplate, listRecruitCandidateNotes, recruitRecommendationColor } from "./recruit";
 import { normalizeAsrConcurrency, decodeAudioBlob, renderAudioBufferSliceToWav, mapLimit, transcribeImportAudioChunk, resolveTranscribeProvider, makeRecordingIssue, APIMIMO_ASR_CHUNK_MS, isApimimoAsrProvider, transcribeAudio } from "./asr/transcribe";
 import { getFrontmatterTags, readFileFrontmatter, upsertFrontmatterInMarkdown, LEARNING_CARD_TAG, CONCEPT_CARD_TAG, TODO_CARD_TAG, ensureTodayDailyNoteFile } from "./shared/util-note";
-import { PEOPLE_SUGGESTION_CACHE_LIMIT, normalizePeopleContextMode, splitPersonFieldValue, normalizePersonLookupText, loadPeopleDirectory, buildPeopleContextForLlm, ensurePeopleNoteRelatedBaseSection, formatPeopleBaseYaml, formatPeopleNoteMarkdown, mergeUniqueStrings, normalizePeopleSuggestion, normalizePeopleSuggestionIgnores, isPeopleSuggestionIgnored, addPeopleSuggestionIgnore, removePeopleSuggestionIgnores, getPeopleSuggestionCacheKey, normalizePeopleSuggestionCache, makePeopleSuggestionCacheRecord, isPeopleSuggestionCacheRecordCurrent, peopleSuggestionRecordToSuggestion, peopleSuggestionIgnoreRecordToSuggestion, findMatchingPersonEntry, mergeSourceNoteRelatedPeopleFrontmatter, mergePersonFrontmatter, generatePeopleDirectorySuggestions, normalizePersonNameForEmail, parsePeopleFromOutput } from "./people";
+import { PEOPLE_SUGGESTION_CACHE_LIMIT, normalizePeopleContextMode, splitPersonFieldValue, normalizePersonLookupText, loadPeopleDirectory, buildPeopleContextForLlm, ensurePeopleNoteRelatedBaseSection, formatPeopleBaseYaml, formatPeopleNoteMarkdown, mergeUniqueStrings, normalizePeopleSuggestion, normalizePeopleSuggestionIgnores, isPeopleSuggestionIgnored, addPeopleSuggestionIgnore, removePeopleSuggestionIgnores, getPeopleSuggestionCacheKey, normalizePeopleSuggestionCache, makePeopleSuggestionCacheRecord, isPeopleSuggestionCacheRecordCurrent, peopleSuggestionRecordToSuggestion, peopleSuggestionIgnoreRecordToSuggestion, findMatchingPersonEntry, arePeopleSuggestionsRelated, mergePeopleSuggestions, mergeSourceNoteRelatedPeopleFrontmatter, mergePersonFrontmatter, generatePeopleDirectorySuggestions, normalizePersonNameForEmail, parsePeopleFromOutput, personEntryFromFrontmatter } from "./people";
 import { getSedimentTodoId, getSedimentCardId, getSedimentHotwordId, getSedimentPersonId, withSedimentCandidateIds, removeSedimentGroupDone, sanitizeSedimentText, normalizeSedimentTodoSubtasks, normalizeSedimentExtractionModel, appendSedimentPreExtractionInstruction, stripSedimentPreExtractionBlocks, extractSedimentPreExtractionBlock, splitOutSedimentBlock, appendSedimentPreExtractionBlock, upsertSedimentPreExtractionBlockInFile, generateSedimentObjects, writeSedimentObjectCards } from "./sediment";
 import { createVocabularyGroups, parseVocabularyGroups, flattenVocabularyGroups, countVocabularyGroups, normalizeVocabularyInput, mergeVocabularyGroups, isStructuredVocabularyMarkdown, loadVocabularyGroups, formatVocabularyMarkdown } from "./vocabulary";
 import { logLlmRequestDiagnostic, getLlmConfigIssue, isLlmConfigError, isLlmServiceBlockedError, isLlmNonRetryableError, formatLlmConfigIssue, formatLlmFailureIssue, callLlm, callBriefingMergeLlm, stripModeSuggestionBlocks } from "./llm/core";
@@ -27,7 +27,7 @@ import { MODE_META, FRONTMATTER_SCHEMA, MODE_PREFIX_TO_KEY } from "./shared/cata
 import { SEDIMENT_GROUP_CONFIG, SEDIMENT_GROUP_ORDER, VOCABULARY_SECTIONS } from "./shared/catalog-sediment";
 import { AUDIO_EXT, TEXT_IMPORT_EXT } from "./shared/catalog-import";
 import { isRecord, cloneJson, pickDefined, pickNonBlankString, genId, pad, formatElapsed, sanitizeFilename, escapeRegExp, stripHtmlText, safeDecodeUriText, normalizeAudioLinkTarget } from "./shared/util-common";
-import { escapeHtmlText } from "./shared/util-markdown";
+import { escapeHtmlText, makeFileWikiLink } from "./shared/util-markdown";
 import { mimeFromExt, extFromMime, isAsrNonRetryableError, pickMimeType, assertAudioCaptureSupported } from "./shared/util-audio";
 import { isLocalLlmEndpoint } from "./shared/util-llm-endpoint";
 import { obfuscateApiKey, deobfuscateApiKey, redactDiagnosticText, sanitizeDiagnosticData, diagnosticError } from "./shared/util-key-diag";
@@ -499,13 +499,7 @@ async function fetchUpdateText(url) {
       errors.push("requestUrl: " + ((e && e.message) || e));
     }
   }
-  try {
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) throw new Error("HTTP " + res.status + " " + res.statusText + " · " + url);
-    return await res.text();
-  } catch (e) {
-    errors.push("fetch: " + ((e && e.message) || e));
-  }
+  errors.push("requestUrl unavailable");
   throw new Error(errors.join("；"));
 }
 
@@ -580,6 +574,7 @@ function getLexVoiceBasesFolder(settings) {
 const LEARNING_WALL_FILE = "学习卡片瀑布墙.md";
 const CONCEPT_WALL_FILE = "概念墙.md";
 const TODO_WALL_FILE = "待办墙.md";
+const OBJECT_WALL_FILE = "对象总览.md";
 
 function getLexVoiceWallPath(settings, fileName) {
   const folder = getLexVoiceBasesFolder(settings);
@@ -649,6 +644,158 @@ function formatLexVoiceWallMarkdown(title, folder, tag, emptyText) {
     "```", "",
   ].join("\n");
 }
+
+function formatLexVoiceObjectWallMarkdown(settings, options = {}) {
+  const title = options.title || "对象总览";
+  const initialFilter = options.initialFilter || "all";
+  const showFilters = options.showFilters !== false;
+  const emptyText = options.emptyText || "还没有找到沉淀对象。完成纪要沉淀后，学习卡片、概念和待办会出现在这里。";
+  const learningFolderQuery = JSON.stringify('"' + obsidian.normalizePath(settings && settings.learningCardsFolder || DEFAULT_SETTINGS.learningCardsFolder || "") + '"');
+  const todoFolderQuery = JSON.stringify('"' + obsidian.normalizePath(settings && settings.todoCardsFolder || DEFAULT_SETTINGS.todoCardsFolder || "") + '"');
+  const learningTag = JSON.stringify("#" + LEARNING_CARD_TAG);
+  const conceptTag = JSON.stringify("#" + CONCEPT_CARD_TAG);
+  const todoTag = JSON.stringify("#" + TODO_CARD_TAG);
+  return [
+    "---", "cssclasses:", "  - lvwall-page", "---", "", "# " + title, "", "```dataviewjs",
+    "const shell = dv.el(\"div\", \"\", { cls: \"lvwall-shell\" });",
+    "const toolbar = document.createElement(\"div\");",
+    "toolbar.className = \"lvwall-filterbar\";",
+    "const root = document.createElement(\"div\");",
+    "root.className = \"lvwall lvwall-object\";",
+    "shell.appendChild(toolbar);",
+    "shell.appendChild(root);",
+    "const learningFolderQuery = " + learningFolderQuery + ";",
+    "const todoFolderQuery = " + todoFolderQuery + ";",
+    "const learningTag = " + learningTag + ";",
+    "const conceptTag = " + conceptTag + ";",
+    "const todoTag = " + todoTag + ";",
+    "const showFilters = " + (showFilters ? "true" : "false") + ";",
+    "let activeFilter = " + JSON.stringify(initialFilter) + ";",
+    "const labels = { all: \"全部\", learning: \"学习卡片\", concept: \"概念\", todo: \"待办\" };",
+    "const records = [];",
+    "const seen = new Set();",
+    "const esc = s => String(s ?? \"\").replace(/[&<>\\\"]/g, c => c === \"&\" ? \"&amp;\" : c === \"<\" ? \"&lt;\" : c === \">\" ? \"&gt;\" : \"&quot;\");",
+    "const cleanTag = t => String(t || \"\").replace(/^#/, \"\");",
+    "const hasTag = (p, tag) => (p.file.tags || []).map(cleanTag).includes(cleanTag(tag));",
+    "const sourceName = src => src ? String(src.path ?? src).split(\"/\").pop().replace(/\\.md$|[\\[\\]]/g, \"\") : \"\";",
+    "function pushRecord(record){ if (!record || !record.id || seen.has(record.id)) return; seen.add(record.id); records.push(record); }",
+    "function columnCount(width, mode){ if (mode === \"todo\") return width >= 720 ? 2 : 1; if (width >= 1320) return 4; if (width >= 960) return 3; if (width >= 620) return 2; return 1; }",
+    "function layoutWidth(){ const selectors = [\".workspace-leaf-content\", \".view-content\", \".markdown-preview-view\", \".markdown-reading-view\", \".markdown-source-view\"]; const nodes = selectors.map(sel => root.closest(sel)).filter(Boolean); nodes.push(root.parentElement, root); for (const node of nodes) { const rect = node && node.getBoundingClientRect ? node.getBoundingClientRect() : null; const width = Math.floor(Math.max(node && node.clientWidth || 0, rect && rect.width || 0)); if (width > 120) return width; } return window.innerWidth || 0; }",
+    "function cardWeight(card){ return 10 + String(card.title || \"\").length * 1.2 + String(card.sum || \"\").length * 0.34 + String(card.src || \"\").length * 0.16 + (card.tagCount || 0) * 3; }",
+    "function addPageCard(p, kind){",
+    "  const kindLabel = kind === \"concept\" ? \"概念\" : \"学习卡片\";",
+    "  const type = String(p[\"卡片类型\"] || p[\"类型\"] || kindLabel);",
+    "  const title = String(p[\"标题\"] || p[\"事项\"] || p.file.name || kindLabel);",
+    "  const sum = String(p[\"摘要\"] || p[\"说明\"] || p[\"任务\"] || p[\"事项\"] || \"\");",
+    "  const src = sourceName(p[\"来源笔记\"] || p[\"来源\"]);",
+    "  const tags = (p.file.tags || []).map(t => '<span class=\\\"lvwall-tag\\\">' + esc(cleanTag(t)) + '</span>').join(\"\");",
+    "  const ct = p.file.ctime ? p.file.ctime.toFormat(\"yyyy-MM-dd HH:mm\") : \"\";",
+    "  pushRecord({ id: kind + \":\" + p.file.path, kind, type, title, sum, src, tags, time: ct, path: p.file.path, tagCount: (p.file.tags || []).length });",
+    "}",
+    "function stripTodoMarker(text){ return String(text || \"\").replace(/<!--\\s*lexvoice-todo:[\\s\\S]*?-->/g, \"\").trim(); }",
+    "function readField(text, label){ const m = String(text || \"\").match(new RegExp(label + \"：([^\\\\n]+?)(?=\\\\s+(?:日期|责任人|事项|截止|时间)：|\\\\s+👤|\\\\s+\\\\(来源:|$)\")); return m ? m[1].trim() : \"\"; }",
+    "function addTodoRecord(p, task){",
+    "  const raw = stripTodoMarker(task && task.text || \"\");",
+    "  const markerMatch = String(task && task.text || \"\").match(/lexvoice-todo:([^\\s>]+)/);",
+    "  const marker = markerMatch ? markerMatch[1] : \"\";",
+    "  const title = String(p[\"事项\"] || readField(raw, \"事项\") || raw || p.file.name || \"未命名待办\").replace(/^[-*]\\s*/, \"\");",
+    "  const owner = String(p[\"责任人\"] || readField(raw, \"责任人\") || (raw.match(/👤\\s*([^\\s]+)/) || [])[1] || \"\").trim();",
+    "  const due = String(p[\"截止\"] || readField(raw, \"截止\") || \"\").trim();",
+    "  const src = sourceName(p[\"来源笔记\"] || p[\"来源\"]);",
+    "  const children = Array.from(task && task.children || []).map(item => stripTodoMarker(item.text)).filter(Boolean).slice(0, 4);",
+    "  const line = Number(task && task.line);",
+    "  const id = \"todo:\" + p.file.path + \":\" + (Number.isFinite(line) ? line : marker || title);",
+    "  pushRecord({ id, kind: \"todo\", type: \"待办\", title, sum: owner || due ? [owner && \"责任人：\" + owner, due && \"截止：\" + due].filter(Boolean).join(\" · \") : \"\", owner, due, src, subtasks: children, path: p.file.path, line, marker, completed: !!(task && task.completed), tagCount: 0 });",
+    "}",
+    "for (const p of dv.pages(learningFolderQuery)) {",
+    "  const concept = hasTag(p, conceptTag);",
+    "  const learning = hasTag(p, learningTag);",
+    "  if (concept) addPageCard(p, \"concept\");",
+    "  else if (learning) addPageCard(p, \"learning\");",
+    "}",
+    "for (const p of dv.pages(todoFolderQuery)) {",
+    "  if (!hasTag(p, todoTag)) continue;",
+    "  const tasks = Array.from(p.file.tasks || []).filter(t => !t.parent);",
+    "  if (tasks.length) tasks.forEach(t => addTodoRecord(p, t));",
+    "  else pushRecord({ id: \"todo-page:\" + p.file.path, kind: \"todo\", type: \"待办\", title: String(p[\"事项\"] || p.file.name), sum: [p[\"责任人\"] && \"责任人：\" + p[\"责任人\"], p[\"截止\"] && \"截止：\" + p[\"截止\"]].filter(Boolean).join(\" · \"), path: p.file.path, completed: String(p[\"状态\"] || \"\") === \"完成\", tagCount: 0 });",
+    "}",
+    "for (const p of dv.pages()) {",
+    "  for (const task of Array.from(p.file.tasks || [])) {",
+    "    if (String(task.text || \"\").includes(\"lexvoice-todo:\")) addTodoRecord(p, task);",
+    "  }",
+    "}",
+    "records.sort((a, b) => String(b.time || b.path || \"\").localeCompare(String(a.time || a.path || \"\")));",
+    "function filteredRecords(){ return activeFilter === \"all\" ? records : records.filter(r => r.kind === activeFilter); }",
+    "function recordHtml(record){",
+    "  if (record.kind === \"todo\") {",
+    "    const subtasks = (record.subtasks || []).map(item => '<li>' + esc(item) + '</li>').join(\"\");",
+    "    return '<div class=\\\"lvwall-card lvwall-todo-card' + (record.completed ? ' is-completed' : '') + '\\\" data-kind=\\\"todo\\\" data-id=\\\"' + esc(record.id) + '\\\" data-path=\\\"' + esc(record.path) + '\\\">' + '<label class=\\\"lvwall-todo-check\\\" title=\\\"切换完成状态\\\"><input type=\\\"checkbox\\\" data-id=\\\"' + esc(record.id) + '\\\" ' + (record.completed ? 'checked' : '') + '><span></span></label>' + '<div class=\\\"lvwall-todo-body\\\"><div class=\\\"lvwall-head\\\"><span class=\\\"lvwall-type\\\">待办</span><span class=\\\"lvwall-brand\\\">ACTION</span></div><div class=\\\"lvwall-title\\\">' + esc(record.title) + '</div>' + (record.sum ? '<div class=\\\"lvwall-sum\\\">' + esc(record.sum) + '</div>' : '') + (subtasks ? '<ul class=\\\"lvwall-subtasks\\\">' + subtasks + '</ul>' : '') + (record.src ? '<div class=\\\"lvwall-k\\\">来源</div><div class=\\\"lvwall-src\\\">' + esc(record.src) + '</div>' : '') + '</div></div>';",
+    "  }",
+    "  return '<div class=\\\"lvwall-card\\\" data-kind=\\\"' + esc(record.kind) + '\\\" data-path=\\\"' + esc(record.path) + '\\\">' + '<div class=\\\"lvwall-head\\\"><span class=\\\"lvwall-type\\\">' + esc(record.type) + '</span><span class=\\\"lvwall-brand\\\">' + (record.kind === 'concept' ? 'CONCEPT' : 'LEARNING') + '</span></div>' + '<div class=\\\"lvwall-title\\\">' + esc(record.title) + '</div>' + (record.sum ? '<div class=\\\"lvwall-k\\\">摘要</div><div class=\\\"lvwall-sum\\\">' + esc(record.sum) + '</div>' : '') + (record.src ? '<div class=\\\"lvwall-k\\\">来源</div><div class=\\\"lvwall-src\\\">' + esc(record.src) + '</div>' : '') + (record.tags ? '<div class=\\\"lvwall-tags\\\">' + record.tags + '</div>' : '') + (record.time ? '<div class=\\\"lvwall-time\\\">' + esc(record.time) + '</div>' : '') + '</div>';",
+    "}",
+    "async function setTaskDone(record, done){",
+    "  if (!record || !record.path) return;",
+    "  const file = app.vault.getAbstractFileByPath(record.path);",
+    "  if (!file) return;",
+    "  const text = await app.vault.cachedRead(file);",
+    "  const eol = text.includes(\"\\r\\n\") ? \"\\r\\n\" : \"\\n\";",
+    "  const lines = text.split(/\\r?\\n/);",
+    "  let idx = Number(record.line);",
+    "  if (!Number.isFinite(idx) || !lines[idx] || !/^\\s*-\\s\\[[ xX/-]\\]/.test(lines[idx])) {",
+    "    idx = record.marker ? lines.findIndex(line => line.includes(\"lexvoice-todo:\" + record.marker)) : -1;",
+    "  }",
+    "  if (idx < 0 || !lines[idx]) return;",
+    "  lines[idx] = lines[idx].replace(/^(\\s*-\\s\\[)[ xX/-](\\]\\s*)/, '$1' + (done ? 'x' : ' ') + '$2');",
+    "  await app.vault.modify(file, lines.join(eol));",
+    "  record.completed = done;",
+    "}",
+    "function renderToolbar(){",
+    "  toolbar.innerHTML = \"\";",
+    "  if (!showFilters) { toolbar.style.display = \"none\"; return; }",
+    "  const filters = [\"all\", \"learning\", \"concept\", \"todo\"];",
+    "  for (const key of filters) {",
+    "    const count = key === \"all\" ? records.length : records.filter(r => r.kind === key).length;",
+    "    const btn = document.createElement(\"button\");",
+    "    btn.type = \"button\";",
+    "    btn.className = \"lvwall-filter\" + (activeFilter === key ? \" is-active\" : \"\");",
+    "    btn.textContent = labels[key] + \" \" + count;",
+    "    btn.addEventListener(\"click\", () => { activeFilter = key; renderToolbar(); renderWall(); });",
+    "    toolbar.appendChild(btn);",
+    "  }",
+    "}",
+    "function bindCards(){",
+    "  root.querySelectorAll(\".lvwall-card\").forEach(el => el.addEventListener(\"click\", event => { if (event.target && event.target.closest && event.target.closest(\"input,label,button\")) return; const path = el.dataset.path; if (path) app.workspace.openLinkText(path, \"\", false); }));",
+    "  root.querySelectorAll(\".lvwall-todo-check input\").forEach(input => input.addEventListener(\"change\", async event => { event.stopPropagation(); const record = records.find(r => r.id === input.dataset.id); if (!record) return; const card = input.closest(\".lvwall-todo-card\"); try { await setTaskDone(record, input.checked); if (card) card.classList.toggle(\"is-completed\", input.checked); } catch(e) { console.error(e); new Notice(\"待办状态写回失败：\" + (e.message || e)); input.checked = !input.checked; } }));",
+    "}",
+    "let lastCols = 0; let raf = 0;",
+    "function renderWall(){",
+    "  const visible = filteredRecords();",
+    "  const width = layoutWidth();",
+    "  const cols = columnCount(width, activeFilter);",
+    "  root.className = \"lvwall lvwall-object\" + (activeFilter === \"todo\" ? \" lvwall-todos\" : \"\");",
+    "  root.style.setProperty(\"--lvwall-columns\", String(cols));",
+    "  root.style.setProperty(\"--lvwall-gutter\", (width < 680 ? 18 : 24) + \"px\");",
+    "  if (!visible.length) { root.classList.add(\"is-empty\"); root.innerHTML = " + JSON.stringify("<p>" + emptyText + "</p>") + "; return; }",
+    "  root.classList.remove(\"is-empty\");",
+    "  const buckets = Array.from({ length: cols }, () => ({ weight: 0, html: \"\" }));",
+    "  for (const record of visible) {",
+    "    let target = 0;",
+    "    for (let i = 1; i < buckets.length; i++) if (buckets[i].weight < buckets[target].weight) target = i;",
+    "    buckets[target].html += recordHtml(record);",
+    "    buckets[target].weight += cardWeight(record);",
+    "  }",
+    "  root.innerHTML = buckets.map(b => '<div class=\\\"lvwall-col\\\">' + b.html + '</div>').join(\"\");",
+    "  bindCards();",
+    "  lastCols = cols;",
+    "}",
+    "function scheduleLayout(){ if (raf) cancelAnimationFrame(raf); raf = requestAnimationFrame(() => { raf = 0; const width = layoutWidth(); const cols = columnCount(width, activeFilter); root.style.setProperty(\"--lvwall-columns\", String(cols)); root.style.setProperty(\"--lvwall-gutter\", (width < 680 ? 18 : 24) + \"px\"); if (cols !== lastCols) renderWall(); }); }",
+    "renderToolbar();",
+    "renderWall();",
+    "if (typeof ResizeObserver !== \"undefined\") { const ro = new ResizeObserver(scheduleLayout); [root, root.parentElement, shell, shell.parentElement, root.closest(\".markdown-preview-view\"), root.closest(\".markdown-reading-view\"), root.closest(\".markdown-source-view\"), root.closest(\".view-content\"), root.closest(\".workspace-leaf-content\")].filter(Boolean).forEach(el => ro.observe(el)); }",
+    "window.addEventListener(\"resize\", scheduleLayout, { passive: true });",
+    "```", "",
+  ].join("\n");
+}
 function formatLearningWallMarkdown(settings) {
   return formatLexVoiceWallMarkdown("学习卡片瀑布墙", settings && settings.learningCardsFolder || DEFAULT_SETTINGS.learningCardsFolder, LEARNING_CARD_TAG, "没有找到学习卡片。完成学习类纪要后，可从信息提取面板保存学习卡片。");
 }
@@ -659,7 +806,21 @@ function formatConceptWallMarkdown(settings) {
 }
 
 function formatTodoWallMarkdown(settings) {
-  return formatLexVoiceWallMarkdown("待办墙", settings && settings.todoCardsFolder || DEFAULT_SETTINGS.todoCardsFolder, TODO_CARD_TAG, "没有找到待办卡片。会议纪要中的明确行动项可在确认后沉淀为待办卡片。");
+  return formatLexVoiceObjectWallMarkdown(settings, {
+    title: "待办墙",
+    initialFilter: "todo",
+    showFilters: false,
+    emptyText: "没有找到待办卡片。会议纪要中的明确行动项可在确认后沉淀为待办。"
+  });
+}
+
+function formatObjectWallMarkdown(settings) {
+  return formatLexVoiceObjectWallMarkdown(settings, {
+    title: "对象总览",
+    initialFilter: "all",
+    showFilters: true,
+    emptyText: "还没有找到沉淀对象。完成纪要沉淀后，学习卡片、概念和待办会出现在这里。"
+  });
 }
 
 const LV_BASE_DEFINITIONS = [
@@ -3859,28 +4020,19 @@ function extractMeetingAttendeeNames(frontmatter) {
   return out;
 }
 
-function getEmailBuffer() {
-  try {
-    if (typeof Buffer !== "undefined") return Buffer;
-  } catch { /* intentionally empty */ }
-  try {
-    return require("buffer").Buffer;
-  } catch {
-    return null;
-  }
-}
-
 function utf8ToBase64(value) {
-  const BufferRef = getEmailBuffer();
   const text = String(value || "");
-  if (BufferRef) return BufferRef.from(text, "utf8").toString("base64");
-  return btoa(unescape(encodeURIComponent(text)));
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  const size = 0x8000;
+  for (let i = 0; i < bytes.length; i += size) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + size));
+  }
+  return btoa(binary);
 }
 
 function arrayBufferToBase64(buffer) {
-  const BufferRef = getEmailBuffer();
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer || []);
-  if (BufferRef) return BufferRef.from(bytes).toString("base64");
   let binary = "";
   const size = 0x8000;
   for (let i = 0; i < bytes.length; i += size) {
@@ -11065,6 +11217,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     this.addCommand({ id: "open-learning-card-wall", name: "打开学习卡片瀑布墙", callback: () => this.openLearningWall("learning") });
     this.addCommand({ id: "open-concept-wall", name: "打开概念墙", callback: () => this.openLearningWall("concept") });
     this.addCommand({ id: "open-todo-wall", name: "打开待办墙", callback: () => this.openTodoWall() });
+    this.addCommand({ id: "open-object-wall", name: "打开对象总览", callback: () => this.openObjectWall() });
     this.addCommand({ id: "import-audio", name: "导入已有音频文件转写+润色", callback: () => new ImportAudioModal(this.app, this).open() });
     this.addCommand({
       id: "generate-html-report",
@@ -11156,14 +11309,14 @@ class LexVoicePlugin extends obsidian.Plugin {
     this.registerEvent(this.app.vault.on("delete", (f) => recruitFileEvent(f)));
     this.registerEvent(this.app.vault.on("rename", (f, oldPath) => recruitFileEvent(f, oldPath)));
 
-    this.addCommand({ id: "lexvoice-refresh-recruit-project", name: "刷新当前招聘项目统计", callback: () => {
+    this.addCommand({ id: "refresh-recruit-project", name: "刷新当前招聘项目统计", callback: () => {
       const file = this.app.workspace.getActiveFile();
       if (!(file instanceof obsidian.TFile) || !file.parent) { new obsidian.Notice("请先打开招聘项目内的任意文件"); return; }
       this.recalcRecruitProject(file.parent.path)
         .then(ok => new obsidian.Notice(ok ? "已刷新当前招聘项目统计" : "当前文件不在招聘项目文件夹内（需与同名 JD 同目录）"))
         .catch(e => { console.error(e); new obsidian.Notice("刷新失败，详见控制台"); });
     } });
-    this.addCommand({ id: "lexvoice-refresh-all-recruit-projects", name: "刷新全部招聘项目统计", callback: async () => {
+    this.addCommand({ id: "refresh-all-recruit-projects", name: "刷新全部招聘项目统计", callback: async () => {
       const projects = listJDProjects(this.app, this.settings.recruitJdFolderPath);
       let n = 0;
       for (const p of projects) { if (p.hasJd) { try { await this.recalcRecruitProject(p.folderPath); n++; } catch (e) { console.error(e); } } }
@@ -11171,7 +11324,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     } });
 
     // F6：重建 JD 库根的聚合看板（招聘项目总览）。
-    this.addCommand({ id: "lexvoice-rebuild-recruit-aggregate-base", name: "重建招聘项目总览看板", callback: async () => {
+    this.addCommand({ id: "rebuild-recruit-aggregate-base", name: "重建招聘项目总览看板", callback: async () => {
       try {
         const root = obsidian.normalizePath(this.settings.recruitJdFolderPath || "JD");
         if (!(this.app.vault.getAbstractFileByPath(root) instanceof obsidian.TFolder)) await this.app.vault.createFolder(root);
@@ -11222,9 +11375,11 @@ class LexVoicePlugin extends obsidian.Plugin {
     // F7：招聘主页 4 个 code block 渲染器（实时计算零落盘，外层 try/catch 降级重试）+ 重建主页命令。
     this.mountHrBlock("lexvoice-hr-actions", (source, el, ctx) => this.renderHrActions(source, el, ctx));
     this.mountHrBlock("lexvoice-hr-stats", (source, el, ctx) => this.renderHrStats(source, el, ctx));
+    this.mountHrBlock("lexvoice-hr-links", (source, el, ctx) => this.renderHrLinks(source, el, ctx));
+    this.mountHrBlock("lexvoice-hr-candidates", (source, el, ctx) => this.renderHrCandidates(source, el, ctx));
     this.mountHrBlock("lexvoice-hr-recent", (source, el, ctx) => this.renderHrRecent(source, el, ctx));
     this.mountHrBlock("lexvoice-hr-latest-notes", (source, el, ctx) => this.renderHrLatest(source, el, ctx));
-    this.addCommand({ id: "lexvoice-rebuild-recruit-homepage", name: "新建 / 重建招聘主页", callback: () => this.rebuildRecruitHomepage() });
+    this.addCommand({ id: "rebuild-recruit-homepage", name: "新建 / 重建招聘主页", callback: () => this.rebuildRecruitHomepage() });
     this.addCommand({ id: "cleanup-empty-short-recordings", name: "清理空白短录音", callback: () => this.cleanupEmptyShortRecordings() });
 
     this.addCommand({
@@ -11291,8 +11446,10 @@ class LexVoicePlugin extends obsidian.Plugin {
     this.app.workspace.onLayoutReady(() => { this.warnIfBuildManifestSkew(); this.checkForUpdatesOnStartup(); });
   }
 
-  async onunload() {
-    try { if (this.recorder && this.recorder.state !== "idle") await this.recorder.stop(); } catch { /* intentionally empty */ }
+  onunload() {
+    void (async () => {
+      try { if (this.recorder && this.recorder.state !== "idle") await this.recorder.stop(); } catch { /* intentionally empty */ }
+    })();
     if (this.bubble) this.bubble.unmount();
     // 清理招聘项目重算 Debouncer，避免卸载后 pending timer 触发已 detach 的实例
     try { if (this._recruitRecalcDebouncers) { this._recruitRecalcDebouncers.forEach(d => { try { if (d.cancel) d.cancel(); } catch { /* intentionally empty */ } }); this._recruitRecalcDebouncers.clear(); } } catch { /* intentionally empty */ }
@@ -13724,6 +13881,69 @@ class LexVoicePlugin extends obsidian.Plugin {
     bar.createEl("button", { text: "＋ 新建招聘项目" }).onclick = () => this.openNewRecruitProjectDialog();
   }
 
+  renderHrLinks(source, el) {
+    el.empty();
+    const root = obsidian.normalizePath(this.settings.recruitJdFolderPath || "JD");
+    const scrollToHeading = (label) => {
+      const view = el.closest(".markdown-preview-view");
+      if (!view) return;
+      const headings = Array.from(view.querySelectorAll("h2, h3"));
+      const target = headings.find(h => String(h.textContent || "").trim().includes(label));
+      if (target && typeof target.scrollIntoView === "function") target.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    const openProjectBase = async () => {
+      try {
+        await ensureRecruitAggregateBase(this.app, root);
+        await this.app.workspace.openLinkText(obsidian.normalizePath(`${root}/招聘项目.base`), "", false);
+      } catch (e) {
+        console.error("[LexVoice] open recruit base failed", e);
+        new obsidian.Notice("打开招聘项目看板失败");
+      }
+    };
+    const groups = [
+      {
+        title: "AGENDA",
+        items: [
+          { label: "新建面试", action: () => new RecruitContextModal(this.app, this, { flow: "settings", onConfirm: () => { /* intentionally empty */ } }).open() },
+          { label: "新建项目", action: () => this.openNewRecruitProjectDialog() },
+        ],
+      },
+      {
+        title: "PROJECTS",
+        items: [
+          { label: "招聘项目", action: () => void openProjectBase() },
+          { label: "在招项目", action: () => scrollToHeading("PROJECT TRACKING") },
+        ],
+      },
+      {
+        title: "PEOPLE",
+        items: [
+          { label: "候选人池", action: () => scrollToHeading("CANDIDATE POOL") },
+          { label: "本周面试", action: () => scrollToHeading("THIS WEEK") },
+        ],
+      },
+      {
+        title: "QUERIES",
+        items: [
+          { label: "最近纪要", action: () => scrollToHeading("RECENT INTERVIEWS") },
+          { label: "工作流", action: () => scrollToHeading("WORKFLOW") },
+        ],
+      },
+    ];
+    const grid = el.createDiv({ cls: "lexvoice-hr-links" });
+    for (const group of groups) {
+      const section = grid.createDiv({ cls: "lexvoice-hr-link-group" });
+      section.createDiv({ cls: "lexvoice-hr-link-title", text: group.title });
+      for (const item of group.items) {
+        const btn = section.createEl("button", { cls: "lexvoice-hr-link-button", text: item.label });
+        btn.onclick = (event) => {
+          event.preventDefault();
+          item.action();
+        };
+      }
+    }
+  }
+
   renderHrStats(source, el) {
     el.empty();
     const projects = listJDProjects(this.app, this.settings.recruitJdFolderPath);
@@ -13732,9 +13952,10 @@ class LexVoicePlugin extends obsidian.Plugin {
     try { weekStart = window.moment ? window.moment().startOf("isoWeek").valueOf() : 0; } catch { weekStart = 0; }
     const weekNotes = notes.filter(n => n.time >= weekStart);
     const weekCands = new Set(weekNotes.map(n => n.候选人).filter(Boolean));
+    const allCands = new Set(notes.map(n => n.候选人).filter(Boolean));
     const cards = [
       { label: "在招项目", value: projects.filter(p => p.status === "招聘中").length },
-      { label: "JD 总数", value: projects.filter(p => p.hasJd).length },
+      { label: "候选人池", value: allCands.size },
       { label: "本周面试", value: weekNotes.length },
       { label: "本周新增候选人", value: weekCands.size },
     ];
@@ -13743,6 +13964,66 @@ class LexVoicePlugin extends obsidian.Plugin {
       const card = grid.createDiv({ cls: "lexvoice-hr-stat-card" });
       card.createDiv({ cls: "lexvoice-hr-stat-value", text: String(c.value) });
       card.createDiv({ cls: "lexvoice-hr-stat-label", text: c.label });
+    }
+  }
+
+  renderHrCandidates(source, el) {
+    el.empty();
+    let count = 30;
+    const m = String(source || "").match(/count\s*[:=]\s*(\d+)/i);
+    if (m) count = Math.max(1, parseInt(m[1], 10) || 30);
+    const groups = new Map();
+    for (const n of listRecruitCandidateNotes(this.app)) {
+      const name = String(n.候选人 || "").trim();
+      if (!name) continue;
+      const key = normalizePersonLookupText(name) || name;
+      const existing = groups.get(key);
+      if (!existing) {
+        groups.set(key, {
+          候选人: name,
+          联系方式: n.联系方式 || "",
+          项目: n.项目 || "",
+          最新轮次: n.轮次 || "",
+          录用建议: n.录用建议 || "",
+          一句话评价: n.一句话评价 || "",
+          time: n.time || 0,
+          path: n.path,
+          count: 1,
+        });
+      } else {
+        existing.count += 1;
+        if (!existing.联系方式 && n.联系方式) existing.联系方式 = n.联系方式;
+        if ((n.time || 0) > (existing.time || 0)) {
+          existing.项目 = n.项目 || existing.项目;
+          existing.最新轮次 = n.轮次 || existing.最新轮次;
+          existing.录用建议 = n.录用建议 || existing.录用建议;
+          existing.一句话评价 = n.一句话评价 || existing.一句话评价;
+          existing.time = n.time || 0;
+          existing.path = n.path;
+        }
+      }
+    }
+    const rows = Array.from(groups.values())
+      .sort((a, b) => (b.time || 0) - (a.time || 0))
+      .slice(0, count);
+    if (!rows.length) { el.createDiv({ cls: "lexvoice-hr-empty", text: "暂无候选人评估纪要" }); return; }
+    const table = el.createEl("table", { cls: "lexvoice-hr-table lexvoice-hr-candidate-table" });
+    const head = table.createEl("thead").createEl("tr");
+    for (const h of ["候选人", "项目", "面试次数", "最近轮次", "最新结论", "一句话评价"]) head.createEl("th", { text: h });
+    const tbody = table.createEl("tbody");
+    for (const n of rows) {
+      const tr = tbody.createEl("tr");
+      const nameCell = tr.createEl("td");
+      nameCell.createEl("strong", { text: n.候选人 || "—" });
+      if (n.联系方式) nameCell.createDiv({ cls: "lexvoice-hr-subtext", text: n.联系方式 });
+      tr.createEl("td", { text: n.项目 || "—" });
+      tr.createEl("td", { text: String(n.count || 1) });
+      tr.createEl("td", { text: n.最新轮次 || "—" });
+      const rec = tr.createEl("td", { text: n.录用建议 || "—" });
+      if (n.录用建议) rec.style.color = recruitRecommendationColor(n.录用建议);
+      tr.createEl("td", { text: n.一句话评价 || "—" });
+      tr.addClass("lexvoice-hr-row");
+      tr.onclick = () => this.app.workspace.openLinkText(n.path, "", false);
     }
   }
 
@@ -13827,8 +14108,9 @@ class LexVoicePlugin extends obsidian.Plugin {
       const hp = String(this.settings.recruitHomepagePath || "").trim();
       const targetPath = obsidian.normalizePath(hp || `${root}/招聘主页.md`);
       const tpl = renderRecruitHomepageTemplate();
-      const dir = targetPath.replace(/\/[^/]*$/, "");
-      if (dir && !(this.app.vault.getAbstractFileByPath(dir) instanceof obsidian.TFolder)) await this.app.vault.createFolder(dir);
+      const slash = targetPath.lastIndexOf("/");
+      const dir = slash >= 0 ? targetPath.slice(0, slash) : "";
+      if (dir && !(this.app.vault.getAbstractFileByPath(dir) instanceof obsidian.TFolder)) await this.ensureFolder(dir);
       await ensureRecruitAggregateBase(this.app, root);    // 主页嵌入聚合 base，确保它存在
       const existing = this.app.vault.getAbstractFileByPath(targetPath);
       if (existing instanceof obsidian.TFile) {
@@ -13845,7 +14127,10 @@ class LexVoicePlugin extends obsidian.Plugin {
         if (f instanceof obsidian.TFile) await this.app.workspace.getLeaf(false).openFile(f);
       }
       new obsidian.Notice("招聘主页已就绪");
-    } catch (e) { console.error(e); new obsidian.Notice("重建招聘主页失败，详见控制台"); }
+    } catch (e) {
+      console.error("[LexVoice] rebuild recruit homepage failed", e);
+      new obsidian.Notice(`重建招聘主页失败：${(e && e.message) || e}`);
+    }
   }
 
   getAvailableVaultPath(targetPath) {
@@ -13868,6 +14153,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       const adapter = this.app.vault.adapter;
       const fullPath = adapter && typeof adapter.getFullPath === "function" ? adapter.getFullPath(path) : "";
       if (!fullPath) return false;
+      // eslint-disable-next-line @typescript-eslint/no-require-imports -- Desktop-only system open uses Electron shell when available; non-desktop returns false.
       const electron = require("electron");
       if (electron && electron.shell && typeof electron.shell.openPath === "function") {
         electron.shell.openPath(fullPath);
@@ -13965,11 +14251,13 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
   async printHtmlToPdfBuffer(html) {
     let BrowserWindow = null;
     try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports -- Hidden BrowserWindow PDF rendering is a desktop-only Electron capability.
       const electron = require("electron");
       BrowserWindow = electron && (electron.BrowserWindow || (electron.remote && electron.remote.BrowserWindow));
     } catch { /* intentionally empty */ }
     if (!BrowserWindow) {
       try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports -- @electron/remote is a compatibility fallback for older desktop Obsidian builds.
         const remote = require("@electron/remote");
         BrowserWindow = remote && remote.BrowserWindow;
       } catch { /* intentionally empty */ }
@@ -14142,7 +14430,9 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
   // 整页不截断 PDF：隐藏窗口量内容真实尺寸 → 注入 @page 为整页全高 + preferCSSPageSize → 单页长 PDF（非 A4 分页，不截断）。
   async printHtmlToSinglePagePdfBuffer(html) {
     let BrowserWindow = null;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- Hidden BrowserWindow PDF rendering is a desktop-only Electron capability.
     try { const e = require("electron"); BrowserWindow = e && (e.BrowserWindow || (e.remote && e.remote.BrowserWindow)); } catch { /* intentionally empty */ }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- @electron/remote is a compatibility fallback for older desktop Obsidian builds.
     if (!BrowserWindow) { try { BrowserWindow = require("@electron/remote").BrowserWindow; } catch { /* intentionally empty */ } }
     if (!BrowserWindow) throw new Error("当前 Obsidian 环境不支持自动生成 PDF");
     const win = new BrowserWindow({ show: false, width: 1024, height: 1400, webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true } });
@@ -14652,6 +14942,10 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
     return await this.openGeneratedMarkdown(getLexVoiceWallPath(this.settings, TODO_WALL_FILE), formatTodoWallMarkdown(this.settings), { overwrite: true });
   }
 
+  async openObjectWall() {
+    return await this.openGeneratedMarkdown(getLexVoiceWallPath(this.settings, OBJECT_WALL_FILE), formatObjectWallMarkdown(this.settings), { overwrite: true });
+  }
+
   async openPeopleBase() {
     const file = await this.ensurePeopleDirectoryFiles({ overwrite: false });
     if (file instanceof obsidian.TFile) await this.app.workspace.getLeaf(false).openFile(file);
@@ -14665,6 +14959,29 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
     if (file instanceof obsidian.TFile) await this.app.workspace.getLeaf(false).openFile(file);
     else new obsidian.Notice("未找到明细 Base，请先创建视图文件。", 8000);
     return file;
+  }
+
+  async archiveLegacyObjectBaseViews() {
+    const root = getLexVoiceBasesFolder(this.settings);
+    const archiveFolder = obsidian.normalizePath(root + "/旧视图");
+    const legacyNames = ["学习卡片墙.base", "概念墙.base", "待办墙.base"];
+    let archived = 0;
+    let missing = 0;
+    await this.ensureFolder(archiveFolder);
+    for (const name of legacyNames) {
+      const sourcePath = obsidian.normalizePath(root + "/" + name);
+      const file = this.app.vault.getAbstractFileByPath(sourcePath);
+      if (!(file instanceof obsidian.TFile)) {
+        missing++;
+        continue;
+      }
+      const target = this.getAvailableVaultPath(obsidian.normalizePath(archiveFolder + "/" + name));
+      if (!target) continue;
+      await this.app.fileManager.renameFile(file, target);
+      archived++;
+    }
+    new obsidian.Notice(archived ? `已归档旧对象 Base：${archived} 个` : "没有发现需要归档的旧对象 Base", 6000);
+    return { archived, missing };
   }
 
   async ensureFolder(folderPath) {
@@ -14932,9 +15249,171 @@ ${source}`;
     const folder = obsidian.normalizePath(this.settings.peopleDirectoryFolder || DEFAULT_SETTINGS.peopleDirectoryFolder);
     if (folder) await this.ensureFolder(folder);
     const safeName = sanitizeFilename(String(name || "").trim()) || "未命名人员";
-    const path = this.getAvailableVaultPath(obsidian.normalizePath(`${folder}/${safeName}.md`));
-    if (!path) throw new Error("无法创建人员信息文件");
-    return await this.app.vault.create(path, formatPeopleNoteMarkdown(name || safeName, this.settings.mdFolder));
+    const exactPath = obsidian.normalizePath(`${folder}/${safeName}.md`);
+    const exact = this.app.vault.getAbstractFileByPath(exactPath);
+    if (exact instanceof obsidian.TFile) return exact;
+    const people = await loadPeopleDirectory(this, { force: true });
+    const matched = findMatchingPersonEntry(people, { name: name || safeName, aliases: [] });
+    if (matched && matched.path) {
+      const file = this.app.vault.getAbstractFileByPath(obsidian.normalizePath(matched.path));
+      if (file instanceof obsidian.TFile) return file;
+    }
+    return await this.app.vault.create(exactPath, formatPeopleNoteMarkdown(name || safeName, this.settings.mdFolder));
+  }
+
+  choosePrimaryPeopleRecord(records) {
+    const scoreRecord = (record) => {
+      const file = record && record.file;
+      const entry = record && record.entry;
+      const basename = String(file && file.basename || "").trim();
+      const name = String(entry && entry.name || "").trim();
+      const cleanName = sanitizeFilename(name);
+      const numericSuffix = /-\d+$/.test(basename);
+      if (cleanName && basename === cleanName) return 0;
+      if (!numericSuffix) return 10;
+      return 20;
+    };
+    return (records || []).slice().sort((a, b) => {
+      const scoreDiff = scoreRecord(a) - scoreRecord(b);
+      if (scoreDiff) return scoreDiff;
+      return String(a.file && a.file.path || "").length - String(b.file && b.file.path || "").length;
+    })[0] || null;
+  }
+
+  mergeDuplicatePeopleFrontmatter(primaryFm, duplicateFm, duplicateEntry, duplicateFile) {
+    const next = Object.assign({}, primaryFm || {});
+    const dup = Object.assign({}, duplicateFm || {});
+    const canonicalName = String(next["姓名"] || next.name || "").trim();
+    const duplicateName = String(duplicateEntry && duplicateEntry.name || dup["姓名"] || dup.name || "").trim();
+    if (!canonicalName && duplicateName) next["姓名"] = duplicateName;
+    for (const key of ["角色", "组织", "邮箱"]) {
+      if (!String(next[key] || "").trim() && String(dup[key] || "").trim()) next[key] = dup[key];
+    }
+    const aliasCandidates = [];
+    aliasCandidates.push(...splitPersonFieldValue(next["常用称呼"] || next.aliases || []));
+    aliasCandidates.push(...splitPersonFieldValue(dup["常用称呼"] || dup.aliases || []));
+    if (duplicateName && normalizePersonLookupText(duplicateName) !== normalizePersonLookupText(next["姓名"] || canonicalName)) aliasCandidates.push(duplicateName);
+    const aliases = mergeUniqueStrings([], aliasCandidates)
+      .filter(item => !/-\d+$/.test(String(item || "").trim()));
+    if (aliases.length) next["常用称呼"] = aliases;
+    const sources = mergeUniqueStrings(next["来源"] || next.sources || [], dup["来源"] || dup.sources || []);
+    if (sources.length) next["来源"] = sources;
+    const notes = [];
+    for (const value of [next["备注"] || next.note, dup["备注"] || dup.note]) {
+      const text = String(value || "").trim();
+      if (text && !notes.includes(text)) notes.push(text);
+    }
+    const duplicateLabel = duplicateFile instanceof obsidian.TFile ? duplicateFile.basename : "";
+    if (duplicateLabel) notes.push(`合并历史重复人员页：${duplicateLabel}`);
+    if (notes.length) next["备注"] = notes.join("\n\n");
+    next.type = "lexvoice-person";
+    next["最近更新"] = new Date().toISOString().slice(0, 10);
+    next.tags = mergeUniqueStrings(getFrontmatterTags(next), ["lexvoice/person"]);
+    delete next.name;
+    delete next.aliases;
+    delete next.sources;
+    delete next.note;
+    return next;
+  }
+
+  formatMergedPeopleArchiveMarkdown(duplicateFile, primaryFile, duplicateFm) {
+    const fm = Object.assign({}, duplicateFm || {});
+    fm.type = "lexvoice-person-merged";
+    fm["已合并到"] = makeFileWikiLink(primaryFile);
+    fm["合并日期"] = new Date().toISOString().slice(0, 10);
+    fm.tags = mergeUniqueStrings(getFrontmatterTags(fm).filter(tag => tag !== "lexvoice/person"), ["lexvoice/person-merged"]);
+    delete fm.name;
+    delete fm.aliases;
+    const title = duplicateFile instanceof obsidian.TFile ? duplicateFile.basename : "已合并人员";
+    const target = makeFileWikiLink(primaryFile);
+    return upsertFrontmatterInMarkdown(`# ${title}\n\n此人员档案已合并到 ${target}。\n\n保留此归档页用于回溯，LexVoice 不再把它作为人员资料读取。\n`, fm);
+  }
+
+  replacePeopleWikiLinksInText(text, replacements) {
+    let next = String(text || "");
+    for (const item of replacements || []) {
+      const fromFile = item && item.fromFile;
+      const toFile = item && item.toFile;
+      if (!(fromFile instanceof obsidian.TFile) || !(toFile instanceof obsidian.TFile)) continue;
+      const targets = Array.from(new Set([
+        obsidian.normalizePath(fromFile.path || "").replace(/\.md$/i, ""),
+        fromFile.basename,
+      ].filter(Boolean)));
+      const toTarget = obsidian.normalizePath(toFile.path || "").replace(/\.md$/i, "");
+      const toLabel = toFile.basename;
+      for (const target of targets) {
+        const re = new RegExp(`\\[\\[${escapeRegExp(target)}(?:\\|([^\\]]+))?\\]\\]`, "g");
+        next = next.replace(re, (_match, label) => {
+          const rawLabel = String(label || "").trim();
+          const display = rawLabel && !/-\d+$/.test(rawLabel) ? rawLabel : toLabel;
+          return `[[${toTarget}|${display}]]`;
+        });
+      }
+    }
+    return next;
+  }
+
+  async mergeDuplicatePeopleDirectory() {
+    await this.ensurePeopleDirectoryFiles({ overwrite: false });
+    const folder = obsidian.normalizePath(this.settings.peopleDirectoryFolder || DEFAULT_SETTINGS.peopleDirectoryFolder);
+    const prefix = folder ? folder + "/" : "";
+    const files = this.app.vault.getMarkdownFiles()
+      .filter(file => {
+        const path = obsidian.normalizePath(file.path || "");
+        return folder && path.startsWith(prefix);
+      });
+    const groups = new Map();
+    for (const file of files) {
+      const fm = await readFileFrontmatter(this, file);
+      const entry = personEntryFromFrontmatter(fm, file);
+      const key = normalizePersonLookupText(entry && entry.name);
+      if (!key) continue;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({ file, fm: fm || {}, entry });
+    }
+    const duplicateGroups = Array.from(groups.values()).filter(group => group.length > 1);
+    if (!duplicateGroups.length) return { groups: 0, merged: 0, updatedLinks: 0 };
+
+    const archiveFolder = obsidian.normalizePath("LexVoice/归档/重复人员");
+    await this.ensureFolder(archiveFolder);
+    const replacements = [];
+    let merged = 0;
+    for (const group of duplicateGroups) {
+      const primary = this.choosePrimaryPeopleRecord(group);
+      if (!primary) continue;
+      let primaryContent = await this.app.vault.read(primary.file);
+      let primaryFm = Object.assign({}, primary.fm || {});
+      for (const duplicate of group) {
+        if (!duplicate || duplicate.file === primary.file) continue;
+        primaryFm = this.mergeDuplicatePeopleFrontmatter(primaryFm, duplicate.fm || {}, duplicate.entry, duplicate.file);
+        replacements.push({ fromFile: duplicate.file, toFile: primary.file });
+        const archiveMarkdown = this.formatMergedPeopleArchiveMarkdown(duplicate.file, primary.file, duplicate.fm || {});
+        await this.app.vault.modify(duplicate.file, archiveMarkdown);
+        const archivePath = this.getAvailableVaultPath(obsidian.normalizePath(`${archiveFolder}/${duplicate.file.basename}.md`));
+        if (archivePath && this.app.fileManager && typeof this.app.fileManager.renameFile === "function") {
+          await this.app.fileManager.renameFile(duplicate.file, archivePath);
+        }
+        merged++;
+      }
+      primaryContent = ensurePeopleNoteRelatedBaseSection(primaryContent, this.settings.mdFolder);
+      await this.app.vault.modify(primary.file, upsertFrontmatterInMarkdown(primaryContent, primaryFm));
+    }
+
+    let updatedLinks = 0;
+    if (replacements.length) {
+      for (const file of this.app.vault.getMarkdownFiles()) {
+        const path = obsidian.normalizePath(file.path || "");
+        if (path.startsWith(archiveFolder + "/")) continue;
+        const content = await this.app.vault.read(file);
+        const next = this.replacePeopleWikiLinksInText(content, replacements);
+        if (next !== content) {
+          await this.app.vault.modify(file, next);
+          updatedLinks++;
+        }
+      }
+    }
+    this.invalidatePeopleDirectoryCache();
+    return { groups: duplicateGroups.length, merged, updatedLinks };
   }
 
   getKnowledgeExtractionSourceFiles(kind) {
@@ -15204,13 +15683,70 @@ ${source}`;
     return false;
   }
 
+  async resolvePeopleDirectorySuggestionTargets(suggestions) {
+    const folder = obsidian.normalizePath(this.settings.peopleDirectoryFolder || DEFAULT_SETTINGS.peopleDirectoryFolder);
+    let existingPeople = [];
+    try {
+      existingPeople = await loadPeopleDirectory(this, { force: true });
+    } catch (e) {
+      console.warn("[LexVoice] load people directory before resolving suggestions failed", e);
+    }
+    const getPersonFileByPath = (path) => {
+      const normalized = obsidian.normalizePath(path || "");
+      if (!normalized) return null;
+      const file = this.app.vault.getAbstractFileByPath(normalized);
+      return file instanceof obsidian.TFile ? file : null;
+    };
+    const getExactPersonFileByName = (name) => {
+      const safeName = sanitizeFilename(name) || "";
+      if (!folder || !safeName) return null;
+      return getPersonFileByPath(obsidian.normalizePath(`${folder}/${safeName}.md`));
+    };
+    const normalizeForApply = (raw) => {
+      const suggestion = normalizePeopleSuggestion(raw);
+      if (!suggestion) return null;
+      suggestion.matchPath = raw.matchPath || (raw.match && raw.match.path) || "";
+      suggestion.sourcePath = raw.sourcePath || "";
+      suggestion.sourceBasename = raw.sourceBasename || "";
+      suggestion.cacheKey = raw.cacheKey || "";
+      suggestion.ignoreKey = raw.ignoreKey || "";
+      suggestion.ignoreTerms = raw.ignoreTerms || [];
+      return suggestion;
+    };
+    const resolvePath = (suggestion) => {
+      const manual = getPersonFileByPath(suggestion && suggestion.matchPath || "");
+      if (manual) return obsidian.normalizePath(manual.path);
+      const exact = getExactPersonFileByName(suggestion && suggestion.name);
+      if (exact) return obsidian.normalizePath(exact.path);
+      const match = findMatchingPersonEntry(existingPeople, suggestion);
+      return obsidian.normalizePath(match && match.path || "");
+    };
+    const groups = [];
+    for (const raw of suggestions || []) {
+      const suggestion = normalizeForApply(raw);
+      if (!suggestion) continue;
+      const targetPath = resolvePath(suggestion);
+      let group = targetPath ? groups.find(item => item.targetPath === targetPath) : null;
+      if (!group) group = groups.find(item => arePeopleSuggestionsRelated(item.suggestion, suggestion));
+      if (group) {
+        group.suggestion = mergePeopleSuggestions(group.suggestion, suggestion);
+        if (targetPath && !group.targetPath) group.targetPath = targetPath;
+      } else {
+        groups.push({ targetPath, suggestion });
+      }
+    }
+    return groups.map(group => Object.assign({}, group.suggestion, {
+      matchPath: group.targetPath || group.suggestion.matchPath || "",
+    }));
+  }
+
   async applyPeopleDirectorySuggestions(sourceFile, suggestions) {
     await this.ensurePeopleDirectoryFiles({ overwrite: false });
     let created = 0;
     let updated = 0;
-    const linkedPeopleFiles = [];
+    const linkedPeopleRecords = [];
     const entries = [];
-    for (const raw of suggestions || []) {
+    for (const raw of await this.resolvePeopleDirectorySuggestionTargets(suggestions)) {
       const suggestion = normalizePeopleSuggestion(raw);
       if (!suggestion) continue;
       suggestion.matchPath = raw.matchPath || (raw.match && raw.match.path) || "";
@@ -15221,7 +15757,7 @@ ${source}`;
         const fm = await readFileFrontmatter(this, file) || {};
         const body = ensurePeopleNoteRelatedBaseSection(content, this.settings.mdFolder);
         await this.app.vault.modify(file, upsertFrontmatterInMarkdown(body, mergePersonFrontmatter(fm, suggestion, sourceFile)));
-        linkedPeopleFiles.push(file);
+        linkedPeopleRecords.push({ file, relation: suggestion.relation || "mentioned" });
         entries.push({ file, path: file.path, created: false, previousContent: content, kind: "person" });
         updated++;
       } else {
@@ -15233,13 +15769,13 @@ ${source}`;
         const fm = mergePersonFrontmatter({ "姓名": suggestion.name }, suggestion, sourceFile);
         const body = formatPeopleNoteMarkdown(suggestion.name, this.settings.mdFolder);
         file = await this.app.vault.create(path, upsertFrontmatterInMarkdown(body, fm));
-        linkedPeopleFiles.push(file);
+        linkedPeopleRecords.push({ file, relation: suggestion.relation || "mentioned" });
         entries.push({ file, path: file.path, created: true, previousContent: "", kind: "person" });
         created++;
       }
     }
-    if (linkedPeopleFiles.length) {
-      await this.updateSourceNoteRelatedPeopleLinks(sourceFile, linkedPeopleFiles);
+    if (linkedPeopleRecords.length) {
+      await this.updateSourceNoteRelatedPeopleLinks(sourceFile, linkedPeopleRecords);
       this.invalidatePeopleDirectoryCache();
     }
     return { created, updated, entries };

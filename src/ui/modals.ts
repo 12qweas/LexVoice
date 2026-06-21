@@ -2,7 +2,7 @@
 // @ts-nocheck — Modal/Widget class 密集（this.plugin.* 等无 TS 字段声明）；已用 tsc 确认无漏引用(TS2304=0)，余者皆类字段类型噪音，故与 main.ts 同档跳过。
 // 由 main.ts 抽出（模块化拆解，提升工程稳定性；纯搬迁、零行为改动）。
 import * as obsidian from "obsidian";
-import { loadPeopleDirectory, normalizePeopleSuggestion } from '../people';
+import { loadPeopleDirectory, normalizePeopleRelation, normalizePeopleSuggestion } from '../people';
 import { diagnosticError } from '../shared/util-key-diag';
 import { classifyImportTextFileForModal, enumerateAudioDevices, lexvoiceConfirm, makeImportTextCheckboxId } from './helpers';
 import { formatElapsed, pad } from '../shared/util-common';
@@ -159,11 +159,11 @@ export class PeopleDirectorySuggestionModal extends obsidian.Modal {
   async onOpen() {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: "AI 辅助补全人员资料" });
+    contentEl.createEl("h2", { text: "确认人员归属" });
     contentEl.createDiv({
       cls: "setting-item-description",
       text: this.sourceFile
-        ? "LexVoice 只会发送当前笔记内容到已配置的大模型，用于生成候选人员建议；已有人员资料仅在本地用于匹配和去重，不随请求发送。保存前需要确认姓名、称呼、角色和组织关系是否准确。"
+        ? "LexVoice 只会发送当前笔记内容到已配置的大模型，用于生成候选人员建议；已有人员资料仅在本地用于匹配和去重，不随请求发送。确认后会把这次会议的人物归属写回纪要，并维护对应人员页。"
         : this.options.fromIgnored
           ? `这里是已忽略的 ${this.options.ignoredCount || this.suggestions.length} 条人员建议。误操作的建议可以先恢复到待确认，也可以直接修改后保存进人员资料；保存后会自动移出忽略列表。`
         : this.options.fromCache
@@ -172,7 +172,7 @@ export class PeopleDirectorySuggestionModal extends obsidian.Modal {
     });
     contentEl.createDiv({
       cls: "setting-item-description lexvoice-people-suggestion-guide",
-      text: "如果这位人员已经在人员库里，请先在每条建议的“保存到人员资料”里选择对应人员笔记；下方字段只是本次要补充进去的信息，不需要手动改名来合并。",
+      text: "先判断这个名字归属于谁：已有人员就合并，新人再建档；本次归属用于区分参会人、被提到的人和待办责任人。下方资料只是补充信息，不需要靠改名来合并。",
     });
     let peopleEntries = [];
     try {
@@ -208,7 +208,7 @@ export class PeopleDirectorySuggestionModal extends obsidian.Modal {
       const top = box.createDiv({ cls: "lexvoice-people-suggestion-top" });
       const checkbox = top.createEl("input", { type: "checkbox" });
       checkbox.checked = item.selected !== false;
-      const badge = top.createSpan({ text: this.options.fromIgnored ? "已忽略" : (item.matchPath ? "更新已有人员" : "新建人员"), cls: "lexvoice-people-suggestion-badge" });
+      const badge = top.createSpan({ text: this.options.fromIgnored ? "已忽略" : (item.matchPath ? "合并到已有人员" : "新建人员"), cls: "lexvoice-people-suggestion-badge" });
       top.createSpan({ text: `置信度：${item.confidence || "中"}`, cls: "setting-item-description" });
       const matchMeta = top.createSpan({ text: item.matchPath ? ` · ${item.matchPath}` : "", cls: "setting-item-description" });
       if (!this.sourceFile && item.sourceBasename) top.createSpan({ text: ` · 来源：${item.sourceBasename}`, cls: "setting-item-description" });
@@ -250,9 +250,9 @@ export class PeopleDirectorySuggestionModal extends obsidian.Modal {
       }
 
       const targetBox = box.createDiv({ cls: "lexvoice-people-suggestion-target" });
-      targetBox.createDiv({ cls: "lexvoice-people-suggestion-target-label", text: "保存到人员资料" });
+      targetBox.createDiv({ cls: "lexvoice-people-suggestion-target-label", text: "归属到" });
       const targetSelect = targetBox.createEl("select", { cls: "dropdown lexvoice-people-suggestion-target-select" });
-      targetSelect.createEl("option", { value: "", text: "新建人员资料" });
+      targetSelect.createEl("option", { value: "", text: "新建人员档案" });
       const currentPath = obsidian.normalizePath(item.matchPath || "");
       if (currentPath && !peopleByPath.has(currentPath)) {
         targetSelect.createEl("option", { value: currentPath, text: `${getPathBasename(currentPath)}（当前匹配）` });
@@ -269,19 +269,30 @@ export class PeopleDirectorySuggestionModal extends obsidian.Modal {
         item.matchPath = path;
         if (rowRef) rowRef.item.matchPath = path;
         const person = path ? peopleByPath.get(path) : null;
-        if (this.options.fromIgnored) badge.setText(path ? "已忽略 · 保存到已有人员" : "已忽略 · 新建");
-        else badge.setText(path ? "保存到已有人员" : "新建人员");
+        if (this.options.fromIgnored) badge.setText(path ? "已忽略 · 合并到已有人员" : "已忽略 · 新建");
+        else badge.setText(path ? "合并到已有人员" : "新建人员");
         matchMeta.setText(path ? ` · ${path}` : "");
         if (path && person) {
-          targetHint.setText(getPersonHint(person) || "将把本条建议补充到选中的人员笔记。");
+          targetHint.setText(getPersonHint(person) || "将把本条建议作为本次会议提及，挂到选中的人员档案。");
         } else if (path) {
-          targetHint.setText("将把本条建议补充到当前匹配的人员笔记。");
+          targetHint.setText("将把本条建议作为本次会议提及，挂到当前匹配的人员档案。");
         } else {
-          targetHint.setText("将使用候选姓名新建一份人员资料。");
+          targetHint.setText("将使用候选姓名新建一份人员档案。");
         }
       };
       targetSelect.addEventListener("change", updateTargetUi);
       updateTargetUi();
+
+      let relationSelect;
+      new obsidian.Setting(box).setName("本次归属")
+        .setDesc("用于写回纪要：参会人、被提到的人、待办责任人会进入不同字段，人员页再反向聚合相关会议。")
+        .addDropdown(d => {
+          relationSelect = d;
+          d.addOption("mentioned", "被提到的人");
+          d.addOption("participant", "参会人");
+          d.addOption("todo_owner", "待办责任人");
+          d.setValue(normalizePeopleRelation(item.relation) || "mentioned");
+        });
 
       let nameInput;
       let aliasInput;
@@ -307,7 +318,7 @@ export class PeopleDirectorySuggestionModal extends obsidian.Modal {
           text: "依据：" + item.evidence.slice(0, 3).join("；"),
         });
       }
-      rowRef = { item, checkbox, nameInput, aliasInput, roleInput, orgInput, noteArea };
+      rowRef = { item, checkbox, nameInput, aliasInput, roleInput, orgInput, relationSelect, noteArea };
       this.rows.push(rowRef);
     }
 
@@ -323,7 +334,7 @@ export class PeopleDirectorySuggestionModal extends obsidian.Modal {
         new obsidian.Notice(`打开人员资料失败：${(e && e.message) || e}`);
       }
     };
-    const saveBtn = actions.createEl("button", { text: "保存选中" });
+    const saveBtn = actions.createEl("button", { text: "确认归属" });
     saveBtn.addClass("mod-cta");
     saveBtn.onclick = async () => {
       const selected = this.rows
@@ -336,6 +347,7 @@ export class PeopleDirectorySuggestionModal extends obsidian.Modal {
             role: row.roleInput.getValue(),
             organization: row.orgInput.getValue(),
             note: row.noteArea.value,
+            relation: row.relationSelect ? row.relationSelect.getValue() : row.item.relation,
             confidence: row.item.confidence || "中",
             evidence: row.item.evidence || [],
           });
@@ -373,7 +385,7 @@ export class PeopleDirectorySuggestionModal extends obsidian.Modal {
         if (this.options.fromIgnored) this.plugin.removePeopleDirectorySuggestionIgnores(selected);
         else this.plugin.removeCachedPeopleSuggestions(selected);
         await this.plugin.saveSettings();
-        new obsidian.Notice(`人员资料已更新：新建 ${created}，更新 ${updated}`);
+        new obsidian.Notice(`人员归属已确认：新建 ${created}，合并 ${updated}`);
         this.close();
       } catch (e) {
         console.error("[LexVoice] apply people suggestions failed", e);
@@ -989,7 +1001,7 @@ export class RecruitContextModal extends obsidian.Modal {
       const parts = [];
       if (q.定义) parts.push(`定义：${q.定义}`);
       if (q.信号) parts.push(`信号：${q.信号}`);
-      detail.setText(`${q.素质}　${parts.join("　·　") || "（未填定义）"}`);
+      detail.setText(`${q.素质}\u3000${parts.join("\u3000·\u3000") || "（未填定义）"}`);
       chip.onclick = () => { detail.style.display = detail.style.display === "none" ? "" : "none"; };
     }
   }

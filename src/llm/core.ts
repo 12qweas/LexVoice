@@ -7,8 +7,23 @@ import { extractLlmContent } from '../shared/util-json';
 import { diagnosticError } from '../shared/util-key-diag';
 import { withPromiseTimeout, getHeaderValue, parseRetryAfterMs, parseRequestUrlJson, getRequestUrlText } from '../shared/util-http';
 
+type LlmQueueItem = {
+  priority: number;
+  seq: number;
+  run: () => unknown;
+  resolve: (value: unknown) => void;
+  reject: (reason?: unknown) => void;
+};
+
+type LlmHttpError = Error & {
+  status?: number;
+  statusDetail?: string;
+  retryAfterMs?: number;
+  nonRetryable?: boolean;
+};
+
 export class LlmRequestQueue {
-  items: any[];
+  items: LlmQueueItem[];
   running: number;
   seq: number;
   constructor() {
@@ -95,7 +110,7 @@ export async function readLlmError(res) {
 
 export function createLlmHttpError(status, detail, endpoint, headers) {
   const cleanDetail = decorateLlmHttpDetail(status, detail, endpoint).slice(0, 500);
-  const err = new Error(`LLM 调用失败 ${status}：${cleanDetail}`) as any;
+  const err = new Error(`LLM 调用失败 ${status}：${cleanDetail}`) as LlmHttpError;
   err.status = status;
   err.statusDetail = cleanDetail;
   err.retryAfterMs = getLlmRetryAfterMsFromHeaders(headers);
@@ -290,6 +305,7 @@ export async function requestLlmChatCompletion(plugin, messages, options) {
     armTimer();
     let res;
     try {
+      // eslint-disable-next-line no-restricted-globals -- LLM streaming needs fetch ReadableStream and AbortController; requestUrl fallback below is non-streaming only.
       res = await fetch(endpoint, {
         method: "POST",
         headers,

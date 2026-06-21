@@ -23,6 +23,7 @@ export class DashScopeStreamingClient {
     if (!this.apiKey) throw new Error("DashScope API Key 未配置");
     let WSCtor = null;
     try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports -- Desktop realtime ASR needs Node ws headers; browser WebSocket cannot set Authorization headers.
       const wsModule = require("ws");
       WSCtor = wsModule && (wsModule.WebSocket || wsModule.default || wsModule);
     } catch { /* intentionally empty */ }
@@ -164,6 +165,7 @@ export class OpenAIRealtimeTranscriptionClient {
     if (!this.apiKey) throw new Error("OpenAI API Key 未配置");
     let WSCtor = null;
     try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports -- Desktop realtime ASR needs Node ws headers; browser WebSocket cannot set Authorization headers.
       const wsModule = require("ws");
       WSCtor = wsModule && (wsModule.WebSocket || wsModule.default || wsModule);
     } catch { /* intentionally empty */ }
@@ -306,6 +308,7 @@ export class OpenAIRealtimeTranslationClient {
     if (!this.apiKey) throw new Error("OpenAI API Key 未配置");
     let WSCtor = null;
     try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports -- Desktop realtime translation needs Node ws headers; browser WebSocket cannot set Authorization headers.
       const wsModule = require("ws");
       WSCtor = wsModule && (wsModule.WebSocket || wsModule.default || wsModule);
     } catch { /* intentionally empty */ }
