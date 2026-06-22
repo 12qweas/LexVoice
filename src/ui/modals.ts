@@ -514,7 +514,10 @@ export class QueueModal extends obsidian.Modal {
         const row = list.createDiv({ cls: "lexvoice-queue-row is-done" });
         const info = row.createDiv({ cls: "lexvoice-queue-info" });
         info.createEl("div", { cls: "lexvoice-queue-title", text: c.title || "完成" });
-        info.createEl("div", { cls: "lexvoice-queue-meta", text: `${fmtTime(c.at)}${c.detail ? " · " + c.detail : ""}` });
+        const tokLabel = (c.tokens && c.tokens > 0)
+          ? ` · ${c.tokensExact ? "" : "≈"}${c.tokens >= 10000 ? (c.tokens / 10000).toFixed(1).replace(/\.0$/, "") + "万" : c.tokens} token`
+          : "";
+        info.createEl("div", { cls: "lexvoice-queue-meta", text: `${fmtTime(c.at)}${c.detail ? " · " + c.detail : ""}${tokLabel}` });
       }
     }
 

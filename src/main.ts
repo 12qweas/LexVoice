@@ -11284,6 +11284,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     this._importBusy = null;
     this._busyLabel = null;
     this.completedWorkLog = []; // 本次启动 OB 后已完成的处理（不持久化，重启清零），供"处理进度"面板展示
+    this._taskMeter = null; // 单任务 token 计量窗口（beginTaskMeter→endTaskMeter）
     this.progressStatusEl = this.addStatusBarItem();
     this.progressStatusEl.addClass("lexvoice-statusbar");
     this.progressStatusEl.addEventListener("click", () => new QueueModal(this.app, this).open());
@@ -12379,11 +12380,32 @@ class LexVoicePlugin extends obsidian.Plugin {
   renderStatusBar() { try { this.updateBusyStatus(); } catch { /* intentionally empty */ } }
 
   // 记一笔"本次启动后已完成"的处理（供处理进度面板展示；不持久化，OB 重启清零）。
-  logCompletedWork(title, detail) {
+  logCompletedWork(title, detail, meter) {
     if (!Array.isArray(this.completedWorkLog)) this.completedWorkLog = [];
-    this.completedWorkLog.unshift({ title: String(title || "完成"), detail: String(detail || ""), at: Date.now() });
+    const entry = { title: String(title || "完成"), detail: String(detail || ""), at: Date.now() };
+    if (meter && Number(meter.tokens) > 0) { entry.tokens = Math.round(Number(meter.tokens)); entry.tokensExact = !!meter.exact; }
+    this.completedWorkLog.unshift(entry);
     if (this.completedWorkLog.length > 80) this.completedWorkLog.length = 80;
     try { this.updateBusyStatus(); } catch { /* intentionally empty */ }
+  }
+
+  // —— 单任务 token 计量 —— beginTaskMeter 开窗，期间所有 LLM 调用经 callLlmWithMeta→addTaskMeter 累计，endTaskMeter 结算。
+  beginTaskMeter() { this._taskMeter = { inChars: 0, outChars: 0, exactTokens: 0, calls: 0, hasExact: true }; }
+  addTaskMeter(inChars, outChars, usage) {
+    const m = this._taskMeter; if (!m) return;
+    m.calls++;
+    m.inChars += Number(inChars) || 0;
+    m.outChars += Number(outChars) || 0;
+    const t = usage && Number(usage.total_tokens);
+    if (t) m.exactTokens += t; else m.hasExact = false;
+  }
+  endTaskMeter() {
+    const m = this._taskMeter; this._taskMeter = null;
+    if (!m || !m.calls) return null;
+    const exact = m.hasExact && m.exactTokens > 0;
+    // 流式调用拿不到精确 usage 时按字符估算：中文为主的 MiMo 约 1.6 字/token（粗估、仅供心里有数，精确以模型控制台为准）。
+    const tokens = exact ? m.exactTokens : Math.round((m.inChars + m.outChars) / 1.6);
+    return { tokens, exact };
   }
 
   // 当前正在进行的处理标签（导入/批量/重整/录音整理/转写/录音），空闲返回 null。供处理进度面板的"处理中"区用。
@@ -13689,6 +13711,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         percent: 62,
         detail: textImport ? "正在把导入文本交给大模型结构化整理" : "正在把分段转写合并成最终纪要",
       });
+      this.beginTaskMeter();
       polished = await mergeAndPolish(this, segmentsForFinal.map(s => ({
         index: s.index, startOffsetMs: s.startOffsetMs, endOffsetMs: s.endOffsetMs, text: s.text,
         audioName: s.audioName,
@@ -13798,7 +13821,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       try {
         const doneLabel = isTextImportSession(session) ? "文本整理完成"
           : session.source === "import" ? "导入音频整理完成" : "录音纪要整理完成";
-        this.logCompletedWork(doneLabel, session.mdPath || "");
+        this.logCompletedWork(doneLabel, session.mdPath || "", this.endTaskMeter());
       } catch { /* intentionally empty */ }
     }
 
@@ -16211,6 +16234,7 @@ ${source}`;
       }
       this._busyLabel = `重新整理中（${meta.prefix}）…`;
       this.updateBusyStatus();
+      this.beginTaskMeter();
       const polished = await mergeAndPolish(this, segments, mode, recruitContext, sessionMeta, originalFmForRegen, repolishOptions);
 
       // 重整完成后，把 frontmatter 里的"代号 → 真名"项压平为"真名"，让 yaml 干净
@@ -16237,7 +16261,7 @@ ${source}`;
         console.error("[LexVoice] daily overview after repolish failed", e);
       }
       new obsidian.Notice(`LexVoice：已生成${meta.prefix}模式纪要${preferenceLabel}${roleMapping.length ? `（角色映射 ${roleMapping.length} 条已应用）` : ""}`);
-      try { this.logCompletedWork(`重新整理完成 · ${meta.prefix}`, (file && file.path) || ""); } catch { /* intentionally empty */ }
+      try { this.logCompletedWork(`重新整理完成 · ${meta.prefix}`, (file && file.path) || "", this.endTaskMeter()); } catch { /* intentionally empty */ }
     } catch (e) {
       console.error("[LexVoice] repolish markdown failed", e);
       new obsidian.Notice(`重新整理失败：${(e && e.message) || e}`, 8000);
@@ -16335,6 +16359,7 @@ ${source}`;
       this._busyLabel = "清稿生成中…";
       this.updateBusyStatus();
       new obsidian.Notice("LexVoice：正在从母本逐字稿生成清稿…");
+      this.beginTaskMeter();
       const { text: cleaned, truncated } = await cleanTranscript(this, segments, getLlmOutputCeiling(this.settings));
       if (!cleaned) { new obsidian.Notice("清稿生成失败：模型无输出", 8000); return; }
       const sidMatch = content.match(/<!--\s*lexvoice-session:\s*([^\s>]+)\s*-->/);
@@ -16364,7 +16389,7 @@ ${source}`;
         outFile = await this.app.vault.create(targetPath, noteBody);
       }
       new obsidian.Notice(`LexVoice：清稿已生成 → ${cleanName}`, 6000);
-      try { this.logCompletedWork("生成清稿", (outFile && outFile.path) || ""); } catch { /* intentionally empty */ }
+      try { this.logCompletedWork("生成清稿", (outFile && outFile.path) || "", this.endTaskMeter()); } catch { /* intentionally empty */ }
       try { await this.app.workspace.getLeaf(false).openFile(outFile); } catch { /* intentionally empty */ }
     } catch (e) {
       console.error("[LexVoice] generate clean script failed", e);
