@@ -1815,7 +1815,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
 
     new obsidian.Setting(c).setName("清理空白短录音")
       .setDesc("扫描转写纪要文件夹，将时长不超过 10 秒且没有有效转写文本的 LexVoice 条目移入系统废纸篓，并同步处理其引用的录音文件。误删可从系统废纸篓恢复。")
-      .addButton(b => b.setButtonText("扫描并清理").setDestructive().onClick(() => this.plugin.cleanupEmptyShortRecordings()));
+      .addButton(b => b.setButtonText("扫描并清理").onClick(() => this.plugin.cleanupEmptyShortRecordings()));
 
     // ---- 失败重试 ----
     new obsidian.Setting(c).setName("失败重试").setHeading();
