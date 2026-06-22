@@ -215,4 +215,7 @@ export const DEFAULT_SETTINGS = {
   recruitResumeDesensitize: true,
   recruitHomepagePath: "",
 };
+
+// 由 DEFAULT_SETTINGS 推导的设置类型——给插件类字段上类型，让类型感知规则识别 this.settings.* 是设置项、不是 Obsidian API（渐进类型化）。
+export type LexVoiceSettings = typeof DEFAULT_SETTINGS;
 /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- end of LexVoice dynamic-typing region */

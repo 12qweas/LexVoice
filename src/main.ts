@@ -21,6 +21,7 @@ import { getSedimentTodoId, getSedimentCardId, getSedimentHotwordId, getSediment
 import { createVocabularyGroups, parseVocabularyGroups, flattenVocabularyGroups, countVocabularyGroups, normalizeVocabularyInput, mergeVocabularyGroups, isStructuredVocabularyMarkdown, loadVocabularyGroups, formatVocabularyMarkdown } from "./vocabulary";
 import { logLlmRequestDiagnostic, getLlmConfigIssue, isLlmConfigError, isLlmServiceBlockedError, isLlmNonRetryableError, formatLlmConfigIssue, formatLlmFailureIssue, callLlm, callBriefingMergeLlm, stripModeSuggestionBlocks } from "./llm/core";
 import { DEFAULT_DAILY_MEETING_OVERVIEW_HEADING, DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE, DEFAULT_SETTINGS } from "./shared/defaults";
+import type { LexVoiceSettings } from "./shared/defaults";
 import { normalizeLlmProfiles, getLlmOutputCeiling, getBriefingMergeDesiredTokens, getBriefingMergeMaxTokens, LLM_OUTPUT_CEILING_FALLBACK, classifyBriefingLength } from "./llm/config";
 import { DashScopeStreamingClient, OpenAIRealtimeTranscriptionClient, OpenAIRealtimeTranslationClient, PcmStreamEncoder } from "./asr/clients";
 import { MODE_META, FRONTMATTER_SCHEMA, MODE_PREFIX_TO_KEY } from "./shared/catalog-modes";
@@ -3214,6 +3215,7 @@ function createStreamingTranscriptionClient(profile, provider, callbacks) {
 // ============================================================
 
 class RecorderService {
+  declare plugin: LexVoicePlugin;
   constructor(plugin) {
     this.plugin = plugin;
     this.recorder = null;
@@ -6076,6 +6078,7 @@ function buildTitleSourceFromSegments(segments) {
 }
 
 class TaskQueue {
+  declare plugin: LexVoicePlugin;
   constructor(plugin) {
     this.plugin = plugin;
     this.tasks = [];
@@ -6266,6 +6269,7 @@ class TaskQueue {
 const VIEW_TYPE_OUTLINE = "lexvoice-outline-view";
 
 class OutlineView extends obsidian.ItemView {
+  declare plugin: LexVoicePlugin;
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
@@ -11272,6 +11276,7 @@ class OutlineView extends obsidian.ItemView {
 
 
 class LexVoicePlugin extends obsidian.Plugin {
+  declare settings: LexVoiceSettings;
   async onload() {
     await this.loadAll();
     this.recorder = new RecorderService(this);
