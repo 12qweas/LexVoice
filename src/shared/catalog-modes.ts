@@ -2,6 +2,7 @@
 // 由 main.ts 抽出（模块化拆解，提升工程稳定性；纯搬迁、零行为改动）。
 
 export const MODE_META = {
+  synthesis: { prefix: "综合纪要", emoji: "", icon: "layers", label: "综合纪要", goal: "默认综合档：先找贯穿全场的主线，再分速览 / 正文 / 查阅三层。取工作纪要之实、研讨会之锋，适合大多数多人讨论。" },
   meeting:   { prefix: "工作纪要", emoji: "📝", icon: "briefcase", label: "工作纪要", goal: "适合各种规模的工作会议：决议、待办、风险、同步同事进展。" },
   interview: { prefix: "访谈", emoji: "🎙", icon: "message-square", label: "访谈", goal: "适合外部访谈、用户调研、专家访谈，把问答转成洞察。" },
   monologue: { prefix: "个人笔记", emoji: "💭", icon: "notebook", label: "个人笔记", goal: "适合个人口述、灵感、复盘，把碎片表达整理成可用笔记。" },
@@ -14,6 +15,10 @@ export const MODE_META = {
 };
 
 export const FRONTMATTER_SCHEMA = {
+  synthesis: `主题: <一句话主题>
+核心问题: <这场讨论真正在攻的那一个问题；即脊柱，一句话>
+参与者:
+  - <姓名或中性角色；不确定时写 "未提及">`,
   learning: `主题: <一句话主题>
 来源: <B站 / YouTube / 播客 / 课程 / 讲座 / 未提及>
 语言: <中文 / 英文 / 日文 / 多语种 / 未提及>`,
@@ -58,6 +63,8 @@ export const MODE_PREFIX_TO_KEY = {
   "面试": "recruit",
   "讨论": "huddle",
   // 新 prefix
+  "综合纪要": "synthesis",
+  "综合": "synthesis",
   "工作纪要": "meeting",
   "学术研讨": "seminar",
   "主题沙龙": "seminar",

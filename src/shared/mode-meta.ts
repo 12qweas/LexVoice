@@ -4,9 +4,9 @@ import * as obsidian from "obsidian";
 import { MODE_META } from './catalog-modes';
 import { isRecruitFeatureUnlocked } from '../recruit';
 
-export const STANDARD_POLISH_MODES = ["meeting", "seminar", "interview", "monologue", "learning"];
+export const STANDARD_POLISH_MODES = ["synthesis", "meeting", "seminar", "interview", "monologue", "learning"];
 
-export const ALL_POLISH_MODES = ["meeting", "seminar", "interview", "monologue", "learning", "recruit", "recruit-needs"];
+export const ALL_POLISH_MODES = ["synthesis", "meeting", "seminar", "interview", "monologue", "learning", "recruit", "recruit-needs"];
 
 type CustomPromptModeTemplate = {
   id: string;

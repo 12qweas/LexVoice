@@ -114,7 +114,7 @@ export const DEFAULT_SETTINGS = {
   llmProfiles: [],           // [{ id, name, endpoint, apiKey, model }]
   activeLlmProfile: "",      // 当前选中的配置 id；空 = 未保存为配置（临时）
 
-  polishMode: "meeting",
+  polishMode: "synthesis",
   polishPromptInterview: "",
   polishPromptMeeting: "",
   polishPromptHuddle: "",

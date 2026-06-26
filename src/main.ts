@@ -1273,6 +1273,7 @@ ${SHARED_DISCIPLINE}
 
 
 const POLISH_PROMPTS = {
+  synthesis: buildPrompt(MODE_BODIES.synthesis, false, "synthesis"),
   learning: buildPrompt(MODE_BODIES.learning, false, "learning"),
   interview: buildPrompt(MODE_BODIES.interview, false, "interview"),
   meeting: buildPrompt(MODE_BODIES.meeting, false, "meeting"),
@@ -1286,6 +1287,7 @@ const POLISH_PROMPTS = {
 
 
 const MERGE_PROMPTS = {
+  synthesis: buildPrompt(MODE_BODIES.synthesis, true, "synthesis"),
   learning: buildPrompt(MODE_BODIES.learning, true, "learning"),
   interview: buildPrompt(MODE_BODIES.interview, true, "interview"),
   meeting: buildPrompt(MODE_BODIES.meeting, true, "meeting"),
