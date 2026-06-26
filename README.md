@@ -1,8 +1,6 @@
 # LexVoice
 
-<p align="center">
-  <img width="1280" alt="LexVoice introduction" src="docs/images/lexvoice-intro.png">
-</p>
+
 
 > 中文说明见 [README.zh-CN.md](README.zh-CN.md).
 
