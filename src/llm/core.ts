@@ -2,6 +2,7 @@
 // 由 main.ts 抽出（模块化拆解，提升工程稳定性；纯搬迁、零行为改动）。
 import * as obsidian from "obsidian";
 import { normalizeLlmEndpoint, isLocalLlmEndpoint, isPoeLlmEndpoint, isMoonshotKimiModel, buildLlmHeaders } from '../shared/util-llm-endpoint';
+import { applyThinkingParam } from './thinking';
 import { delayMs } from '../shared/util-audio';
 import { extractLlmContent } from '../shared/util-json';
 import { diagnosticError } from '../shared/util-key-diag';
@@ -284,6 +285,8 @@ export async function requestLlmChatCompletion(plugin, messages, options) {
   };
   if (!isMoonshotKimiModel(endpoint, llmModel)) basePayload.temperature = 0.3;
   const payload = Object.assign(basePayload, options && options.payload ? options.payload : {});
+  // 思考档：default 不动请求；fast 关思维链 / reasoning 显式开——仅对已核实可控的服务注入对应参数，其它不动。
+  try { applyThinkingParam(payload, plugin.settings.thinkingMode, endpoint, llmModel); } catch { /* intentionally empty */ }
   payload.stream = streamWanted;
   const payloadText = JSON.stringify(payload);
   // Obsidian requestUrl 兜底不支持流式，单独准备一份 stream:false 的 payload 给它用。
@@ -533,13 +536,69 @@ export async function callLlm(plugin, system, user, options) {
   return text;
 }
 
+// 续写衔接：若续写片段开头与已有结尾有重叠，去掉重叠再拼，避免模型重复一段。
+function stitchContinuation(a, b) {
+  const head = String(a || "");
+  const tail = String(b || "");
+  if (!head) return tail;
+  if (!tail) return head;
+  const maxOverlap = Math.min(400, head.length, tail.length);
+  for (let k = maxOverlap; k >= 16; k--) {
+    if (head.slice(-k) === tail.slice(0, k)) return head + tail.slice(k);
+  }
+  return head + tail;
+}
+
+// 截断自动续写：当一次输出因 finishReason==="length" 被截断时，用「assistant 预填 + 让它从断点续写」
+// 的方式再发请求，把多段拼成完整产物——不让偶发的模型输出上限决定内容完整性。
+// 工程兜底，与 mergeAndPolishLongSession 的「事前按时间分段」互补：那条防"明显超长"，这条防"偶发被切"。
+export async function callLlmWithContinuation(plugin, system, user, options, opts) {
+  const maxContinuations = Math.max(0, (opts && Number(opts.maxContinuations)) || 3);
+  const first = await callLlmWithMeta(plugin, system, user, options);
+  let text = String(first.text || "");
+  let finishReason = first.finishReason;
+  let continuations = 0;
+  while (isTruncatedFinishReason(finishReason) && continuations < maxContinuations && text.trim()) {
+    continuations++;
+    const messages = [
+      { role: "system", content: system },
+      { role: "user", content: user },
+      { role: "assistant", content: text },
+      { role: "user", content: "你上一条回复因长度上限被截断了。请直接从断点处继续输出剩余内容、无缝衔接，不要重复任何已输出的文字、不要重新开头、不要加任何前言或结束语，直接接着写。" },
+    ];
+    let data;
+    try {
+      data = await requestLlmChatCompletion(plugin, messages, options);
+    } catch (e) {
+      break; // 续写失败就用已有内容，不让整体失败
+    }
+    const piece = stripModeSuggestionBlocks(extractLlmContent(data).trim());
+    try {
+      if (plugin && typeof plugin.addTaskMeter === "function") {
+        plugin.addTaskMeter(messages.reduce((n, m) => n + String(m.content || "").length, 0), piece.length, (data && data.usage) || null);
+      }
+    } catch { /* intentionally empty */ }
+    if (!piece) break;
+    text = stitchContinuation(text, piece);
+    finishReason = extractLlmFinishReason(data);
+  }
+  return { text, finishReason, truncated: isTruncatedFinishReason(finishReason), continuations };
+}
+
 export async function callBriefingMergeLlm(plugin, system, user, options, diagCtx) {
-  const { text, finishReason } = await callLlmWithMeta(plugin, system, user, options);
+  const { text, finishReason, continuations } = await callLlmWithContinuation(plugin, system, user, options, { maxContinuations: 3 });
   const truncated = isTruncatedFinishReason(finishReason);
+  if (continuations > 0) {
+    try {
+      await logLlmRequestDiagnostic(plugin, "info", "llm.merge_continued", "输出被截断后自动续写拼接", Object.assign({
+        continuations, truncatedAfter: truncated, outputChars: text.length,
+      }, diagCtx || {}));
+    } catch { /* intentionally empty */ }
+  }
   if (truncated) {
     try {
-      await logLlmRequestDiagnostic(plugin, "warn", "llm.merge_truncated", "最终纪要疑似被输出长度上限截断", Object.assign({
-        finishReason, outputChars: text.length,
+      await logLlmRequestDiagnostic(plugin, "warn", "llm.merge_truncated", "最终纪要在多次续写后仍疑似被输出长度上限截断", Object.assign({
+        finishReason, outputChars: text.length, continuations,
       }, diagCtx || {}));
     } catch { /* intentionally empty */ }
   }

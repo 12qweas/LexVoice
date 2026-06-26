@@ -6,6 +6,7 @@ import { isLocalServiceEndpoint } from '../shared/util-note';
 import { buildVocabularyPrompt, applyVocabularyCorrections, loadVocabularyGroups } from '../vocabulary';
 import { buildPeopleHotwordsForAsr } from '../people';
 import { lexvoiceArrayBufferToBase64 } from './clients';
+import { extractTranscriptText } from './speaker-labels';
 
 export function normalizeAsrConcurrency(value) {
   const n = Number(value);
@@ -417,7 +418,8 @@ export async function transcribeAudio(plugin, blob, mime) {
       }
       throw new Error(`转写响应解析失败（HTTP ${res.status} 但响应体非法或中断）：${(e && e.message) || e}`);
     }
-    const rawText = (data.text || data.transcript || data.result || "").trim();
+    // 取最终文本：若服务返回了说话人分离信息（segments[].speaker 或内联 [SPEAKER_00]），归一成 [说话人N] 前缀；否则同旧行为。
+    const rawText = extractTranscriptText(data);
     return applyVocabularyCorrections(rawText, vocabularyGroups).trim();
   } finally {
     if (timer) window.clearTimeout(timer);

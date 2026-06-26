@@ -409,6 +409,7 @@ export class QueueModal extends obsidian.Modal {
     const pending = allTasks.filter(t => t && t.status !== "running");
     const completed = Array.isArray(this.plugin.completedWorkLog) ? this.plugin.completedWorkLog : [];
     const activity = this.plugin.getCurrentActivityLabel ? this.plugin.getCurrentActivityLabel() : null;
+    const fmtDur = (ms) => { const s = Math.max(0, Math.round(Number(ms) / 1000)); if (s < 60) return `${s} 秒`; const m = Math.floor(s / 60), r = s % 60; if (m < 60) return r ? `${m} 分 ${r} 秒` : `${m} 分`; const h = Math.floor(m / 60), rm = m % 60; return rm ? `${h} 时 ${rm} 分` : `${h} 时`; };
 
     if (!running.length && !pending.length && !completed.length && !activity) {
       contentEl.createEl("p", { text: "暂无处理任务。录音转写、AI 整理、重试任务的进度会显示在这里。" });
@@ -452,9 +453,15 @@ export class QueueModal extends obsidian.Modal {
         }
         // 第三行：步骤说明
         if (detail.stepDetail) info.createDiv({ cls: "lexvoice-activity-detail", text: detail.stepDetail });
+        // 第四行：实时已用时（AI 整理/重整/清稿等经 beginTaskMeter 的处理；面板每 1.2s 重渲染会走动）
+        const _tm = this.plugin._taskMeter;
+        if (_tm && _tm.startedAt) info.createDiv({ cls: "lexvoice-activity-detail", text: `已用时 ${fmtDur(Date.now() - _tm.startedAt)}` });
       } else if (activity) {
         const row = list.createDiv({ cls: "lexvoice-queue-row is-running" });
-        row.createDiv({ cls: "lexvoice-queue-info" }).createEl("div", { cls: "lexvoice-queue-title", text: activity });
+        const aInfo = row.createDiv({ cls: "lexvoice-queue-info" });
+        aInfo.createEl("div", { cls: "lexvoice-queue-title", text: activity });
+        const _tm = this.plugin._taskMeter;
+        if (_tm && _tm.startedAt) aInfo.createEl("div", { cls: "lexvoice-queue-meta", text: `已用时 ${fmtDur(Date.now() - _tm.startedAt)}` });
       }
       // 正在跑的队列重试任务（与当前活动并列）
       for (const t of running) {
@@ -517,7 +524,8 @@ export class QueueModal extends obsidian.Modal {
         const tokLabel = (c.tokens && c.tokens > 0)
           ? ` · ${c.tokensExact ? "" : "≈"}${c.tokens >= 10000 ? (c.tokens / 10000).toFixed(1).replace(/\.0$/, "") + "万" : c.tokens} token`
           : "";
-        info.createEl("div", { cls: "lexvoice-queue-meta", text: `${fmtTime(c.at)}${c.detail ? " · " + c.detail : ""}${tokLabel}` });
+        const durLabel = (c.durationMs && c.durationMs > 0) ? ` · 用时 ${fmtDur(c.durationMs)}` : "";
+        info.createEl("div", { cls: "lexvoice-queue-meta", text: `${fmtTime(c.at)}${c.detail ? " · " + c.detail : ""}${durLabel}${tokLabel}` });
       }
     }
 
@@ -788,7 +796,7 @@ export class RecruitContextModal extends obsidian.Modal {
     // —— 简历区块 ——
     const resumeSec = contentEl.createDiv({ cls: "lexvoice-recruit-section" });
     const resumeHead = resumeSec.createDiv({ cls: "lexvoice-recruit-section-head" });
-    resumeHead.createEl("label", { text: "📄 候选人简历（可选）" });
+    resumeHead.createEl("label", { text: "候选人简历（可选）" });
     if (hrUnlocked) {
       const pdfs = listResumePdfs(this.app, this.plugin.settings.recruitResumeFolderPath);
       if (pdfs.length) {
@@ -978,6 +986,7 @@ export class RecruitContextModal extends obsidian.Modal {
     if (parsed.岗位描述) this.ctx.jd = parsed.岗位描述;
     this.ctx.requiredQualities = parsed.综合素质 || [];
     this.ctx.generalOutline = parsed.统一提纲 || "";
+    if (parsed.岗位资历) this.ctx.seniority = parsed.岗位资历;  // JD 写了岗位资历 → 自动带入，评估按此档校准严苛度
     this.clearCachedInterviewBrief();
     const proj = (this._jdProjects || []).find(p => p.jdFilePath === path);
     if (proj && !this.ctx.position) this.ctx.position = proj.position;
@@ -1078,7 +1087,7 @@ export class PromptTemplateModal extends obsidian.Modal {
         "- 使用场景：说明这类录音通常来自什么任务、谁会继续使用这份笔记。",
         "- 重点内容：说明必须识别哪些信息，例如事实、结论、待办、风险、争议、关键原话、术语、外语内容；待办 / 行动项必须输出为 `- [ ]` todo 任务。",
         "- 必须输出：说明最终笔记必须包含哪些部分，以及不需要出现哪些过度模板化内容。",
-        "- 待办语法：如果有待办，统一写成 `- [ ] 责任人：<人> 事项：<具体动作> 截止：<时间>`，不要写成表格或普通列表。",
+        "- 待办语法：如果有待办，统一写成 `- [ ] 事项：<具体动作>`，能确定时再补 `责任人：<人>` 和 `截止：<时间>`（无法判断就省略该字段，不要写「未提及」）；不要写成表格或普通列表。",
         "- 写作要求：说明语气、详略、是否翻译、是否保留原文、如何处理不确定信息。",
         "- 反幻觉：没有出现在转写里的信息不要编造，拿不准要标注不确定。",
         "",

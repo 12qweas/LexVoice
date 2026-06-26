@@ -94,6 +94,14 @@ export const DEFAULT_SETTINGS = {
       language: "zh",
       hint: "适合 Xinference、faster-whisper-server、whisper.cpp 等本地服务；需要能接收音频文件上传并返回 text。",
     },
+    whisperx: {
+      name: "WhisperX · 带说话人分离（本地）",
+      endpoint: "http://127.0.0.1:8000/v1/audio/transcriptions",
+      apiKey: "",
+      model: "whisper-large-v3",
+      language: "zh",
+      hint: "本地 WhisperX / whisper-diarization 服务：转写同时做说话人分离。需服务在响应里返回 segments[].speaker（或在 text 内联 [SPEAKER_00]），LexVoice 会自动归一成 [说话人N]。注意：整段导入音频时说话人编号才全程一致；边录边切的分段模式跨段编号可能对不上。",
+    },
   },
 
   llmEndpoint: "https://api.siliconflow.cn/v1/chat/completions",
@@ -124,6 +132,8 @@ export const DEFAULT_SETTINGS = {
   repolishPreferencePromptAddendum: "",
   // 右键"重新整理为"时记住的偏好修饰（detailed/concise/structured/natural/expanded 或 ""=不加偏好）。
   repolishPreference: "",
+  // 思考档：auto=默认（不动请求）/ reasoning=显式开思维链 / fast=关思维链省 token（仅对可控服务生效，见 llm/thinking.ts）。
+  thinkingMode: "auto",
 
   briefingTranslationMode: "off",
   briefingTargetLanguage: "zh-CN",
@@ -145,6 +155,8 @@ export const DEFAULT_SETTINGS = {
   peopleBaseFile: "LexVoice/人员库.base",
   learningCardsFolder: "LexVoice/学习卡片",
   todoCardsFolder: "LexVoice/待办卡片",
+  sedimentAutoExtract: false,  // 默认关闭：转写完成不自动沉淀，手动点「沉淀」再扫描（省 token）；开启则转写完成后自动扫描并入库
+
   lexVoiceBasesFolder: "LexVoice/视图",
   peopleContextMode: "privacy",
   peopleHotwordsConsentAt: "",
