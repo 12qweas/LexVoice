@@ -151,7 +151,7 @@ export function injectHtmlReportExportScript(html) {
 
 export function extractMarkdownForHtmlReport(markdown) {
   let text = String(markdown || "").replace(/\r\n/g, "\n");
-  const rawMatch = /\n##\s+📁\s+原始材料/.exec(text);
+  const rawMatch = /\n##\s+(?:📁\s*)?原始材料/.exec(text);
   if (rawMatch) text = text.slice(0, rawMatch.index);
   text = text
     .replace(/<details>\s*<summary>上一版纪要[\s\S]*?<\/details>/gi, "")
@@ -450,7 +450,7 @@ export function buildHtmlReportPrompt(fileName, markdown) {
 输出要求：
 - 只输出 JSON，不要 Markdown，不要代码块标记，不要解释。
 - 字段必须使用下面的结构；没有信息时用空数组或空字符串。
-- todos 中无法判断责任人或截止时间时写“未提及”。
+- todos 中无法判断责任人或截止时间时直接省略该字段（owner/due 留空），不要写“未提及”。
 - visualCards 用于页面顶部的视觉卡片，优先写数字、判断、状态、结论标签；没有数字也可以写“核心矛盾 / 推荐方案 / 当前状态”等短语。
 - logicFlow 是可视化流程主线，3-5 个节点，每个节点 desc 不超过 35 字。
 - sections 是报告主体，必须经过重构，不能照抄原文标题；每节 body 控制在 60-120 字，bullets 最多 3 条。
@@ -498,7 +498,8 @@ export async function generateHtmlReportFromMarkdown(plugin, fileName, markdown)
 }
 
 export async function generateStyledReportFromMarkdown(plugin, mode, markdown) {
-  const source = String(markdown || "").trim();
+  // 先剥掉「原始材料（逐字稿）」「沉淀注释」等附录再喂模型——报告只需正文，附录每次重发是纯浪费。
+  const source = extractMarkdownForHtmlReport(markdown).trim();
   if (source.length < 80) throw new Error("当前纪要内容过短，无法生成报告");
   const template = mode === "recruit" ? RECRUIT_REPORT_TEMPLATE : SEMINAR_REPORT_TEMPLATE;
   const prompt = mode === "recruit" ? RECRUIT_REPORT_PROMPT : SEMINAR_REPORT_PROMPT;
@@ -560,14 +561,16 @@ export function renderDecisionPanel(items) {
 export function renderTodoPanel(todos) {
   const list = Array.isArray(todos) ? todos : [];
   if (!list.length) return `<p class="lv-muted">未提及</p>`;
-  return `<div class="lv-action-list">${list.map(todo => `
+  // 责任人 / 截止 没明确就省略，不显示「未提及」。
+  const clean = (v) => { const t = String(v || "").trim(); return /^(无|暂无|没有|未提及|不适用|跳过|待定|未明确|未指定|n\/a|na|tbd)$/i.test(t) ? "" : t; };
+  return `<div class="lv-action-list">${list.map(todo => {
+    const meta = [clean(todo.owner), clean(todo.due)].filter(Boolean).map(x => `<span>${escapeHtmlText(x)}</span>`).join("");
+    return `
     <div class="lv-action-row">
-      <div class="lv-action-main">${escapeHtmlText(todo.task || "未提及")}</div>
-      <div class="lv-action-meta">
-        <span>${escapeHtmlText(todo.owner || "未提及")}</span>
-        <span>${escapeHtmlText(todo.due || "未提及")}</span>
-      </div>
-    </div>`).join("")}</div>`;
+      <div class="lv-action-main">${escapeHtmlText(todo.task || "")}</div>
+      ${meta ? `<div class="lv-action-meta">${meta}</div>` : ""}
+    </div>`;
+  }).join("")}</div>`;
 }
 
 export function renderVisualCards(cards) {

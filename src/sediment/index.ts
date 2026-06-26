@@ -5,7 +5,7 @@ import { VOCABULARY_SECTIONS } from '../shared/catalog-sediment';
 import { sanitizeFilename, escapeRegExp } from '../shared/util-common';
 import { makeFileWikiLink } from '../shared/util-markdown';
 import { getPeopleSuggestionCacheKey, normalizePeopleSuggestionsModel, loadPeopleDirectory, isPeopleSuggestionIgnored, findMatchingPersonEntry } from '../people';
-import { callLlm } from '../llm/core';
+import { callLlm, callLlmWithContinuation } from '../llm/core';
 import { extractJsonObject } from '../shared/util-json';
 import { isLocalLlmEndpoint } from '../shared/util-llm-endpoint';
 import { DEFAULT_SETTINGS } from '../shared/defaults';
@@ -169,8 +169,8 @@ export function normalizeSedimentExtractionModel(model) {
       task,
       // 留空字符串，让 UI 端用"加责任人 / 加时间"虚线占位渲染；
       // 同时把 LLM 误填的 "未指定" / "无" / "待定" / "TBD" 也视为空
-      owner: rawOwner && !/^(未指定|无|待定|TBD|N\/A|null|none)$/i.test(rawOwner) ? rawOwner : "",
-      due:   rawDue   && !/^(未指定|无|待定|TBD|N\/A|null|none)$/i.test(rawDue)   ? rawDue   : "",
+      owner: rawOwner && !/^(未指定|未提及|未明确|未知|无|暂无|没有|待定|TBD|N\/A|null|none|-)$/i.test(rawOwner) ? rawOwner : "",
+      due:   rawDue   && !/^(未指定|未提及|未明确|未知|无|暂无|没有|待定|TBD|N\/A|null|none|-)$/i.test(rawDue)   ? rawDue   : "",
       sourceTime: sanitizeSedimentText(item && (item.sourceTime || item.time || item.timestamp), 20),
       note: sanitizeSedimentText(item && (item.note || item.reason || item.evidence), 220),
       subtasks: normalizeSedimentTodoSubtasks(item && (item.subtasks || item.children || item.steps || item.items)),
@@ -404,7 +404,9 @@ ${source}`;
 export async function generateSedimentObjects(plugin, file, markdown) {
   if (!plugin.settings.llmApiKey && !isLocalLlmEndpoint(plugin.settings.llmEndpoint)) throw new Error("请先在 API 页配置大模型服务");
   const sys = "你是 LexVoice 的纪要沉淀助手。你只根据当前纪要提炼结构化信息对象，输出合法 JSON，不编造，不泄露或要求任何配置。";
-  const raw = await callLlm(plugin, sys, buildSedimentExtractionPrompt(file && file.basename ? file.basename : "当前笔记", markdown), { timeoutMs: 90000 });
+  // 沉淀输出是结构化 JSON，体量大、最易被输出上限截断（见真实产物里 learningCards 被切断）。
+  // 走续写拼接：截断后让模型从断点续写 JSON，再整体解析，避免沉淀对象不完整。
+  const { text: raw } = await callLlmWithContinuation(plugin, sys, buildSedimentExtractionPrompt(file && file.basename ? file.basename : "当前笔记", markdown), { timeoutMs: 90000 }, { maxContinuations: 3 });
   const objects = normalizeSedimentExtractionModel(extractJsonObject(raw));
   const people = await loadPeopleDirectory(plugin);
   objects.people = objects.people
@@ -552,7 +554,7 @@ export function buildSedimentTodoDailyEntry(todo, sourceFile, todoId) {
   const parts = [`- [ ] ${task}`];
 
   // 截止：尝试解析成 ISO 日期，命中则用 Tasks 插件能识别的 📅；否则降级到 Dataview inline 字段
-  if (dueRaw && !/^(未指定|无|待定|TBD|N\/A|null|none)$/i.test(dueRaw)) {
+  if (dueRaw && !/^(未指定|未提及|未明确|未知|无|暂无|没有|待定|TBD|N\/A|null|none|-)$/i.test(dueRaw)) {
     const moment = window.moment;
     const parsed = moment ? moment(dueRaw, [
       "YYYY-MM-DD", "YYYY/M/D", "YYYY/MM/DD", "YYYY.M.D", "YYYY.MM.DD",
@@ -565,7 +567,7 @@ export function buildSedimentTodoDailyEntry(todo, sourceFile, todoId) {
     }
   }
 
-  if (owner && !/^(未指定|无|待定|TBD|N\/A|null|none)$/i.test(owner)) {
+  if (owner && !/^(未指定|未提及|未明确|未知|无|暂无|没有|待定|TBD|N\/A|null|none|-)$/i.test(owner)) {
     parts.push(`👤 ${owner}`);
   }
 

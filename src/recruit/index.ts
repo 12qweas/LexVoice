@@ -82,6 +82,36 @@ export function isRecruitFeatureUnlocked(settings) {
   return !!(settings && settings.recruitFeatureUnlocked);
 }
 
+// 岗位资历校准块：对「默认 senior 反向期待 + 默认不达标」的红线按 seniority 重新标定。
+// 对初级岗尤其关键——否则应届会被 senior 标尺系统性误判成倾向不推荐（见丁思引案例）。
+// 这段对上面的红旗/评分规则有最终解释权，放在纪律末尾、冲突时以它为准。
+export function seniorityCalibrationLines(seniority) {
+  const s = String(seniority || "").trim();
+  if (!s || /未指定|未填|^$/.test(s)) {
+    return ["**资历校准**：岗位资历未明确——按 JD 实际要求（年限、职责措辞）推断标杆深度，不默认按 senior 苛求，也不默认放宽。"];
+  }
+  if (/初级|初阶|junior|助理|专员|应届|实习|入门/i.test(s)) {
+    return [
+      `**资历校准（本岗为「${s}」，本节对上面所有红旗与评分规则有最终解释权，冲突以本节为准）**：`,
+      "- 标杆人是「有潜力、能在带教下快速上手的新人」，不是即战力专家。",
+      "- 下列情形属初级常态，**降级为「待观察 / 可培养」，不计红旗、不作硬扣分**：未独立主导、结果未闭环或未量化、核心专业领域只到「接触过/了解」级、缺复杂跨部门案例。",
+      "- **不要求** senior 级的战略/组织级提问深度；候选人问培训、带教、流程、待遇属合理，不算减分。",
+      "- 红旗仅保留：硬性资质缺失（学历/证照/语言不达 JD 必备项）、简历造假或前后矛盾、对岗位核心能力零基础**且无任何学习力/可塑性证据**、明显态度或诚信问题。",
+      "- 评分锚点下移：达到「基础扎实 + 有学习力 + 岗位硬条件齐」即可给「推荐」，不要因「还不是专家」而压到倾向不推荐。",
+    ];
+  }
+  if (/中级|中阶|\bmid\b/i.test(s)) {
+    return [`**资历校准（本岗为「${s}」）**：要求能独立承担常规事务。未闭环/未独立主导可记风险但未必是红旗；核心领域需达「能上手实操」级，仅「接触过」级在核心项上可扣分。`];
+  }
+  if (/高级|资深|专家|senior|staff/i.test(s)) {
+    return [`**资历校准（本岗为「${s}」）**：按 senior 标尺从严——独立主导范围、量化交付、方法论、跨部门影响必须有证据；核心能力仅「接触过」级、结果未闭环、未激活的潜在优势均按红旗处理。`];
+  }
+  if (/总监|负责人|head|director|lead|管理|vp|经理/i.test(s)) {
+    return [`**资历校准（本岗为「${s}」）**：按管理者标尺——必须考察组织设计、团队搭建、预算/资源、机制建设、业务取舍与关键风险兜底；缺这些维度证据即为重大缺口。`];
+  }
+  return [`**资历校准**：岗位资历「${s}」，按该层级标杆校准评分严格度。`];
+}
+
 export function buildRecruitContextPrefix(ctx) {
   if (!ctx) return "";
   const parts = ["## 📋 本场面试上下文（评分锚点，必须严格遵循）"];
@@ -125,7 +155,8 @@ export function buildRecruitContextPrefix(ctx) {
   parts.push("- 把 JD 拆成 3-5 条硬性要求 + 1-3 条加分项，逐条评估");
   parts.push("- 简历 vs 面试陈述若有矛盾，必须列入风险点");
   parts.push("- 行业/经验跨度若 JD 不允许，必须作为硬扣分项");
-  parts.push("- 多极化岗位（A 端 + B 端）必须独立评估，两端均未达 senior 深度 = 两头不接 = 倾向不推荐");
+  parts.push("");
+  for (const line of seniorityCalibrationLines(ctx.seniority)) parts.push(line);
   parts.push("");
   return parts.join("\n");
 }
@@ -408,7 +439,7 @@ export async function getRecruitInterviewOutline(plugin, ctx) {
   if (general) {
     parts.push([
       "<details>",
-      "<summary>📚 通用题库 · 本岗位通用</summary>",
+      "<summary>通用题库 · 本岗位通用</summary>",
       "",
       general,
       "",
@@ -447,6 +478,7 @@ export function buildCompactRecruitContextPrefix(ctx) {
   if (ctx.round) parts.push(`- 轮次：${ctx.round}`);
   if (ctx.interviewer) parts.push(`- 面试官：${ctx.interviewer}`);
   if (ctx.seniority) parts.push(`- 岗位资历级别：${ctx.seniority}`);
+  for (const line of seniorityCalibrationLines(ctx.seniority)) parts.push(line);
   if (ctx.customNote) {
     parts.push(`- 特殊关注点（重点考核项）：${truncateForLlmPrompt(ctx.customNote, 900)}`);
     parts.push(`- ⚠️ 必须在结论下方输出「重点考核项核验」，逐项从文本里找正反证据（含侧面体现）并引用，找不到就标「未触及，建议二面核查」。`);
@@ -492,34 +524,45 @@ export function buildRecruitTextImportMergePrompt(joined, recruitContext) {
     "",
     "## 招聘评估纪律",
     "",
-    "- 先按 JD 拆出硬性要求、加分项和 seniority 标杆，再对照文本证据评估。",
-    "- 默认候选人不达标；只有文本中有明确正向证据才加分。",
-    "- 诚实、不夸大、承认边界属于基础职业素养，不算亮点。",
-    "- 简历与文本陈述矛盾、结果未闭环、独立主导边界不清、行业或经验跨度不匹配，必须列入风险。",
-    "- 未问到或文本没有证据的 JD 要求，写「未验证」，不要默认及格。",
-    "- 如果文本是已有纪要而非问答，按能力维度和证据组织；不要强行编造题号、面试官问题或时间戳。",
-    "- 如果文本里有候选人原话或明确事实，保留为证据；没有证据就写「未提及 / 未验证」。",
+    "- 先按 JD 拆出硬性要求、加分项；并**严格遵守上文「资历校准」一节**——按岗位资历（初级/中级/高级/资深/总监）定标尺，初级岗不得用 senior 标准苛求。",
+    "- 正向证据才加分；但初级岗的「结果未闭环/非独立主导/核心领域仅『接触过』级」按资历校准**降级为「待观察·可培养」，不计红旗、不作硬扣分**。",
+    "- 诚实、不夸大、承认边界属于基础职业素养，不单独算亮点（但可作为某素质达成的侧证）。",
+    "- 简历与文本陈述矛盾、硬性资质缺失（学历/证照/语言不达 JD 必备项），必须列入风险/红旗。",
+    "- 未问到或文本无证据的 JD 要求，写「未验证」并归入待澄清；**不要默认及格，也不要据此判红旗**（没问到 ≠ 不具备）。",
     "",
-    "## 推荐正文结构",
+    "## 详尽度（重要 · 本条决定这份纪要的价值）",
     "",
-    "> [!summary] 面试评价",
-    "> 结论：<强烈推荐 / 推荐 / 倾向推荐 / 倾向不推荐 / 不推荐>",
-    "> 核心原因：<2-4 条，必须对应文本证据和 JD 要求>",
+    "面试评估的价值在于**可回溯**。**若文本是问答式的面试转写，必须尽量还原每一个实际问到的问题与候选人的回答**——同一主题的多轮追问可归并成一个「问题块」，但**绝不可把多轮问答压成一两句概括，不可丢失候选人回答里的具体事实、案例、原话、数字与细节**。宁可写长，也不要因「看起来啰嗦」而砍掉真实发生的问答（纯寒暄/调试设备除外）。若文本是已有纪要而非问答，则按能力维度组织，同样保留全部证据细节。",
     "",
-    "### 候选人画像",
-    "用 1-3 段说明候选人背景、主要能力表现、与 JD seniority 的差距。",
+    "## 正文结构",
     "",
-    "### JD 匹配度",
-    "用简洁表格列出 3-6 条关键 JD 要求：要求 / 证据 / 判断 / 风险或缺口。",
+    "用**加粗小标题**分节，顺序固定如下：",
     "",
-    "### 关键证据",
-    "按能力维度或面试问题整理，不强制题号。每点包含：候选人说了什么、能证明什么、仍缺什么。",
+    "**综合评价**",
+    "一段可同步进人才档案的均衡评价（完整段落、非清单）：候选人背景与硬条件 → 专业能力与底层素质的实际表现 → 与（按资历校准后的）JD 标杆的差距与主要风险。未通过则说明不适配原因与是否保留人才池。",
     "",
-    "### 红旗与待追问",
-    "只写确实由文本触发的风险和追问；不要生成泛泛的面试题库。",
+    "**结论：<强烈推荐 / 推荐 / 倾向推荐 / 倾向不推荐 / 不推荐>**（禁用「待定」；条件性档位在标题后注明触发条件）",
+    "一句判断句定调；严格按上文「资历校准」给档——初级岗硬条件齐 + 有学习力即可给「推荐 / 进二面」，不要因「还不是专家」压到倾向不推荐。若按 senior 标尺会更严，可在结论下补一句口径说明。",
     "",
-    "### 录用建议",
-    "给出最终建议、适合/不适合的岗位边界，以及下一步验证建议。",
+    "**关键风险与二面必验项**",
+    "用**数字序号**分条，每条先一个**加粗小标题**，再跟一句说明（风险是什么 + 二面具体怎么验）。按资历校准：初级岗的「结果未闭环 / 非独立主导 / 核心领域仅『接触过』级」一律写成「二面必验项」而非否决理由；只有硬性资质缺失、简历造假或矛盾、核心能力零基础且无可塑性证据才算红旗。条目按候选人实际增删，不强凑、不套模板。骨架示例：",
+    "1. **行业经验匹配度**：<经验跨度与弥合信号；二面如何验“兴趣能否转成快速上手”>",
+    "2. **核心法域认知**（如本岗的海外/游戏法规）：<仅接触过 vs 系统认知；二面的情景实测点>",
+    "3. **独立主导经验**：<以协助/参与为主；初级属常态，追问一件其真正独立推进到结果的事>",
+    "4. **语言/专业实操未验证**：<硬性要求但本场未实质考到；二面设具体场景实测>",
+    "",
+    "**JD 匹配度**",
+    "表格列出关键 JD 硬性要求：要求 / 文本证据 / 判断（达到·部分·未达·未验证）/ 缺口。",
+    "",
+    "**问答展开**（核心 · 务必详尽，不要压缩）",
+    "**逐个**还原文本里实际出现的每个问题/主题（按推进顺序），每个写成一个小节：",
+    "- **问的是什么**：一句概括提问意图；",
+    "- **怎么答的**：完整叙述候选人回答，保留事实、案例、原话、数字；多轮追问归并但不省略；",
+    "- **判断与可追问**：一句质量判断 + 1-2 个能挖到事实层的具体追问（不要「能不能再说说」这类空问）。",
+    "若文本非问答（已有纪要），改为按能力维度逐项展开，同样保留全部证据细节。",
+    "",
+    "**下一步**",
+    "推进 / 淘汰 / 二面的明确动作 + 二面重点考核项 + 若推进的背调核实点。",
     "",
     "## 导入文本",
     "",
@@ -690,7 +733,7 @@ export function isRecruitJdFile(file) {
 }
 
 export async function parseJdProject(app, jdFilePath) {
-  const result = { 岗位描述: "", 综合素质: [], 统一提纲: "", qualitiesError: false };
+  const result = { 岗位描述: "", 综合素质: [], 统一提纲: "", qualitiesError: false, 岗位资历: "" };
   const jdFile = app.vault.getAbstractFileByPath(obsidian.normalizePath(jdFilePath || ""));
   if (!(jdFile instanceof obsidian.TFile)) return result;
   let md = "";
@@ -713,6 +756,7 @@ export async function parseJdProject(app, jdFilePath) {
   } else if (raw != null && String(raw).trim()) {
     result.qualitiesError = true;
   }
+  result.岗位资历 = String(fm.岗位资历 || fm.seniority || "").trim();  // 供评估按资历校准严苛度
   return result;
 }
 
@@ -772,6 +816,7 @@ export function renderRecruitJdTemplate(fm, jdBody) {
   const name = String(f.职位名 || "未命名岗位").trim();
   const seq = String(f.序列 || "招聘").trim();
   const status = String(f.状态 || "招聘中").trim();
+  const level = String(f.岗位资历 || f.seniority || "").trim();
   let today = "";
   try { today = window.moment ? window.moment().format("YYYY-MM-DD") : new Date().toISOString().slice(0, 10); } catch { today = ""; }
   const body = String(jdBody || "").trim() || "（在此粘贴或撰写 JD 正文，注入评估时整段取用）";
@@ -788,6 +833,7 @@ export function renderRecruitJdTemplate(fm, jdBody) {
     `职位名: ${name}`,
     `状态: ${status}`,
     `序列: ${seq}`,
+    `岗位资历: ${level}`,
     ...qLines,
     "已面试数: 0",
     "候选人数: 0",
@@ -806,16 +852,17 @@ export function renderRecruitJdTemplate(fm, jdBody) {
     "",
     "## 候选人看板",
     "",
-    `![[${name}.base#全部]]`,
+    `![[${name}.base#招聘看板]]`,
     "",
     "> [!tip] 使用方式",
-    "> 面试纪要放在本项目文件夹后，会自动出现在上方看板。看板里的「面试纪要」可跳回原始面试记录。",
+    "> 面试纪要放在本项目文件夹后，会自动出现在上方看板。点候选人姓名即可跳回原始纪要；在看板工具栏按「录用建议」分组即变成按状态分列的看板；也可切到「卡片」「全部」视图横向对比。",
     "",
     "## 岗位速览",
     "",
     `- **职位**：${name}`,
     `- **序列**：${seq}`,
     `- **状态**：${status}`,
+    `- **岗位资历**：${level || "未设置（填 初级/中级/高级/资深/总监 可校准评估严苛度）"}`,
     `- **重点素质**：${qualityNames}`,
     "",
     "## 岗位描述",
@@ -836,16 +883,26 @@ export function renderRecruitCandidateBase(qualities) {
   // 素质名只收纯中文/字母/数字/下划线（排除空格/冒号/# 等会破坏 order 行内数组或属性引用的字符）。
   const qs = (Array.isArray(qualities) ? qualities : []).map(q => String(q || "").trim()).filter(q => /^[一-龥A-Za-z0-9_]+$/.test(q));
   const qCols = qs.map(n => `素质_${n}`);
-  const allOrder = ["file.name", "候选人", "联系方式", "轮次", "一句话评价", "录用建议", "time", "时长"].concat(qCols);
+  // 首列用 formula.面试纪要 = file.asLink()：渲染为可点击链接，点开即跳回原始面试纪要。
+  // （纯 file.name 属性在「嵌入看板」里不可点，所以模板里承诺的「可跳回」此前是空头支票。）
+  const tableAll = ["formula.面试纪要", "候选人", "联系方式", "轮次", "一句话评价", "录用建议", "time", "时长"].concat(qCols);
+  const tableFiltered = ["formula.面试纪要", "候选人", "联系方式", "轮次", "一句话评价", "录用建议", "time"];
+  // 卡片视图：一句话评价等长文本整段换行，不被表格单元格截断。
+  const cardOrder = ["formula.面试纪要", "候选人", "轮次", "录用建议", "一句话评价", "time"];
+  // 自定义「招聘看板」视图（lexvoice-recruit-board，插件自绘）：真链接 + 整段换行 + 按 groupBy 分列的看板。
+  // 该视图用 entry.file 造链接、直接读 note.* 字段，order 仅供前向兼容与工具栏列序。
+  const boardOrder = ["候选人", "轮次", "录用建议", "一句话评价", "time"];
   // 录用建议过滤一律用 contains（与 PRD F5.1 一致）：兼容「倾向推荐」「倾向推荐（条件性）」等带后缀枚举，
   // 避免精确 == 漏过条件性档；取反用 not 分组包 contains。
   return [
+    "formulas:",
+    "  面试纪要: 'file.asLink()'",
     "filters:",
     "  and:",
     "    - file.folder == this.file.folder",
     "    - jd != null",
     "properties:",
-    "  file.name:",
+    "  formula.面试纪要:",
     "    displayName: 面试纪要",
     "  候选人:",
     "    displayName: 姓名",
@@ -862,9 +919,21 @@ export function renderRecruitCandidateBase(qualities) {
     "  时长:",
     "    displayName: 面试时长",
     "views:",
+    "  - type: lexvoice-recruit-board",
+    "    name: 招聘看板",
+    `    order: [${boardOrder.join(", ")}]`,
+    "    sort:",
+    "      - property: time",
+    "        direction: DESC",
+    "  - type: cards",
+    "    name: 卡片",
+    `    order: [${cardOrder.join(", ")}]`,
+    "    sort:",
+    "      - property: time",
+    "        direction: DESC",
     "  - type: table",
     "    name: 全部",
-    `    order: [${allOrder.join(", ")}]`,
+    `    order: [${tableAll.join(", ")}]`,
     "    sort:",
     "      - property: time",
     "        direction: DESC",
@@ -875,7 +944,7 @@ export function renderRecruitCandidateBase(qualities) {
     '        - 录用建议.contains("推荐")',
     "        - not:",
     '            - 录用建议.contains("不推荐")',
-    "    order: [file.name, 候选人, 联系方式, 轮次, 一句话评价, 录用建议, time]",
+    `    order: [${tableFiltered.join(", ")}]`,
     "    sort:",
     "      - property: time",
     "        direction: DESC",
@@ -884,7 +953,7 @@ export function renderRecruitCandidateBase(qualities) {
     "    filters:",
     "      and:",
     '        - 录用建议.contains("不推荐")',
-    "    order: [file.name, 候选人, 联系方式, 轮次, 一句话评价, 录用建议, time]",
+    `    order: [${tableFiltered.join(", ")}]`,
     "  - type: table",
     "    name: 待复试",
     "    filters:",
@@ -892,18 +961,22 @@ export function renderRecruitCandidateBase(qualities) {
     '        - 轮次 == "初面"',
     "        - not:",
     '            - 录用建议.contains("不推荐")',
-    "    order: [file.name, 候选人, 联系方式, 轮次, 一句话评价, 录用建议, time]",
+    `    order: [${tableFiltered.join(", ")}]`,
     "",
   ].join("\n");
 }
 
 export function renderRecruitAggregateBase() {
+  // 首列 formula.项目 = file.asLink()：可点击跳转到项目主页。
+  // 最新动态是多行文本，放进表格会被单元格截断，故只在「卡片」视图里整段展示。
   return [
+    "formulas:",
+    "  项目: 'file.asLink()'",
     "filters:",
     "  and:",
     '    - 类型 == "招聘项目"',
     "properties:",
-    "  file.name:",
+    "  formula.项目:",
     "    displayName: 项目",
     "  职位名:",
     "    displayName: 职位",
@@ -913,13 +986,19 @@ export function renderRecruitAggregateBase() {
     "    filters:",
     "      and:",
     '        - 状态 == "招聘中"',
-    "    order: [file.name, 职位名, 序列, 候选人数, 已面试数, 推荐数, 倾向不推荐数, 最新动态, 开放日期]",
+    "    order: [formula.项目, 职位名, 序列, 候选人数, 已面试数, 推荐数, 倾向不推荐数, 开放日期]",
     "    sort:",
     "      - property: 开放日期",
     "        direction: DESC",
     "  - type: table",
     "    name: 全部",
-    "    order: [file.name, 职位名, 状态, 序列, 候选人数, 已面试数, 推荐数, 倾向不推荐数, 开放日期]",
+    "    order: [formula.项目, 职位名, 状态, 序列, 候选人数, 已面试数, 推荐数, 倾向不推荐数, 开放日期]",
+    "    sort:",
+    "      - property: 开放日期",
+    "        direction: DESC",
+    "  - type: cards",
+    "    name: 卡片",
+    "    order: [formula.项目, 职位名, 状态, 候选人数, 已面试数, 推荐数, 倾向不推荐数, 最新动态, 开放日期]",
     "    sort:",
     "      - property: 开放日期",
     "        direction: DESC",

@@ -10,7 +10,7 @@ import { compareVersions, isLexVoiceMobileRuntime } from '../shared/util-platfor
 import { getEffectivePolishMode, getModeMeta, getVisibleModeEntries } from '../shared/mode-meta';
 import { LLM_SERVICE_PRESETS, ONE_CARD_PROVIDERS, applyLlmProfileToWorkingConfig, findLlmProfile, getActiveLlmServicePresetId, getLlmServicePreset, inferLlmServicePresetId, normalizeLlmProfiles, syncWorkingConfigToLlmProfile } from '../llm/config';
 import { fetchLlmModelList, testLlmConnection } from '../llm/core';
-import { schemeIsOneKey, snapshotActiveAsr, syncWorkingAsrToActiveScheme } from '../llm/asr-scheme';
+import { snapshotActiveAsr, syncWorkingAsrToActiveScheme } from '../llm/asr-scheme';
 import { normalizeAsrConcurrency, resolveTranscribeProvider, transcribeAudio } from '../asr/transcribe';
 import { countVocabularyGroups, formatVocabularyMarkdown, isStructuredVocabularyMarkdown, parseVocabularyGroups, summarizeVocabularyGroups } from '../vocabulary';
 import { hasPeopleHotwordsConsent, loadPeopleDirectory, normalizePeopleContextMode, normalizePeopleSuggestionCache, normalizePeopleSuggestionIgnores } from '../people';
@@ -166,7 +166,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     if (cfg.llmModel) s.llmModel = cfg.llmModel;
     s.llmApiKey = k;
     // 自动存成一套完整 API 方案（带转写快照），出现在 API 页顶部可一键重选；同名方案就地覆盖、不重复堆叠
-    const schemeName = `${cfg.label}（一个 Key）`;
+    const schemeName = cfg.label;
     const profiles = normalizeLlmProfiles(s.llmProfiles);
     const asrSnap = snapshotActiveAsr(s);
     const existing = profiles.find(p => p.name === schemeName);
@@ -300,7 +300,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     // 快速配置：MiMo / 硅基流动等"一个 Key 同时跑转写 + AI 整理"的供应商，填一次即可两边都配好。
     const oneCard = page.createDiv({ cls: "lexvoice-home-block lexvoice-home-onecard" });
     oneCard.createEl("h3", { text: "快速配置" });
-    oneCard.createDiv({ cls: "lexvoice-home-prep-desc", text: "这些服务用同一把 Key 既能语音转写也能 AI 整理。选供应商、填一次 Key、点应用，自动把「转写服务」和「大模型服务」都配好，并在「API」页存成一套可切换的方案，无需分别填两次。" });
+    oneCard.createDiv({ cls: "lexvoice-home-prep-desc", text: "选一个同时支持语音转写和 AI 整理的服务，填一次 Key、点应用，自动把「转写服务」和「大模型服务」都配好，并在「API」页存成一套可切换的方案。" });
     let oneCardProviderId = "mimo";
     let oneCardKey = "";
     const oneCardRow = new obsidian.Setting(oneCard).setName("供应商 + 密钥");
@@ -318,7 +318,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       if (!oneCardKey) { new obsidian.Notice("请先填写 API Key", 4000); return; }
       const cfg = ONE_CARD_PROVIDERS[oneCardProviderId];
       const ok = await lexvoiceConfirm(this.app, `用一把 ${cfg.label} Key 配好转写 + AI 整理？`,
-        `将把「转写服务」和「大模型服务」都切换为 ${cfg.label}，并填入这把 Key，存成一套「${cfg.label}（一个 Key）」方案。会覆盖当前转写服务和大模型服务的地址/模型/密钥（其它已保存的方案不受影响）。`,
+        `将把「转写服务」和「大模型服务」都切换为 ${cfg.label}，并填入这把 Key，存成一套「${cfg.label}」方案。会覆盖当前转写服务和大模型服务的地址/模型/密钥（其它已保存的方案不受影响）。`,
         "应用");
       if (!ok) return;
       const done = await this.applyOneCardProvider(oneCardProviderId, oneCardKey);
@@ -785,13 +785,13 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     // 自定义布局（不用 obsidian.Setting 的左名右控件，避免下拉+3按钮+长说明挤成一团）：
     // 说明整行 → 下拉(占主) + 按钮同一行 → 激活态提示整行淡字。
     const block = c.createDiv({ cls: "lexvoice-scheme-block" });
-    block.createDiv({ cls: "lexvoice-scheme-desc", text: "把「转写服务 + AI 整理」整套存成方案，顶部一键切换。带「一个 Key 通用」的是同一把 Key 既转写也整理（如 MiMo / 硅基流动）。" });
+    block.createDiv({ cls: "lexvoice-scheme-desc", text: "把「转写服务 + AI 整理」整套存成方案，顶部一键切换、检测连通性。" });
 
     const controls = block.createDiv({ cls: "lexvoice-scheme-controls" });
     const sel = controls.createEl("select", { cls: "dropdown lexvoice-scheme-select" });
     const addOpt = (value, label) => { const o = sel.createEl("option", { text: label }); o.value = value; };
     addOpt("", "（临时配置 · 未保存）");
-    for (const p of schemes) addOpt(p.id, schemeIsOneKey(p) ? `${p.name} · 一个 Key 通用` : p.name);
+    for (const p of schemes) addOpt(p.id, p.name);
     sel.value = activeId;
     sel.addEventListener("change", async () => {
       const id = sel.value;
@@ -1291,6 +1291,10 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     new obsidian.Setting(c).setName("对象提取").setHeading();
     c.createDiv({ cls: "setting-item-description lexvoice-section-hint" })
       .setText("提取遵循“候选 → 确认 → 入库”。当前可直接扫描纪要库生成 ASR 热词和人员建议；学习卡片和待办卡片通过已确认的卡片文件进入对应墙面。");
+
+    new obsidian.Setting(c).setName("转写完成后自动沉淀")
+      .setDesc("关闭（默认）：转写完成不自动沉淀，省 token；需要时在实时纪要面板手动点「沉淀」再扫描入库。开启：每次转写/整理完成后，自动扫描纪要、把学习卡片与待办写入对应墙面（按量计费，无需逐条确认）。")
+      .addToggle(t => t.setValue(!!this.plugin.settings.sedimentAutoExtract).onChange(async v => { this.plugin.settings.sedimentAutoExtract = v; await this.plugin.saveSettings(); }));
 
     const pendingPeopleSuggestions = normalizePeopleSuggestionCache(this.plugin.settings.peopleSuggestionCache).pending;
     const ignoredPeopleSuggestions = normalizePeopleSuggestionIgnores(this.plugin.settings.peopleSuggestionIgnores);

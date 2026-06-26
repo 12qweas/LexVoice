@@ -89,21 +89,21 @@ export function noteHasSuccessfulLlmBriefing(content) {
   const text = stripArchivedDetailsBlocks(fullText);
 
   // 新格式（v3 之后）：## ✨ 当前纪要（…）
-  const currentMatch = text.match(/(?:^|\n)##\s+✨\s+当前纪要[^\n]*\n+([\s\S]*?)(?:\n---|\n##\s|$)/);
+  const currentMatch = text.match(/(?:^|\n)##\s+(?:✨\s*)?当前纪要[^\n]*\n+([\s\S]*?)(?:\n---|\n##\s|$)/);
   if (currentMatch) {
     const body = currentMatch[1] || "";
     const meaningful = normalizeRecentNoteMeaningfulText(body);
     if (meaningful.length > 60 && !/合并润色失败|AI 整理失败|_\[无输出\]_|_\[转写失败/.test(body)) return true;
   }
 
-  const rawMatch = /\n##\s+📁\s+原始材料/.exec(text);
+  const rawMatch = /\n##\s+(?:📁\s*)?原始材料/.exec(text);
   if (rawMatch) {
     const beforeRaw = stripLexVoiceFrontmatterSimple(text.slice(0, rawMatch.index));
     const meaningful = normalizeRecentNoteMeaningfulText(beforeRaw);
     if (meaningful.length > 60 && !/合并润色失败|AI 整理失败|_\[无输出\]_/.test(beforeRaw)) return true;
   }
 
-  const mergeMatch = text.match(/(?:^|\n)##\s+✨\s+整合版[^\n]*\n+([\s\S]*?)(?:\n---|\n##\s|$)/);
+  const mergeMatch = text.match(/(?:^|\n)##\s+(?:✨\s*)?整合版[^\n]*\n+([\s\S]*?)(?:\n---|\n##\s|$)/);
   if (mergeMatch) {
     const body = mergeMatch[1] || "";
     const meaningful = normalizeRecentNoteMeaningfulText(body);

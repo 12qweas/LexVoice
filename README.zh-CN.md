@@ -1,5 +1,9 @@
 # LexVoice 中文说明
 
+<p align="center">
+  <img width="1280" alt="LexVoice 介绍图" src="docs/images/lexvoice-intro.png">
+</p>
+
 > English: see [README.md](README.md).
 
 LexVoice 是一个 Obsidian 桌面端插件，做录音、转写、实时大纲和会议沉淀。
