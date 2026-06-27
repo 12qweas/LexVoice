@@ -2420,6 +2420,103 @@ function buildLexVoiceRenamedMarkdownPath(currentPath, mode, titleTag, settings)
   return obsidian.normalizePath(dir ? `${dir}/${nextName}` : nextName);
 }
 
+const LEXVOICE_ACTIVE_VERSION_START = "<!-- lexvoice-active-version-start -->";
+const LEXVOICE_ACTIVE_VERSION_END = "<!-- lexvoice-active-version-end -->";
+
+function getLexVoiceSourceIdFromMarkdown(markdown, file) {
+  const text = String(markdown || "");
+  const sidMatch = text.match(/<!--\s*lexvoice-session:\s*([^\s>]+)\s*-->/);
+  if (sidMatch && sidMatch[1]) return sanitizeFilename(sidMatch[1]) || sidMatch[1];
+  const basis = `${file && file.path || "note"}:${file && file.stat && file.stat.ctime || ""}`;
+  return `note-${hashRealtimeOutlineText(basis)}`;
+}
+
+function getLexVoiceSegmentsHash(segments) {
+  const text = (segments || []).map((seg) => [
+    Number(seg && seg.startOffsetMs) || 0,
+    Number(seg && seg.endOffsetMs) || 0,
+    String(seg && seg.text || "").trim(),
+  ].join("|")).join("\n");
+  return hashRealtimeOutlineText(text);
+}
+
+function buildLexVoiceSegmentStatusList(segments) {
+  return (segments || []).map((seg, i) => {
+    const text = String(seg && seg.text || "").trim();
+    const start = Number(seg && seg.startOffsetMs) || 0;
+    const end = Number(seg && seg.endOffsetMs) || start;
+    return {
+      id: `seg-${String(i + 1).padStart(4, "0")}`,
+      index: i,
+      startOffsetMs: start,
+      endOffsetMs: end,
+      status: text ? "done" : "pending",
+      textHash: text ? hashRealtimeOutlineText(text) : "",
+    };
+  });
+}
+
+function getLexVoiceVersionStoreFolder(settings, sourceId) {
+  const base = obsidian.normalizePath(String(settings && settings.mdFolder || DEFAULT_SETTINGS.mdFolder || "LexVoice"));
+  const safeId = sanitizeFilename(sourceId) || "unknown-session";
+  return obsidian.normalizePath(`${base}/.versions/${safeId}`);
+}
+
+function normalizeLexVoiceVersionId(label) {
+  const stamp = window.moment ? window.moment().format("YYYYMMDD-HHmmss") : new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+  const safe = sanitizeFilename(label) || "version";
+  return `${stamp}-${safe}`;
+}
+
+function buildLexVoiceActiveVersionBlock(versionMeta, body) {
+  const label = String(versionMeta && versionMeta.label || versionMeta && versionMeta.kind || "当前版本");
+  const mode = String(versionMeta && versionMeta.mode || "");
+  const style = String(versionMeta && versionMeta.style || "");
+  const created = String(versionMeta && versionMeta.createdAt || "");
+  const sourceHash = String(versionMeta && versionMeta.sourceHash || "");
+  const desc = [label, mode, style].filter(Boolean).join(" · ");
+  const metaLines = [
+    `> [!info] 当前显示版本：${desc || "当前版本"}`,
+    created ? `> 生成时间：${created}` : "",
+    sourceHash ? `> 源转写指纹：${sourceHash}` : "",
+  ].filter(Boolean).join("\n");
+  return [
+    LEXVOICE_ACTIVE_VERSION_START,
+    metaLines,
+    "",
+    String(body || "").trim() || "_[当前版本无内容]_",
+    LEXVOICE_ACTIVE_VERSION_END,
+  ].join("\n").replace(/\n{4,}/g, "\n\n\n");
+}
+
+function replaceLexVoiceActiveVersionBlock(markdown, versionMeta, body) {
+  const text = String(markdown || "");
+  const block = buildLexVoiceActiveVersionBlock(versionMeta, body);
+  const re = /<!--\s*lexvoice-active-version-start\s*-->[\s\S]*?<!--\s*lexvoice-active-version-end\s*-->/;
+  if (re.test(text)) return text.replace(re, block);
+  // First adoption of the version model compacts the mother note:
+  // keep only frontmatter, H1, active display block, and raw/source metadata.
+  // The previous rendered minutes/clean text is already persisted in the version store.
+  const extracted = extractAllRawBlocksFromText(text);
+  const parts = splitLeadingFrontmatter(extracted.withoutRaw);
+  const bodyText = parts.body || "";
+  const titleMatch = bodyText.match(/^#\s+[^\n]+\n*/);
+  const rawTail = extracted.tail ? `\n\n---\n\n${extracted.tail.trimEnd()}\n` : "\n";
+  if (titleMatch) {
+    const titleBlock = titleMatch[0].trimEnd();
+    return [
+      parts.frontmatter ? parts.frontmatter.trimEnd() : "",
+      titleBlock,
+      "",
+      block,
+    ].filter(Boolean).join("\n") + rawTail;
+  }
+  return [
+    parts.frontmatter ? parts.frontmatter.trimEnd() : "",
+    block,
+  ].filter(Boolean).join("\n") + rawTail;
+}
+
 // ===== API 密钥本地存储混淆 =====
 // 目标：data.json 里不出现可直接读取的明文密钥（满足"不是明文"承诺、防止截图/误分享 data.json 泄露）。
 // 诚实说明：这是「混淆」不是「加密」—— 因为本插件开源，变换算法公开，能拿到 data.json + 读源码的人仍可还原。
@@ -10925,7 +11022,7 @@ class OutlineView extends obsidian.ItemView {
           try { obsidian.setIcon(vchip, v.kind === "clean" ? "file-text" : "files"); } catch { /* intentionally empty */ }
           vrow.createDiv({ cls: "lexvoice-outline-recent-variant-name", text: v.label || v.file.basename });
           vrow.addEventListener("click", async () => {
-            try { await this.app.workspace.getLeaf(false).openFile(v.file); } catch (e) { console.error(e); }
+            try { await this.plugin.switchLexVoiceVersion(v.file, v.sourcePath); } catch (e) { console.error(e); }
           });
           vrow.addEventListener("contextmenu", (evt) => {
             evt.preventDefault();
@@ -16630,6 +16727,136 @@ ${source}`;
     }
   }
 
+  async readLexVoiceVersionManifest(folder) {
+    const manifestPath = obsidian.normalizePath(`${folder}/manifest.json`);
+    const f = this.app.vault.getAbstractFileByPath(manifestPath);
+    if (!(f instanceof obsidian.TFile)) return { version: 1, activeVersionId: "", versions: [] };
+    try {
+      const parsed = JSON.parse(await this.app.vault.read(f));
+      return Object.assign({ version: 1, activeVersionId: "", versions: [] }, parsed || {});
+    } catch (e) {
+      console.warn("[LexVoice] version manifest parse failed", e);
+      return { version: 1, activeVersionId: "", versions: [] };
+    }
+  }
+
+  async writeLexVoiceVersionManifest(folder, manifest) {
+    await this.ensureFolder(folder);
+    const manifestPath = obsidian.normalizePath(`${folder}/manifest.json`);
+    const payload = JSON.stringify(Object.assign({ version: 1 }, manifest || {}), null, 2);
+    const f = this.app.vault.getAbstractFileByPath(manifestPath);
+    if (f instanceof obsidian.TFile) await this.app.vault.modify(f, payload);
+    else await this.app.vault.create(manifestPath, payload);
+  }
+
+  async writeLexVoiceVersionFile(folder, fileName, content) {
+    await this.ensureFolder(folder);
+    const path = obsidian.normalizePath(`${folder}/${fileName}`);
+    const existing = this.app.vault.getAbstractFileByPath(path);
+    if (existing instanceof obsidian.TFile) {
+      await this.app.vault.modify(existing, content);
+      return existing;
+    }
+    return await this.app.vault.create(path, content);
+  }
+
+  async saveLexVoiceVersion(sourceFile, sourceContent, segments, versionInput) {
+    const sourceId = getLexVoiceSourceIdFromMarkdown(sourceContent, sourceFile);
+    const sourceHash = getLexVoiceSegmentsHash(segments);
+    const folder = getLexVoiceVersionStoreFolder(this.settings, sourceId);
+    const createdAt = window.moment ? window.moment().format("YYYY-MM-DD HH:mm:ss") : new Date().toISOString();
+    const id = normalizeLexVoiceVersionId(versionInput.idLabel || versionInput.label || versionInput.kind || "version");
+    const fileStem = sanitizeFilename(`${id}`) || id;
+    const fileName = `${fileStem}.md`;
+    const body = String(versionInput.body || "").trim() || "_[无输出]_";
+    const meta = {
+      id,
+      kind: versionInput.kind || "",
+      label: versionInput.label || versionInput.kind || "版本",
+      mode: versionInput.mode || "",
+      style: versionInput.style || "",
+      sourcePath: sourceFile.path,
+      sourceId,
+      sourceHash,
+      fileName,
+      createdAt,
+      containsRaw: false,
+    };
+    const versionFileBody = [
+      "---",
+      "类型: LexVoice版本缓存",
+      `version_id: "${id}"`,
+      `variant_kind: "${meta.kind}"`,
+      `variant_label: "${meta.label}"`,
+      meta.mode ? `variant_mode: "${meta.mode}"` : "",
+      meta.style ? `variant_style: "${meta.style}"` : "",
+      `source_path: "${sourceFile.path}"`,
+      `source_id: "${sourceId}"`,
+      `source_segments_hash: "${sourceHash}"`,
+      "contains_raw: false",
+      `created: ${createdAt}`,
+      "---",
+      "",
+      body,
+      "",
+    ].filter(v => v !== "").join("\n");
+    await this.writeLexVoiceVersionFile(folder, fileName, versionFileBody);
+    const manifest = await this.readLexVoiceVersionManifest(folder);
+    const versions = Array.isArray(manifest.versions) ? manifest.versions.filter(v => v && v.id !== id) : [];
+    versions.push(meta);
+    Object.assign(manifest, {
+      version: 1,
+      sourcePath: sourceFile.path,
+      sourceId,
+      sourceHash,
+      segments: buildLexVoiceSegmentStatusList(segments),
+      activeVersionId: id,
+      updatedAt: createdAt,
+      versions,
+    });
+    await this.writeLexVoiceVersionManifest(folder, manifest);
+    return { folder, manifest, meta, body };
+  }
+
+  async applyLexVoiceVersionToSource(sourceFile, versionMeta, body) {
+    const cur = await this.app.vault.read(sourceFile);
+    const next = replaceLexVoiceActiveVersionBlock(cur, versionMeta, body);
+    if (next !== cur) await this.app.vault.modify(sourceFile, next);
+  }
+
+  async switchLexVoiceVersion(versionFile, fallbackSourcePath) {
+    if (!(versionFile instanceof obsidian.TFile)) return;
+    const content = await this.app.vault.read(versionFile);
+    const fm = ((this.app.metadataCache.getFileCache(versionFile) || {}).frontmatter) || {};
+    const sourcePath = obsidian.normalizePath(String(fm.source_path || fallbackSourcePath || ""));
+    const sourceFile = sourcePath ? this.app.vault.getAbstractFileByPath(sourcePath) : null;
+    if (!(sourceFile instanceof obsidian.TFile)) {
+      new obsidian.Notice("找不到母本，无法切换版本。", 6000);
+      return;
+    }
+    const parts = splitLeadingFrontmatter(content);
+    const body = parts.body.trim() || "_[版本内容为空]_";
+    const meta = {
+      id: String(fm.version_id || versionFile.basename),
+      kind: String(fm.variant_kind || ""),
+      label: String(fm.variant_label || fm.variant_kind || "版本"),
+      mode: String(fm.variant_mode || ""),
+      style: String(fm.variant_style || ""),
+      sourceHash: String(fm.source_segments_hash || ""),
+      createdAt: String(fm.created || ""),
+    };
+    await this.applyLexVoiceVersionToSource(sourceFile, meta, body);
+    const sourceContent = await this.app.vault.read(sourceFile);
+    const sourceId = getLexVoiceSourceIdFromMarkdown(sourceContent, sourceFile);
+    const folder = getLexVoiceVersionStoreFolder(this.settings, sourceId);
+    const manifest = await this.readLexVoiceVersionManifest(folder);
+    manifest.activeVersionId = meta.id;
+    manifest.updatedAt = window.moment ? window.moment().format("YYYY-MM-DD HH:mm:ss") : new Date().toISOString();
+    await this.writeLexVoiceVersionManifest(folder, manifest);
+    try { await this.app.workspace.getLeaf(false).openFile(sourceFile); } catch { /* intentionally empty */ }
+    new obsidian.Notice(`已切换到版本：${meta.label}`, 3000);
+  }
+
   async repolishMarkdownFile(file, mode, repolishOptions = null) {
     if (!(file instanceof obsidian.TFile) || file.extension !== "md") return;
     if (mode === "recruit" && !isRecruitFeatureUnlocked(this.settings)) {
@@ -16730,17 +16957,28 @@ ${source}`;
         }
       }
 
-      await this.appendRepolishBlock(file, polished, mode, segments);
       let dailyTargetFile = file;
       const renamed = await this.renameMarkdownWithGeneratedTitle(file, polished, mode);
       if (renamed instanceof obsidian.TFile) dailyTargetFile = renamed;
+      const latestSourceContent = await this.app.vault.read(dailyTargetFile);
+      const versionLabel = `${meta.prefix}${preferenceLabel}`;
+      const versionStyle = repolishOptions && repolishOptions.label ? repolishOptions.label : "";
+      const version = await this.saveLexVoiceVersion(dailyTargetFile, latestSourceContent, segments, {
+        kind: "minutes",
+        label: versionLabel,
+        mode,
+        style: versionStyle,
+        idLabel: `${meta.prefix}${versionStyle ? "-" + versionStyle : ""}`,
+        body: stripModeSuggestionBlocks(polished || "_[无输出]_").trim(),
+      });
+      await this.applyLexVoiceVersionToSource(dailyTargetFile, version.meta, version.body);
       try {
         const dailyContent = await this.app.vault.read(dailyTargetFile);
         await this.appendDailyMeetingOverviewForMarkdown(dailyTargetFile, dailyContent, polished, mode, segments, sessionMeta);
       } catch (e) {
         console.error("[LexVoice] daily overview after repolish failed", e);
       }
-      new obsidian.Notice(`LexVoice：已生成${meta.prefix}模式纪要${preferenceLabel}${roleMapping.length ? `（角色映射 ${roleMapping.length} 条已应用）` : ""}`);
+      new obsidian.Notice(`LexVoice：已生成${meta.prefix}版本${preferenceLabel}${roleMapping.length ? `（角色映射 ${roleMapping.length} 条已应用）` : ""}`);
       try { this.logCompletedWork(`重新整理完成 · ${meta.prefix}`, (file && file.path) || "", this.endTaskMeter()); } catch { /* intentionally empty */ }
     } catch (e) {
       console.error("[LexVoice] repolish markdown failed", e);
@@ -16828,14 +17066,6 @@ ${source}`;
         return;
       }
       const baseTitle = sourceFile.basename;
-      const cleanName = sanitizeFilename(`清稿-${baseTitle}`) || "清稿";
-      const folder = sourceFile.parent && sourceFile.parent.path && sourceFile.parent.path !== "/" ? sourceFile.parent.path + "/" : "";
-      const targetPath = obsidian.normalizePath(folder + cleanName + ".md");
-      const existing = this.app.vault.getAbstractFileByPath(targetPath);
-      if (existing instanceof obsidian.TFile) {
-        const ok = await lexvoiceConfirm(this.app, "清稿已存在", `「${cleanName}」已存在，重新生成会覆盖它（清稿是母本的只读派生，要改请改母本而非清稿）。继续？`, "覆盖生成");
-        if (!ok) return;
-      }
       this._busyLabel = "清稿生成中…";
       this.updateBusyStatus();
       new obsidian.Notice("LexVoice：正在从母本逐字稿生成清稿…");
@@ -16848,29 +17078,19 @@ ${source}`;
       const warn = truncated
         ? "> [!warning] 清稿可能被截断：部分内容或因模型输出上限未完整。建议换更大输出上限的模型后重新生成。\n\n"
         : "";
-      const fmLines = [
-        "---",
-        "类型: LexVoice派生版本",
-        "variant_kind: clean",
-        "variant_label: 清稿",
-        `source_note: "[[${baseTitle}]]"`,
-        `source_path: "${sourceFile.path}"`,
-        `source_id: "${sourceId}"`,
-        "contains_raw: false",
-        `created: ${stamp}`,
-        "---",
-      ].join("\n");
-      const noteBody = `${fmLines}\n\n# 清稿 · ${baseTitle}\n\n> [!note] 从母本逐字稿忠实清理的可读稿（非纪要、不摘要）。母本（事实源 / 逐字稿）：[[${baseTitle}]]\n\n${warn}${cleaned}\n`;
-      let outFile;
-      if (existing instanceof obsidian.TFile) {
-        await this.app.vault.modify(existing, noteBody);
-        outFile = existing;
-      } else {
-        outFile = await this.app.vault.create(targetPath, noteBody);
-      }
-      new obsidian.Notice(`LexVoice：清稿已生成 → ${cleanName}`, 6000);
-      try { this.logCompletedWork("生成清稿", (outFile && outFile.path) || "", this.endTaskMeter()); } catch { /* intentionally empty */ }
-      try { await this.app.workspace.getLeaf(false).openFile(outFile); } catch { /* intentionally empty */ }
+      const noteBody = `# [清稿] ${baseTitle}\n\n> [!note] 从母本逐字稿忠实清理的可读稿（非纪要、不摘要）。母本（事实源 / 逐字稿）：[[${baseTitle}]]\n\n${warn}${cleaned}`;
+      const version = await this.saveLexVoiceVersion(sourceFile, content, segments, {
+        kind: "clean",
+        label: "清稿",
+        mode: "cleanscript",
+        style: "",
+        idLabel: "清稿",
+        body: noteBody,
+      });
+      await this.applyLexVoiceVersionToSource(sourceFile, version.meta, version.body);
+      new obsidian.Notice("LexVoice：清稿已生成并设为当前显示版本", 6000);
+      try { this.logCompletedWork("生成清稿", sourceFile.path || "", this.endTaskMeter()); } catch { /* intentionally empty */ }
+      try { await this.app.workspace.getLeaf(false).openFile(sourceFile); } catch { /* intentionally empty */ }
     } catch (e) {
       console.error("[LexVoice] generate clean script failed", e);
       new obsidian.Notice(`清稿生成失败：${(e && e.message) || e}`, 8000);
