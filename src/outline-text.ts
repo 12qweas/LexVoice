@@ -398,7 +398,13 @@ export function validateRealtimeOutlineMarkdown(outline, opts = {}) {
   if (!topBullets.length) {
     return { ok: false, reason: "no_top_level_bullets" };
   }
-  if (topBullets.length > 10) {
+  // 顶层项上限只看"本轮相对已有大纲【新增】的顶层项"，不看全量——长会里累积顶层项必然 >10，
+  // 旧的"全量 >10 即判废"会让大纲过了约 50 分钟就整轮被否、停更并丢失中段内容（已知 bug）。
+  // 只有单轮新增过多（模型把层级摊平成一长串）才判废；累积变多交给下游冻结合并 + 节点上限兜底。
+  const prevTopCount = previousOutline
+    ? previousOutline.split(/\r?\n/).filter((l) => /^ {0,1}[-*+]\s+/.test(String(l || ""))).length
+    : 0;
+  if (topBullets.length - prevTopCount > 8) {
     return { ok: false, reason: "too_many_top_level_bullets" };
   }
   const timedTopBullets = topBullets.filter((body) => /\[\[[^\]]+\|\d{1,2}:\d{2}(?::\d{2})?\]\]/.test(body));

@@ -218,7 +218,7 @@ export const DEFAULT_SETTINGS = {
     interviewBrief: "",
     savedAt: null,
   },
-  recruitAlwaysAskOnStart: true,  // 每次开始招聘录音时弹 Modal 确认上下文
+  recruitAlwaysAskOnStart: false,  // 默认「下次直接套用此上下文、不再询问」（设计规范 §6 默认开）；录音前不打断，要改事先点铅笔进内联
   recruitContextLibrary: [],      // 历史 JD 列表，便于快速复用
   recruitFeatureUnlocked: false,
   // HR 招聘项目化模块（仅解锁后可见）：JD 库 / 简历库 / 脱敏 / 主页 路径

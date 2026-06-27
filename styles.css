@@ -2274,6 +2274,18 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   user-select: none;
 }
 .lexvoice-outline-more-toggle:hover { color: var(--text-normal); }
+/* 折叠态摘要：方案 · 偏好 · 思考 的当前值靠右显示；展开后隐藏（值已在表单里）。 */
+.lexvoice-outline-more-summary {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 62%;
+}
+.lexvoice-outline-more.is-expanded .lexvoice-outline-more-summary { display: none; }
 .lexvoice-outline-more-chev {
   display: inline-flex;
   align-items: center;
@@ -2308,6 +2320,28 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
 .lexvoice-outline-more-body .lexvoice-outline-menu-trigger:hover { background: transparent; border-color: transparent; }
 .lexvoice-outline-more-body .lex-ms-label { flex: 0 1 auto; color: var(--text-muted); text-align: right; }
 .lexvoice-outline-more-body .lexvoice-outline-menu-trigger:hover .lex-ms-label { color: var(--text-normal); }
+/* 偏好 + 思考 并排双列（压扁折叠区）：与其它折叠行同样的分隔线 + 上下内边距；每个单元 = 标签左 + 紧凑触发器（值右对齐弱化） */
+.lexvoice-outline-more-body .lexvoice-outline-control-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 14px;
+  padding: 9px 0;
+  border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 45%, transparent);
+}
+.lexvoice-outline-pair-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.lexvoice-outline-pair-cell .lexvoice-outline-control-label {
+  flex: 0 0 auto; /* 字号 / 颜色 / 字重 全部继承 is-idle 的 .lexvoice-outline-control-label，与 模板/音频/方案 一致 */
+}
+.lexvoice-outline-pair-cell .lexvoice-outline-select-wrap,
+.lexvoice-outline-pair-cell .lexvoice-outline-menu-trigger {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 
 /* 自定义菜单（mkSelect 弹出的 Obsidian Menu，挂了 lexvoice-ms-menu 类，只影响我们自己的下拉）：
    ① 无图标——隐藏左侧图标占位槽，让文本左对齐、左右留白对称；
@@ -2365,7 +2399,7 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
 
 .lexvoice-outline-head.is-idle .lexvoice-outline-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.92fr) minmax(0, 0.92fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 7px;
   margin-left: 0;
   margin-top: 4px;
@@ -2436,7 +2470,7 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   }
 
   .lexvoice-outline-head.is-idle .lexvoice-outline-actions {
-    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.92fr) minmax(0, 0.92fr);
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
   }
 
   .lexvoice-outline-head.is-idle .lexvoice-outline-action-button.is-record {
@@ -2478,33 +2512,8 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   color: var(--text-accent);
 }
 
-/* 候选人回答 / 原始转写事实：中性引用样式，避免和 AI 判断混在一起。 */
-.lexvoice-outline-ai-body ul:not(.lexvoice-outline-time-rail) > li.lexvoice-ai-answer {
-  background: color-mix(in srgb, var(--background-secondary) 70%, transparent);
-  border-left: 2px solid color-mix(in srgb, var(--background-modifier-border) 80%, transparent);
-  border-radius: var(--radius-s);
-  padding: 3px 8px;
-  margin: 3px 0;
-}
-
-/* AI 评价：淡主题色底 + 左边框，与候选人原话区隔——这是 AI 的判断，不是候选人说的。
-   底色/边框只加在「非时间轴直接子项」上（即问题下的嵌套子要点），避免叠到 time-rail 顶层项把竖线圆点错位 */
-.lexvoice-outline-ai-body ul:not(.lexvoice-outline-time-rail) > li.lexvoice-ai-eval {
-  background: color-mix(in srgb, var(--interactive-accent) 9%, transparent);
-  border-left: 2px solid color-mix(in srgb, var(--interactive-accent) 55%, transparent);
-  border-radius: var(--radius-s);
-  padding: 3px 8px;
-  margin: 3px 0;
-}
-
-/* AI 追问建议：淡暖色底 + 左边框，标识为「可执行的 AI 建议」，与评价区分开 */
-.lexvoice-outline-ai-body ul:not(.lexvoice-outline-time-rail) > li.lexvoice-ai-followup {
-  background: color-mix(in srgb, var(--color-yellow, var(--text-accent)) 10%, transparent);
-  border-left: 2px solid color-mix(in srgb, var(--color-yellow, var(--text-accent)) 50%, transparent);
-  border-radius: var(--radius-s);
-  padding: 2px 6px;
-  margin: 3px 0;
-}
+/* 招聘节点改用「方案B」对话气泡 + AI 分析区渲染（见 renderRecruitOutlineNode / .lexvoice-recruit-*）。
+   旧的「整块底纹 + 左竖条」样式已废弃（左竖条也违反禁用左侧竖条约束）；MarkdownRenderer 回退路径只保留文字色区分。 */
 
 /* 招聘模式条目的语义图标（替代 ❓💬🤖⛏ emoji）。inline-flex 紧裹 SVG，
    与文字基线对齐；颜色按类型区分，svg 用 currentColor 跟随。 */
@@ -2524,6 +2533,111 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
 .lexvoice-outline-ai-body li.lexvoice-ai-answer > .lexvoice-outline-marker-icon { color: var(--text-normal); }
 .lexvoice-outline-ai-body li.lexvoice-ai-eval > .lexvoice-outline-marker-icon { color: var(--interactive-accent); }
 .lexvoice-outline-ai-body li.lexvoice-ai-followup > .lexvoice-outline-marker-icon { color: var(--text-accent); }
+
+/* ============ 招聘实时大纲 · 方案B（主题标题 + 对话气泡 + AI 分析） ============ */
+/* 主题标题：紧挨时间戳/圆点的加粗节点标题。 */
+.lexvoice-recruit-topic {
+  font-weight: 650;
+  color: var(--text-normal);
+}
+/* 对话区：面试官（左灰）/ 候选人（右蓝）两条回合，气泡固定 84% 等宽。 */
+.lexvoice-recruit-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  margin: 9px 0 2px;
+}
+.lexvoice-recruit-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lexvoice-recruit-turn.is-interviewer { align-items: flex-start; }
+.lexvoice-recruit-turn.is-candidate { align-items: flex-end; }
+.lexvoice-recruit-who {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.lexvoice-recruit-turn.is-candidate .lexvoice-recruit-who {
+  flex-direction: row-reverse;
+  color: #2563eb;
+}
+.lexvoice-recruit-avatar { display: inline-flex; align-items: center; }
+.lexvoice-recruit-avatar svg { width: 13px; height: 13px; }
+.lexvoice-recruit-bubble {
+  width: 84%;
+  box-sizing: border-box;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 11px;
+  color: var(--text-normal);
+  border-radius: 11px;
+}
+.lexvoice-recruit-turn.is-interviewer .lexvoice-recruit-bubble {
+  background: color-mix(in srgb, var(--text-muted) 13%, var(--background-primary));
+  border-top-left-radius: 3px;
+}
+.lexvoice-recruit-turn.is-candidate .lexvoice-recruit-bubble {
+  background: color-mix(in srgb, #2563eb 12%, var(--background-primary));
+  border-top-right-radius: 3px;
+}
+.lexvoice-recruit-bubble.is-pending { color: var(--text-muted); opacity: 0.85; }
+.lexvoice-recruit-bubble-line + .lexvoice-recruit-bubble-line { margin-top: 3px; }
+/* AI 分析区：细分割线 + 小标题 + 圆形彩色图标条目。 */
+.lexvoice-recruit-ai {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: 11px;
+  padding-top: 9px;
+  border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 80%, transparent);
+}
+.lexvoice-recruit-ai-head {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+.lexvoice-recruit-ai-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+.lexvoice-recruit-ai-icon {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.lexvoice-recruit-ai-icon svg { width: 14px; height: 14px; }
+.lexvoice-recruit-ai-item.is-eval .lexvoice-recruit-ai-icon { background: color-mix(in srgb, #4f46e5 13%, var(--background-primary)); color: #4f46e5; }
+.lexvoice-recruit-ai-item.is-followup .lexvoice-recruit-ai-icon { background: color-mix(in srgb, #c2410c 14%, var(--background-primary)); color: #c2410c; }
+.lexvoice-recruit-ai-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-top: 1px;
+}
+.lexvoice-recruit-ai-label { font-size: 11px; font-weight: 700; }
+.lexvoice-recruit-ai-item.is-eval .lexvoice-recruit-ai-label { color: #4f46e5; }
+.lexvoice-recruit-ai-item.is-followup .lexvoice-recruit-ai-label { color: #c2410c; }
+.lexvoice-recruit-ai-body {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.lexvoice-recruit-ai-pending {
+  font-size: 12px;
+  color: var(--text-muted);
+  opacity: 0.85;
+}
 
 /* ============ 招聘需求挖掘 · 会中画像字段树（Phase 2，structure-based 大纲） ============ */
 .lexvoice-outline-jobportrait-head {
@@ -4406,9 +4520,27 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px 10px;
+  flex-wrap: wrap;
   margin: 5px 0 17px;
 }
+/* 纪要搜索框：独占一行（flex 100% 强制换行），日期/模板筛选 chip 落到下一行。 */
+.lexvoice-outline-recent-search {
+  flex: 1 1 100%;
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 11px;
+  border: 1px solid var(--lex-border-line, var(--background-modifier-border));
+  border-radius: 8px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 13px;
+}
+.lexvoice-outline-recent-search:focus {
+  border-color: color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border));
+  outline: none;
+}
+.lexvoice-outline-recent-search::placeholder { color: var(--text-muted); }
 
 .lexvoice-outline-recent-filters {
   flex: 1 1 auto;
@@ -4856,17 +4988,15 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
 }
 
 /* 警告/失败状态：统一走主题强调色，跟随用户主题；不再用红色家族 */
+/* 行内状态指示（转写中/失败/可重整）：裸图标，绝不加边框/底色/圆框——按用户硬约束。 */
 .lexvoice-outline-recent-failure-status {
   position: relative;
   height: 24px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 0 8px;
-  border-radius: var(--radius-s);
+  padding: 0 2px;
   color: var(--text-accent);
-  background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
-  border: 1px solid color-mix(in srgb, var(--interactive-accent) 24%, var(--background-modifier-border));
   font-size: var(--font-ui-smaller);
   line-height: 1;
 }
@@ -4879,11 +5009,7 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   justify-content: center;
   gap: 0;
   padding: 0;
-  border-radius: 999px;
   color: var(--text-accent);
-  background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
-  border-color: color-mix(in srgb, var(--interactive-accent) 24%, var(--background-modifier-border));
-  box-shadow: none;
 }
 
 .lexvoice-outline-recent-failure-status.is-failed > span:not(.lexvoice-outline-recent-failure-icon),
@@ -4906,11 +5032,7 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   padding: 0;
   gap: 0;
   justify-content: center;
-  border-radius: 999px;
   color: var(--interactive-accent);
-  background: color-mix(in srgb, var(--interactive-accent) 8%, transparent);
-  border: 0.5px solid color-mix(in srgb, var(--interactive-accent) 20%, var(--background-modifier-border));
-  overflow: hidden;
 }
 
 .lexvoice-outline-recent-failure-status.is-processing > span:not(.lexvoice-outline-recent-failure-icon),
@@ -6168,12 +6290,15 @@ select.lexvoice-recruit-input.dropdown {
 }
 
 .lexvoice-outline-head.is-idle .lexvoice-recruit-card {
-  margin-top: 8px;
-  padding: 13px 16px 12px;
+  margin-top: 0;
+  padding: 11px 14px;
   border-color: color-mix(in srgb, var(--background-modifier-border) 82%, var(--text-accent) 18%);
   border-radius: 10px;
   background: color-mix(in srgb, var(--background-primary) 94%, var(--background-secondary) 6%);
 }
+/* 「对象」字段行：卡片是两行、比普通字段高，让左标签与卡片标题行顶对齐。 */
+.lexvoice-outline-head.is-idle .lexvoice-recruit-row { align-items: start; }
+.lexvoice-outline-head.is-idle .lexvoice-recruit-row .lexvoice-outline-control-label { align-self: start; padding-top: 11px; }
 
 .lexvoice-recruit-card-head {
   display: flex;
@@ -6221,16 +6346,49 @@ select.lexvoice-recruit-input.dropdown {
   padding: 0;
   border: 0;
   background: transparent;
-  color: color-mix(in srgb, var(--text-muted) 82%, var(--text-accent) 18%);
   box-shadow: none;
-  font-size: 13px;
+  color: var(--text-muted);
+  opacity: 0.6;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.lexvoice-outline-head.is-idle .lexvoice-recruit-card-edit svg { width: 15px; height: 15px; }
+.lexvoice-outline-head.is-idle .lexvoice-recruit-card-edit:hover {
+  color: var(--text-accent);
+  background: transparent;
+  opacity: 1;
 }
 
-.lexvoice-outline-head.is-idle .lexvoice-recruit-card-edit:hover {
-  color: var(--text-normal);
-  background: transparent;
-  text-decoration: underline;
+/* 状态 chip：简历已填 ✓ / 资历 / 面试官——克制的圆角小标签（状态指示，非按钮）。 */
+.lexvoice-recruit-card-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
 }
+.lexvoice-recruit-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.7;
+  background: color-mix(in srgb, var(--text-muted) 13%, transparent);
+  color: color-mix(in srgb, var(--text-muted) 88%, var(--text-normal));
+}
+.lexvoice-recruit-chip.is-ok {
+  background: color-mix(in srgb, var(--color-green) 15%, transparent);
+  color: color-mix(in srgb, var(--color-green) 72%, var(--text-normal));
+}
+.lexvoice-recruit-chip.is-warn {
+  background: color-mix(in srgb, var(--color-orange) 15%, transparent);
+  color: color-mix(in srgb, var(--color-orange) 75%, var(--text-normal));
+}
+.lexvoice-recruit-chip-icon { display: inline-flex; align-items: center; }
+.lexvoice-recruit-chip-icon svg { width: 12px; height: 12px; }
 
 .lexvoice-recruit-card-meta {
   font-size: var(--font-ui-smaller);
@@ -6244,6 +6402,272 @@ select.lexvoice-recruit-input.dropdown {
   color: color-mix(in srgb, var(--text-muted) 88%, var(--text-normal) 12%);
   font-size: 13px;
 }
+
+/* ============ 招聘评估上下文 · 内联编辑（严格按《招聘评估·界面设计规范》）============ */
+/* 字号/颜色按规范硬编码（该页是自包含白卡，刻意不跟随主题）。文字按钮一律 <span>，无任何 Obsidian 按钮 chrome。 */
+.lexvoice-rcx-page {
+  height: 100%;
+  box-sizing: border-box;
+  padding: 18px 20px;
+  background: #ECECE8;
+  display: flex;
+  overflow: hidden;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+}
+.lexvoice-rcx-card {
+  width: 100%;
+  max-width: 530px;
+  margin: 0 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 8px 30px rgba(17, 24, 39, 0.10);
+  overflow: hidden;
+}
+
+/* §1 顶部标题栏 */
+.lexvoice-rcx-top {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid #EDEEF0;
+}
+.lexvoice-rcx-back {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: #4B5563;
+  cursor: pointer;
+}
+.lexvoice-rcx-back:hover { background: #F2F3F5; }
+.lexvoice-rcx-back svg { width: 19px; height: 19px; stroke-width: 2; }
+.lexvoice-rcx-titles { flex: 1 1 auto; min-width: 0; }
+.lexvoice-rcx-title { font-size: 16px; font-weight: 700; line-height: 1.2; color: #111827; }
+.lexvoice-rcx-sub { font-size: 12px; color: #9098A3; margin-top: 2px; }
+.lexvoice-rcx-badge {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: #94A3B8;
+  background: #F2F3F5;
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+
+/* §2 表单通用 */
+.lexvoice-rcx-form {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.lexvoice-rcx-group { display: flex; flex-direction: column; gap: 11px; }
+.lexvoice-rcx-group-title { display: flex; align-items: center; gap: 8px; }
+.lexvoice-rcx-group-name { flex: 0 0 auto; font-size: 13px; font-weight: 600; color: #374151; }
+.lexvoice-rcx-group-line { flex: 1 1 auto; height: 1px; background: #F0F1F3; }
+.lexvoice-rcx-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+.lexvoice-rcx-field { display: block; }
+.lexvoice-rcx-label-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.lexvoice-rcx-label-row .lexvoice-rcx-lbl { flex: 1 1 auto; margin-bottom: 0; }
+.lexvoice-rcx-lbl { display: block; font-size: 12px; color: #9098A3; margin-bottom: 6px; }
+/* 文字按钮：无底色/边框/阴影，纯文字 + 图标。 */
+.lexvoice-rcx-txtbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: #4F46E5;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.lexvoice-rcx-txtbtn:hover { opacity: 0.78; }
+.lexvoice-rcx-txtbtn-icon { display: inline-flex; }
+.lexvoice-rcx-txtbtn-icon svg { width: 13px; height: 13px; stroke-width: 2; }
+.lexvoice-rcx-in,
+.lexvoice-rcx-ta {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #E5E7EB;
+  border-radius: 9px;
+  background: #fff;
+  color: #1F2937;
+  font-family: inherit;
+}
+.lexvoice-rcx-in { padding: 9px 11px; font-size: 14px; }
+.lexvoice-rcx-ta { padding: 10px 12px; font-size: 13.5px; line-height: 1.55; color: #4B5563; resize: none; }
+.lexvoice-rcx-in:focus,
+.lexvoice-rcx-ta:focus { outline: none; border-color: #B6BBE8; box-shadow: 0 0 0 3px #EEF0FB; }
+.lexvoice-rcx-field-foot { display: flex; justify-content: flex-end; margin-top: 7px; }
+
+/* §4 简历 PDF 文件卡 */
+.lexvoice-rcx-filecard {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #E5E7EB;
+  border-radius: 9px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+.lexvoice-rcx-filecard-icon {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #FDECEC;
+  color: #DC2626;
+}
+.lexvoice-rcx-filecard-icon svg { width: 16px; height: 16px; stroke-width: 2; }
+.lexvoice-rcx-filecard-mid { flex: 1 1 auto; min-width: 0; }
+.lexvoice-rcx-filecard-name { font-size: 13px; color: #1F2937; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lexvoice-rcx-filecard-status { font-size: 11px; color: #15803D; margin-top: 1px; }
+.lexvoice-rcx-filecard-del { flex: 0 0 auto; display: inline-flex; color: #B6BBC4; cursor: pointer; }
+.lexvoice-rcx-filecard-del:hover { color: #6B7280; }
+.lexvoice-rcx-filecard-del svg { width: 15px; height: 15px; stroke-width: 2; }
+
+/* §5 面试提纲（生成结果） */
+.lexvoice-rcx-genbadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: #4F46E5;
+  background: #EEF0FB;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.lexvoice-rcx-genbadge-icon { display: inline-flex; }
+.lexvoice-rcx-genbadge-icon svg { width: 11px; height: 11px; stroke-width: 2; }
+.lexvoice-rcx-result {
+  background: #FAFAFB;
+  border: 1px solid #EEEFF1;
+  border-radius: 12px;
+  padding: 15px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #3A3F4A;
+}
+.lexvoice-rcx-result :is(h1, h2, h3, h4) {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #9098A3;
+  margin: 14px 0 8px;
+}
+.lexvoice-rcx-result > :first-child { margin-top: 0; }
+.lexvoice-rcx-result p { margin: 6px 0; }
+.lexvoice-rcx-result strong { color: #1A1D24; font-weight: 600; }
+.lexvoice-rcx-result ul, .lexvoice-rcx-result ol { margin: 6px 0; padding-left: 0; list-style: none; }
+.lexvoice-rcx-result li { position: relative; padding-left: 18px; margin: 5px 0; color: #3A3F4A; }
+.lexvoice-rcx-result ul li::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 9px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #C7CCD3;
+}
+.lexvoice-rcx-result ol { counter-reset: rcx; }
+.lexvoice-rcx-result ol li { counter-increment: rcx; padding-left: 24px; }
+.lexvoice-rcx-result ol li::before {
+  content: counter(rcx);
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  background: #1A1D24;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* §6 底部固定操作栏 */
+.lexvoice-rcx-bottom {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 18px 14px;
+  border-top: 1px solid #EDEEF0;
+  background: #FBFBFC;
+}
+.lexvoice-rcx-switch-row { display: flex; align-items: center; gap: 9px; }
+.lexvoice-rcx-switch { position: relative; flex: 0 0 auto; width: 34px; height: 20px; cursor: pointer; }
+.lexvoice-rcx-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.lexvoice-rcx-switch-track { position: absolute; inset: 0; background: #D1D5DB; border-radius: 999px; transition: background 0.15s; }
+.lexvoice-rcx-switch-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform 0.15s;
+}
+.lexvoice-rcx-switch input:checked + .lexvoice-rcx-switch-track { background: #4F46E5; }
+.lexvoice-rcx-switch input:checked + .lexvoice-rcx-switch-track::after { transform: translateX(14px); }
+.lexvoice-rcx-switch-label { font-size: 13px; color: #4B5563; }
+.lexvoice-rcx-btn-row { display: flex; gap: 11px; }
+.lexvoice-rcx-btn-secondary,
+.lexvoice-rcx-btn-primary {
+  box-shadow: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.lexvoice-rcx-btn-secondary {
+  flex: 0 0 auto;
+  border: 1px solid #E5E7EB;
+  background: #fff;
+  color: #6B7280;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 11px 16px;
+}
+.lexvoice-rcx-btn-secondary:hover { background: #F9FAFB; }
+.lexvoice-rcx-btn-primary {
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: none;
+  background: #4F46E5;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 11px 0;
+}
+.lexvoice-rcx-btn-primary:hover { background: #463FCB; }
+.lexvoice-rcx-btn-primary.is-busy { opacity: 0.65; }
+.lexvoice-rcx-btn-icon { display: inline-flex; }
+.lexvoice-rcx-btn-icon svg { width: 16px; height: 16px; stroke-width: 2; }
 
 
 .lexvoice-home {
@@ -7592,11 +8016,12 @@ select.lexvoice-recruit-input.dropdown {
    否则会被自动塞进 50px 那一列、塌缩成窄条，把折叠区里的下拉触发器裁空（与 control-row 同理）。 */
 .lexvoice-outline-head.is-idle .lexvoice-outline-more,
 .lexvoice-outline-head.is-idle .lexvoice-outline-actions,
-.lexvoice-outline-head.is-idle .lexvoice-outline-device-status,
-.lexvoice-outline-head.is-idle .lexvoice-recruit-card {
+.lexvoice-outline-head.is-idle .lexvoice-outline-device-status {
   grid-column: 1 / -1;
   margin-left: 0;
 }
+/* 对象卡片现在在「对象」字段行的 field 列里（label 左、卡片右），不再跨满整行——
+   否则它会被推到下一行、把「对象」标签挤到上方（错位/换行 bug）。 */
 
 .lexvoice-outline-head.is-idle .lexvoice-recruit-card {
   min-height: 36px;
@@ -7636,7 +8061,7 @@ select.lexvoice-recruit-input.dropdown {
 }
 
 .lexvoice-outline-head.is-idle .lexvoice-outline-actions {
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.92fr) minmax(0, 0.92fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 7px;
   margin-top: 3px;
 }
@@ -7967,6 +8392,10 @@ select.lexvoice-recruit-input.dropdown {
 .lexvoice-finalizing-banner-text {
   color: var(--lex-primary-soft);
   font-size: 11px;
+}
+/* 后台整理状态条（录音停后回到 idle 头，这条落在「新建录音」按钮下方，告知后台还在整理且可直接开下一段）。 */
+.lexvoice-finalizing-banner.is-background {
+  margin: 8px 0 2px;
 }
 
 .lexvoice-recording-alert {

@@ -3,7 +3,7 @@
 import * as obsidian from "obsidian";
 // 实时大纲"文本/状态纯函数层"已抽到独立模块并由 vitest 回归测试覆盖（src/outline-text.test.ts）。
 // 这里 import 回来，保持原有调用点用裸名引用不变。
-import { REALTIME_OUTLINE_STATE_MAX_NODES, normalizeRealtimeOutlineList, hashRealtimeOutlineText, getRealtimeOutlineAnchorTime, cleanRealtimeOutlineItemText, makeRealtimeOutlineNode, parseRealtimeOutlineStateFromMarkdown, mergeStableRealtimeOutlineNodes, normalizeOutlineMarkdownForDisplay, validateRealtimeOutlineMarkdown, mergeCoverageNoRegress, deriveFollowupCards, findLowEvidenceEntities, sanitizeProjectFolderName, recolorReportHtml } from "./outline-text";
+import { REALTIME_OUTLINE_STATE_MAX_NODES, normalizeRealtimeOutlineList, hashRealtimeOutlineText, getRealtimeOutlineAnchorTime, cleanRealtimeOutlineItemText, makeRealtimeOutlineNode, parseRealtimeOutlineStateFromMarkdown, mergeStableRealtimeOutlineNodes, normalizeOutlineMarkdownForDisplay, validateRealtimeOutlineMarkdown, mergeCoverageNoRegress, deriveFollowupCards, findLowEvidenceEntities, sanitizeProjectFolderName, recolorReportHtml, desensitizeResumeText } from "./outline-text";
 import { LexVoiceSettingTab } from "./ui/settings-tab";
 import { pickReportAccentColor, AudioTimeModal, PeopleDirectorySuggestionModal, QueueModal, VirtualCableSetupModal, RecruitContextModal, ImportTextModal, ImportAudioModal, BubbleWidget } from "./ui/modals";
 import { LEXVOICE_UPDATE_REPO_URL, resolveUpdateRawBase, resolveUpdateRawBases, stripLexVoiceFrontmatterSimple, getRecentNoteProcessingState, lexvoiceConfirm, enumerateAudioDevices, trashLexVoiceFile, pluginBasePath, normalizeAudioInputMode, audioInputModeLabel } from "./ui/helpers";
@@ -13,7 +13,7 @@ import { normalizeKnowledgeExtractionHistory } from "./shared/util-knowledge";
 import { listJDProjects } from "./recruit/jd-projects";
 import { sanitizeReportFileStem, generateHtmlReportFromMarkdown, generateStyledReportFromMarkdown } from "./report/render";
 import { parseElapsedMsToken, parseLexVoiceDurationLabel, TEXT_IMPORT_PRE_SUMMARY_CHUNK_CHARS, buildBriefingLanguageInstruction, applyBriefingLanguageInstruction, getSessionMetaDurationMs, getSegmentsDurationMs, truncateForLlmPrompt, splitLongTextForLlm } from "./shared/util-text";
-import { JOBPORTRAIT_DIMENSIONS, DEFAULT_RECRUIT_QUALITIES, isRecruitFeatureUnlocked, buildRecruitContextPrefix, getRecruitInterviewOutline, parseRecruitQualitiesFromOutput, buildCompactRecruitContextPrefix, buildRecruitTextImportMergePrompt, generateJobPortrait, normalizeRecruitContext, hasRecruitContextContent, parseJdProject, renderRecruitCandidateBase, renderRecruitAggregateBase, ensureRecruitAggregateBase, createRecruitProject, renderRecruitHomepageTemplate, listRecruitCandidateNotes, recruitRecommendationColor } from "./recruit";
+import { JOBPORTRAIT_DIMENSIONS, DEFAULT_RECRUIT_QUALITIES, isRecruitFeatureUnlocked, buildRecruitContextPrefix, getRecruitInterviewOutline, getRecruitJdLibrary, upsertRecruitJdLibrary, applyRecruitJdLibraryItem, getRecruitJdPreview, extractPdfTextBestEffort, parseRecruitQualitiesFromOutput, buildCompactRecruitContextPrefix, buildRecruitTextImportMergePrompt, generateJobPortrait, normalizeRecruitContext, hasRecruitContextContent, parseJdProject, renderRecruitCandidateBase, renderRecruitAggregateBase, ensureRecruitAggregateBase, createRecruitProject, renderRecruitHomepageTemplate, listRecruitCandidateNotes, recruitRecommendationColor } from "./recruit";
 import { registerRecruitBoardView, recommendationTone } from "./recruit/bases-view";
 import { normalizeAsrConcurrency, decodeAudioBlob, renderAudioBufferSliceToWav, mapLimit, transcribeImportAudioChunk, resolveTranscribeProvider, makeRecordingIssue, APIMIMO_ASR_CHUNK_MS, isApimimoAsrProvider, transcribeAudio } from "./asr/transcribe";
 import { getFrontmatterTags, readFileFrontmatter, upsertFrontmatterInMarkdown, LEARNING_CARD_TAG, CONCEPT_CARD_TAG, TODO_CARD_TAG, ensureTodayDailyNoteFile } from "./shared/util-note";
@@ -1746,17 +1746,25 @@ ${buildOutlineAudioAnchorInstruction()}
 
 ${buildRealtimeOutlineEnvelopeInstruction()}
 
-【结构 · 严格按问题为单位组织】
-在 <lexvoice-outline> 内，对识别到的每个"面试官提问"作为一级节点，下挂候选人回答要点和 AI 评价。
+【结构 · 每个面试主题为一个节点】
+在 <lexvoice-outline> 内，把每一轮"面试官提问 → 候选人回答"归到一个**主题节点**下：节点标题是 4-8 字主题（概括这一轮在聊的能力/话题，不是原话问题），下挂这一轮的提问、回答要点、AI 评价、追问。
 
 【可见大纲格式】
 \`\`\`
-- ❓ <问题主题，6-12 字> [[音频文件.webm|12:34]]
+- <主题，4-8 字> [[音频文件.webm|12:34]]
+  - ❓ <面试官提问，精简成一句>
   - 💬 <候选人回答的关键点 1>
   - 💬 <候选人回答的关键点 2>
   - 🤖 <AI 简评：质量定调 + 一句话评价>
   - ⛏ <可继续追问的具体方向>
 \`\`\`
+
+【节点标题（主题）要求】
+- 4-8 字，概括这一轮聊的主题/能力项，如"社招体系搭建""跨部门协作""离职原因"
+- 不要把原话问题塞进标题——问题放到 ❓ 子行
+
+【提问行的要求】
+- 必须以 \`❓ \` 开头，是面试官这一轮的核心提问，精简成一句
 
 【AI 评价行的写作要求】
 - 必须以 \`🤖 \` 开头（让样式可识别为 AI 评价，与候选人内容做视觉区分）
@@ -1771,10 +1779,10 @@ ${buildRealtimeOutlineEnvelopeInstruction()}
 【克制】
 - 候选人回答还没出现的问题，不要预生成评价
 - 转写不完整就只整理已出现的问答对
-- 没听清楚的问答标注"❓ <主题>（转写不清，待复核）"，不要硬猜
+- 没听清楚的，主题标题写成"（转写不清，待复核）"，不要硬猜
 
 【输出】
-- <lexvoice-outline> 内使用纯 Markdown 列表，每个问题独立成一级节点
+- <lexvoice-outline> 内使用纯 Markdown 列表，每个主题独立成一级节点；提问/回答/评价/追问都是该节点的子项
 - 不要前言、不要总评（综合评价留给最终整合，不在大纲里出现）${langBlock}
 
 实时整理上下文：
@@ -2762,8 +2770,15 @@ function getRecentNotes(plugin, limit) {
     }
     const meta = getModeMeta(plugin.settings, mode) || MODE_META.off;
     let title = stripRecentDatePrefix(f.basename);
-    if (meta && meta.prefix) {
-      title = title.replace(new RegExp("^" + escapeRegExp(meta.prefix) + "[-·\\s]*"), "").trim();
+    // 去掉标题开头的"模板名 + 分隔符"——含历史别名（会议 / 研讨 / 手记…），图标 + 元信息已标类型，
+    // 标题不必再重复，去掉后行首也更齐。逐个已知前缀（当前 prefix + 该 mode 的所有别名）按长到短试一次。
+    const modePrefixes = [meta && meta.prefix]
+      .concat(Object.keys(MODE_PREFIX_TO_KEY).filter((k) => MODE_PREFIX_TO_KEY[k] === mode))
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length);
+    for (const p of modePrefixes) {
+      const re = new RegExp("^" + escapeRegExp(p) + "[-·\\s]*");
+      if (re.test(title)) { title = title.replace(re, "").trim(); break; }
     }
     if (!title) title = f.basename;
     const weekday = LEXVOICE_EN_WEEKDAYS[t.day()] || t.format("dddd");
@@ -6451,6 +6466,12 @@ class OutlineView extends obsidian.ItemView {
       const stamp = window.moment(session.startedAt).format("YYYY-MM-DD HH:mm:ss");
       metaEl.setText(`${stamp} · ${formatElapsed(info.elapsed)} · ${session.segments.length} 段`);
     }
+    // 录音条计时（renderActiveHead 的 .lexvoice-recording-elapsed）也在这条轻量路径里按秒刷新——
+    // 否则签名去重会吞掉 recorder 每 160ms 的 tick，计时文本只在出现新段落时才"跳"一下（计时不实时 bug）。
+    const elapsedEl = root.querySelector(".lexvoice-recording-elapsed");
+    if (elapsedEl && (info.state === "recording" || info.state === "paused")) {
+      elapsedEl.setText(formatElapsed(info.elapsed || 0));
+    }
     this.updateInputMeter(root, info);
   }
   render() {
@@ -6471,11 +6492,22 @@ class OutlineView extends obsidian.ItemView {
     }
     this.syncSessionOutline(session);
 
-    if (session) {
+    const recState = recInfo && recInfo.state ? recInfo.state : "idle";
+    // 只有"真正在录音/暂停"时才把面板接管成录音态；录音一停（即便后台还在转写/整理）就回到 idle 头，
+    // 让用户能立刻开始下一段——后台 finalizing 不阻塞录音（recorder 已 idle，startRecording 允许）。
+    const activelyRecording = !!(session && (recState === "recording" || recState === "paused"));
+    const activeTab = this.idlePanelTab || "outline";
+
+    // 招聘上下文内联编辑：接管整个面板（顶部返回 + 分组表单 + 底部操作）。非录音中才允许进。
+    if (this._recruitEditing && !activelyRecording && isRecruitFeatureUnlocked(this.plugin.settings)) {
+      this.renderRecruitContextInline(root);
+      this._lastSig = this.computeSignature();
+      return;
+    }
+
+    if (activelyRecording) {
       const sessionNote = this.getSessionNoteFile(session);
-      const activeTab = this.idlePanelTab || "outline";
-      const showMeetingComposer = activeTab === "outline" && recInfo && (recInfo.state === "recording" || recInfo.state === "paused");
-      if (showMeetingComposer) root.addClass("has-meeting-composer");
+      if (activeTab === "outline") root.addClass("has-meeting-composer");
       this.renderActiveHead(root, session, recInfo, recordingIssue);
       this.renderIdleTabs(root, activeTab);
       if (activeTab === "recent") {
@@ -6489,25 +6521,39 @@ class OutlineView extends obsidian.ItemView {
       if (recordingIssue && recordingIssue.kind === "microphone") {
         this.renderMicrophoneBlockedOverlay(root, recordingIssue, recInfo);
       }
+      if (activeTab === "outline") this.renderMeetingComposer(root, session);
     } else {
+      // 非录音中（含录音刚结束、后台转写/整理；或已加载的纪要；或全空闲）：始终显示 idle 头（新建录音可用）。
       this.renderIdleHead(root);
-      const activeNote = this.getActiveLexVoiceNoteFile();
-      const activeTab = this.idlePanelTab || "outline";
-      this.renderIdleTabs(root, activeTab);
-      if (activeTab === "outline") {
-        if (activeNote) this.renderCompletedNote(root, activeNote);
-        else this.renderNoOpenNoteEmpty(root, "outline");
-      } else if (activeTab === "extract") {
-        if (activeNote) this.renderExtractionPanel(root, activeNote);
-        else this.renderNoOpenNoteEmpty(root, "extract");
-      } else {
-        this.renderRecent(root);
+      if (session && session.finalizing) {
+        const banner = root.createDiv({ cls: "lexvoice-finalizing-banner is-background" });
+        try { obsidian.setIcon(banner.createSpan({ cls: "lexvoice-finalizing-banner-icon" }), "loader-2"); } catch { /* intentionally empty */ }
+        banner.createSpan({ cls: "lexvoice-finalizing-banner-text", text: "AI 正在后台整理上一段，可直接开始下一段录音" });
       }
-    }
-    if (session) {
-      const activeTab = this.idlePanelTab || "outline";
-      const showMeetingComposer = activeTab === "outline" && recInfo && (recInfo.state === "recording" || recInfo.state === "paused");
-      if (showMeetingComposer) this.renderMeetingComposer(root, session);
+      this.renderIdleTabs(root, activeTab);
+      if (session) {
+        // 录音已结束、后台处理中：仍展示这条 session 的大纲 / 沉淀
+        const sessionNote = this.getSessionNoteFile(session);
+        if (activeTab === "extract") {
+          if (sessionNote) this.renderExtractionPanel(root, sessionNote);
+          else this.renderPanelEmpty(root, "当前录音笔记尚未生成，录音开始写入纪要后可进行沉淀。");
+        } else if (activeTab === "recent") {
+          this.renderRecent(root);
+        } else {
+          this.renderAIOutline(root, session, recInfo, recordingIssue);
+        }
+      } else {
+        const activeNote = this.getActiveLexVoiceNoteFile();
+        if (activeTab === "outline") {
+          if (activeNote) this.renderCompletedNote(root, activeNote);
+          else this.renderNoOpenNoteEmpty(root, "outline");
+        } else if (activeTab === "extract") {
+          if (activeNote) this.renderExtractionPanel(root, activeNote);
+          else this.renderNoOpenNoteEmpty(root, "extract");
+        } else {
+          this.renderRecent(root);
+        }
+      }
     }
     this._lastSig = this.computeSignature();
   }
@@ -9554,7 +9600,7 @@ class OutlineView extends obsidian.ItemView {
     // 自定义下拉：用 Obsidian Menu 替代原生 <select>（OS 渲染的选项弹层没法美化）。菜单贴字段宽度、当前项左侧加色点，样式与面板一致。
     const mkSelect = (row, opts) => {
       let curVal = opts.current;
-      const find = () => opts.items.find(it => it.value === curVal) || opts.items[0];
+      const find = () => opts.items.find(it => it.value === curVal) || (opts.blankWhenUnset ? null : opts.items[0]);
       const trigger = row.createDiv({ cls: "lexvoice-outline-select-wrap lexvoice-outline-menu-trigger" + (opts.disabled ? " is-disabled" : "") });
       const lbl = trigger.createSpan({ cls: "lex-ms-label", text: (opts.disabled && opts.disabledLabel) ? opts.disabledLabel : ((find() || {}).label || "") });
       try { obsidian.setIcon(trigger.createSpan({ cls: "lex-ms-chev" }), "chevron-down"); } catch { /* intentionally empty */ }
@@ -9592,6 +9638,11 @@ class OutlineView extends obsidian.ItemView {
       onPick: async (k) => { this.plugin.settings.polishMode = k; await this.plugin.saveSettings(); this.scheduleUpdate(); },
     });
 
+    // 招聘评估：「对象」卡片紧跟模板（解锁 + recruit 模式时）——突出当前候选人 / JD，不沉到底部。
+    if (isRecruitFeatureUnlocked(this.plugin.settings) && currentMode === "recruit") {
+      this.renderRecruitContextCard(controls);
+    }
+
     // 音频输入（常驻，和模板并列——最常跟着录音场景切换：会议 / 视频 / 纯麦）
     const capRow = controls.createDiv({ cls: "lexvoice-outline-control-row" });
     capRow.createEl("span", { cls: "lexvoice-outline-control-label", text: "音频" });
@@ -9621,6 +9672,15 @@ class OutlineView extends obsidian.ItemView {
     const moreToggle = moreWrap.createDiv({ cls: "lexvoice-outline-more-toggle" });
     try { obsidian.setIcon(moreToggle.createSpan({ cls: "lexvoice-outline-more-chev" }), "chevron-right"); } catch { /* intentionally empty */ }
     moreToggle.createSpan({ cls: "lexvoice-outline-more-label", text: "更多设置" });
+    // 折叠态摘要：把 方案 / 偏好 / 思考 的当前值显示在右侧，不展开也一眼可见（展开后 CSS 自动隐藏）。
+    const moreSummaryParts = [];
+    const _ap = this.plugin.settings.activeLlmProfile;
+    if (_ap) { const _p = (this.plugin.settings.llmProfiles || []).find(x => x.id === _ap); if (_p && _p.name) moreSummaryParts.push(_p.name); }
+    const _pref = this.plugin.settings.repolishPreference;
+    if (_pref && REPOLISH_PREFERENCE_PRESETS[_pref]) moreSummaryParts.push(REPOLISH_PREFERENCE_PRESETS[_pref].label);
+    const _tm = this.plugin.settings.thinkingMode;
+    if (_tm === "fast") moreSummaryParts.push("快速模式"); else if (_tm === "reasoning") moreSummaryParts.push("推理模式");
+    if (moreSummaryParts.length) moreToggle.createSpan({ cls: "lexvoice-outline-more-summary", text: moreSummaryParts.join(" · ") });
     moreToggle.onclick = () => {
       this._sidebarMoreExpanded = !moreWrap.hasClass("is-expanded");
       moreWrap.toggleClass("is-expanded", this._sidebarMoreExpanded);
@@ -9645,31 +9705,34 @@ class OutlineView extends obsidian.ItemView {
       },
     });
 
-    // 整理偏好：复用右键「重新整理为」的偏好预设，读写同一个 repolishPreference（影响"重新整理"的风格默认值）。
-    const prefRow = moreBody.createDiv({ cls: "lexvoice-outline-control-row" });
-    prefRow.createEl("span", { cls: "lexvoice-outline-control-label", text: "偏好" });
-    // 侧边栏只保留最小正交集合（量：详细/精炼 · 结构：结构化/自然 · 外推：适度拓展 + 默认锚点）；
-    // 其余预设留在右键「重新整理为」高级菜单。主表 REPOLISH_PREFERENCE_PRESETS 不删任何 key，避免已存 repolishPreference 变孤儿。
+    // 偏好 + 思考 并排一行（紧凑双列），方案在上独占一行——压扁「更多设置」。
+    const pairRow = moreBody.createDiv({ cls: "lexvoice-outline-control-pair" });
+
+    // 整理偏好（左半）：复用右键「重新整理为」预设，读写同一个 repolishPreference。
+    // 侧边栏只保留最小正交集合；其余预设留在右键高级菜单。主表 REPOLISH_PREFERENCE_PRESETS 不删 key，避免已存值变孤儿。
+    const prefCell = pairRow.createDiv({ cls: "lexvoice-outline-pair-cell" });
+    prefCell.createEl("span", { cls: "lexvoice-outline-control-label", text: "偏好" });
     const SIDEBAR_PREF_KEYS = ["detailed", "concise", "structured", "natural", "expanded"];
     const curPref = this.plugin.settings.repolishPreference || "";
-    const prefItems = [{ value: "", label: "无特殊偏好" }]
-      .concat(SIDEBAR_PREF_KEYS.map(k => ({ value: k, label: REPOLISH_PREFERENCE_PRESETS[k].label })));
-    // 当前偏好若是被精简掉的旧值，补一项让触发器显示其真实名字（不静默退成"默认"误导用户）
+    // 不放"无特殊偏好"项：未选偏好时触发器留空（blankWhenUnset）。菜单只列 5 个正交预设。
+    const prefItems = SIDEBAR_PREF_KEYS.map(k => ({ value: k, label: REPOLISH_PREFERENCE_PRESETS[k].label }));
+    // 当前偏好若是被精简掉的旧值，补一项让触发器显示其真实名字
     if (curPref && !SIDEBAR_PREF_KEYS.includes(curPref)) {
       const hiddenPreset = getRepolishPreferencePreset(curPref);
       if (hiddenPreset) prefItems.push({ value: curPref, label: hiddenPreset.label });
     }
-    mkSelect(prefRow, {
+    mkSelect(prefCell, {
       current: curPref,
       items: prefItems,
+      blankWhenUnset: true,
       onPick: async (v) => { this.plugin.settings.repolishPreference = v; await this.plugin.saveSettings(); },
     });
 
-    // 思考档：默认 / 推理 / 快速（关思维链省 token）。仅当前 AI 整理服务支持调节时可选，否则灰掉不可选。
+    // 思考档（右半）：默认 / 快速 / 推理。仅当前 AI 整理服务支持调节时可选，否则灰掉。
     const thinkCtrl = getThinkingControl(this.plugin.settings.llmEndpoint, this.plugin.settings.llmModel);
-    const thinkRow = moreBody.createDiv({ cls: "lexvoice-outline-control-row" });
-    thinkRow.createEl("span", { cls: "lexvoice-outline-control-label", text: "思考" });
-    mkSelect(thinkRow, {
+    const thinkCell = pairRow.createDiv({ cls: "lexvoice-outline-pair-cell" });
+    thinkCell.createEl("span", { cls: "lexvoice-outline-control-label", text: "思考" });
+    mkSelect(thinkCell, {
       current: this.plugin.settings.thinkingMode || "auto",
       items: [
         { value: "fast", label: "快速模式" },
@@ -9677,14 +9740,9 @@ class OutlineView extends obsidian.ItemView {
         { value: "reasoning", label: "推理模式" },
       ],
       disabled: !thinkCtrl,
-      disabledLabel: "当前服务不支持调节",
+      disabledLabel: "不支持",
       onPick: async (v) => { this.plugin.settings.thinkingMode = v; await this.plugin.saveSettings(); },
     });
-
-    // 扩展模式解锁后才显示专属上下文卡片
-    if (isRecruitFeatureUnlocked(this.plugin.settings) && currentMode === "recruit") {
-      this.renderRecruitContextCard(controls);
-    }
 
     // 设备状态条：根据当前音频输入方式检测对应硬件，给出可见反馈
     const devStatus = controls.createDiv({ cls: "lexvoice-outline-device-status" });
@@ -10176,7 +10234,7 @@ class OutlineView extends obsidian.ItemView {
         emptyEl.setText("录音开始且产出第一段后可生成大纲。");
       } else if (session && session.mode === "recruit") {
         // 不用 emoji——AI 评价 / 追问建议 用与大纲同款的 lucide 图标 + 语义色（见 applyOutlineMarkerIcon）区分。
-        emptyEl.appendText("点「刷新」生成面试大纲——按问题组织，含候选人回答要点，另用 ");
+        emptyEl.appendText("点「刷新」生成面试大纲：按问题组织、含候选人回答要点，另用 ");
         const ai = emptyEl.createSpan({ cls: "lexvoice-outline-legend lexvoice-ai-eval" });
         try { obsidian.setIcon(ai.createSpan({ cls: "lexvoice-outline-marker-icon" }), "bot"); } catch { /* intentionally empty */ }
         ai.createSpan({ text: "AI 评价" });
@@ -10186,7 +10244,7 @@ class OutlineView extends obsidian.ItemView {
         fu.createSpan({ text: "追问建议" });
         emptyEl.appendText(" 标注。");
       } else {
-        emptyEl.setText("点「刷新」生成大纲——把零散发言归并到共同的上层概念。");
+        emptyEl.setText("点「刷新」，把零散的发言整理成一份提纲。");
       }
       this.renderOutlineAnnotations(body, session);
       if (recordingIssue && recordingIssue.kind === "network") this.renderNetworkOutlineGap(body, recordingIssue, recInfo);
@@ -10276,6 +10334,7 @@ class OutlineView extends obsidian.ItemView {
     const nodes = parseRealtimeOutlineStateFromMarkdown(outlineText);
     if (!nodes.length) return false;
     const ul = body.createEl("ul");
+    const isRecruit = body.hasClass("is-recruit-mode");
     const anchorRe = /\[\[([^\]\n|]+)\|([^\]\n]+)\]\]/;
     for (const node of nodes) {
       const li = ul.createEl("li");
@@ -10291,6 +10350,8 @@ class OutlineView extends obsidian.ItemView {
           li.appendText(" ");
         }
       }
+      // 招聘面试：节点 = 主题，子项 = ❓提问/💬回答/🤖评价/⛏追问 → 渲染成「方案B」对话气泡 + AI 分析区。
+      if (isRecruit) { this.renderRecruitOutlineNode(li, node); continue; }
       li.appendText(this.applyOutlineMarkerIcon(li, String((node && node.title) || "")));
       const children = node && Array.isArray(node.children) ? node.children : [];
       if (children.length) {
@@ -10304,6 +10365,71 @@ class OutlineView extends obsidian.ItemView {
       }
     }
     return true;
+  }
+
+  // 招聘面试节点「方案B」渲染：主题标题（紧挨时间戳）+ 对话区（面试官左灰气泡 / 候选人右蓝气泡）
+  // + AI 分析区（细分割线 + 「AI 分析」小标题 + 圆形彩色图标条目：AI 评价 / 建议追问）。无 emoji、无左竖条。
+  renderRecruitOutlineNode(li, node) {
+    li.addClass("lexvoice-recruit-node");
+    let topic = String((node && node.title) || "").trim();
+    const children = node && Array.isArray(node.children) ? node.children : [];
+    const strip = (t) => { for (const e of ["❓", "？", "?", "💬", "🤖", "⛏"]) if (t.startsWith(e)) return t.slice(e.length).replace(/^[️‍\s]+/, ""); return t; };
+    const q = [], ans = [], evals = [], fups = [];
+    for (const c of children) {
+      const t = String(c || "").trim();
+      if (!t) continue;
+      if (t.startsWith("❓") || t.startsWith("？") || t.startsWith("?")) q.push(strip(t));
+      else if (t.startsWith("💬")) ans.push(strip(t));
+      else if (t.startsWith("🤖")) evals.push(strip(t));
+      else if (t.startsWith("⛏")) fups.push(strip(t));
+      else ans.push(t);
+    }
+    // 兼容旧结构（节点标题本身就是 ❓提问、没有独立主题行）：把标题降级成提问，主题留空。
+    if (!q.length && /^[❓？?]/.test(topic)) { q.push(strip(topic)); topic = ""; }
+    // 完全没有招聘语义标记的异常节点 → 回退普通子项渲染（标题经 applyOutlineMarkerIcon 去 emoji），别把内容吞掉。
+    if (!q.length && !ans.length && !evals.length && !fups.length) {
+      li.appendText(this.applyOutlineMarkerIcon(li, topic));
+      if (children.length) {
+        const sub = li.createEl("ul");
+        for (const c of children) { const t = String(c || "").trim(); if (!t) continue; const cli = sub.createEl("li"); cli.appendText(this.applyOutlineMarkerIcon(cli, t)); }
+      }
+      return;
+    }
+    if (topic) li.createSpan({ cls: "lexvoice-recruit-topic", text: topic });
+    // —— 对话区 ——
+    const dlg = li.createDiv({ cls: "lexvoice-recruit-dialog" });
+    if (q.length) this.renderRecruitTurn(dlg, "interviewer", "面试官", q.join("　"));
+    this.renderRecruitTurn(dlg, "candidate", "候选人", ans.length ? ans : null);
+    // —— AI 分析区 ——
+    const ai = li.createDiv({ cls: "lexvoice-recruit-ai" });
+    ai.createDiv({ cls: "lexvoice-recruit-ai-head", text: "AI 分析" });
+    if (evals.length || fups.length) {
+      for (const e of evals) this.renderRecruitAiItem(ai, "eval", "AI 评价", "sparkles", e);
+      for (const f of fups) this.renderRecruitAiItem(ai, "followup", "建议追问", "corner-down-right", f);
+    } else {
+      ai.createDiv({ cls: "lexvoice-recruit-ai-pending", text: "待候选人回答后生成…" });
+    }
+  }
+
+  // 一条对话回合：上方「头像 + 角色名」标识，下方气泡。content 为 null 时显示占位。
+  renderRecruitTurn(parent, who, label, content) {
+    const turn = parent.createDiv({ cls: `lexvoice-recruit-turn is-${who}` });
+    const whoRow = turn.createDiv({ cls: "lexvoice-recruit-who" });
+    try { obsidian.setIcon(whoRow.createSpan({ cls: "lexvoice-recruit-avatar" }), "user"); } catch { /* intentionally empty */ }
+    whoRow.createSpan({ cls: "lexvoice-recruit-who-name", text: label });
+    const bubble = turn.createDiv({ cls: "lexvoice-recruit-bubble" });
+    if (content === null) { bubble.addClass("is-pending"); bubble.setText("待候选人回答…"); }
+    else if (Array.isArray(content)) { for (const line of content) bubble.createDiv({ cls: "lexvoice-recruit-bubble-line", text: line }); }
+    else bubble.setText(content);
+  }
+
+  // 一条 AI 分析项：26px 圆形浅底图标 + 彩色类型标签 + 正文。
+  renderRecruitAiItem(parent, kind, label, icon, text) {
+    const item = parent.createDiv({ cls: `lexvoice-recruit-ai-item is-${kind}` });
+    try { obsidian.setIcon(item.createDiv({ cls: "lexvoice-recruit-ai-icon" }), icon); } catch { /* intentionally empty */ }
+    const tx = item.createDiv({ cls: "lexvoice-recruit-ai-text" });
+    tx.createDiv({ cls: "lexvoice-recruit-ai-label", text: label });
+    tx.createDiv({ cls: "lexvoice-recruit-ai-body", text: text });
   }
 
   // 招聘模式的语义标记：模型用 emoji 标出条目类型（❓提问 / 💬候选人回答 / 🤖AI评价 / ⛏追问）。
@@ -10658,6 +10784,13 @@ class OutlineView extends obsidian.ItemView {
   renderRecentFilterBar(parent, allRecents) {
     const filters = this.getRecentFilters();
     const wrap = parent.createDiv({ cls: "lexvoice-outline-recent-filter-wrap" });
+    // 搜索框：实时按关键词过滤当前列表（标题 / 时间 / 模板文本），show/hide 不重渲染、保留输入焦点。
+    const searchInput = wrap.createEl("input", {
+      cls: "lexvoice-outline-recent-search",
+      attr: { type: "text", placeholder: "搜索纪要或关键词", spellcheck: "false" },
+    });
+    searchInput.value = this._recentSearch || "";
+    searchInput.addEventListener("input", () => { this._recentSearch = searchInput.value; this.applyRecentSearchFilter(parent); });
     const bar = wrap.createDiv({ cls: "lexvoice-outline-recent-filters" });
     const chipDefs = [
       ["time", RECENT_TIME_FILTER_OPTIONS],
@@ -10802,6 +10935,23 @@ class OutlineView extends obsidian.ItemView {
         }
       }
     }
+    this.applyRecentSearchFilter(sec);
+  }
+
+  // 实时按关键词过滤纪要列表（匹配标题/时间/模板等行内文本），show/hide 不重渲染、保留输入焦点。
+  applyRecentSearchFilter(scope) {
+    const root = scope || (this.containerEl && this.containerEl.children[1]);
+    if (!root || typeof root.querySelectorAll !== "function") return;
+    const q = String(this._recentSearch || "").trim().toLowerCase();
+    root.querySelectorAll(".lexvoice-outline-recent-row, .lexvoice-outline-recent-variant").forEach((rowEl) => {
+      const hit = !q || (rowEl.textContent || "").toLowerCase().includes(q);
+      rowEl.style.display = hit ? "" : "none";
+    });
+    root.querySelectorAll(".lexvoice-outline-recent-group").forEach((g) => {
+      const anyVisible = Array.from(g.querySelectorAll(".lexvoice-outline-recent-row, .lexvoice-outline-recent-variant"))
+        .some((r) => r.style.display !== "none");
+      g.style.display = anyVisible ? "" : "none";
+    });
   }
 
   createRecentActionButton(parent, opt) {
@@ -11267,11 +11417,13 @@ class OutlineView extends obsidian.ItemView {
 
   renderRecruitContextCard(parent) {
     const ctx = this.plugin.settings.recruitContext || {};
-    const card = parent.createDiv({ cls: "lexvoice-recruit-card" });
-    const head = card.createDiv({ cls: "lexvoice-recruit-card-head" });
     const hasJd = !!(ctx.jd && ctx.jd.trim());
     const hasResume = !!(ctx.resume && ctx.resume.trim());
-    head.createSpan({ cls: `lexvoice-recruit-card-dot ${hasJd ? "is-ok" : "is-warn"}` });
+    // 「对象」做成与 模板/音频 同构的字段行：左标签 + 卡片（标题 + 铅笔，下面一行状态 chip）。
+    const row = parent.createDiv({ cls: "lexvoice-outline-control-row lexvoice-recruit-row" });
+    row.createEl("span", { cls: "lexvoice-outline-control-label", text: "对象" });
+    const card = row.createDiv({ cls: "lexvoice-recruit-card" });
+    const head = card.createDiv({ cls: "lexvoice-recruit-card-head" });
     const title = head.createSpan({ cls: "lexvoice-recruit-card-title" });
     if (hasJd) {
       const positionLabel = ctx.position || "（未命名岗位）";
@@ -11279,24 +11431,221 @@ class OutlineView extends obsidian.ItemView {
       const roundLabel = ctx.round ? ` · ${ctx.round}` : "";
       title.setText(`${positionLabel}${candLabel}${roundLabel}`);
     } else {
-      title.setText("未注入 JD 或简历");
+      title.setText("未注入 JD / 简历");
     }
-    const editBtn = head.createEl("button", { text: hasJd ? "编辑" : "立即设置", cls: "lexvoice-recruit-card-edit", attr: { type: "button" } });
-    editBtn.onclick = () => {
-      const modal = new RecruitContextModal(this.app, this.plugin, {
-        flow: "settings",
-        onConfirm: () => this.scheduleUpdate(),
-      });
+    // 编辑入口：裸铅笔图标（不加边框/底色，符合硬约束），不再用「编辑」文字按钮。
+    const editBtn = head.createEl("button", { cls: "lexvoice-recruit-card-edit", attr: { type: "button", title: hasJd ? "编辑对象" : "立即设置", "aria-label": hasJd ? "编辑对象" : "立即设置" } });
+    try { obsidian.setIcon(editBtn, hasJd ? "pencil" : "plus"); } catch { editBtn.setText(hasJd ? "编辑" : "设置"); }
+    // 进招聘上下文内联编辑视图（替掉原来的弹窗）。
+    editBtn.onclick = () => { this._recruitEditing = true; this.render(); };
+    // 状态用 chip（简历已填 ✓ / 资历 / 面试官），不用 dot + 逗号文本。
+    const chips = card.createDiv({ cls: "lexvoice-recruit-card-chips" });
+    if (hasJd) {
+      const resumeChip = chips.createSpan({ cls: `lexvoice-recruit-chip ${hasResume ? "is-ok" : "is-warn"}` });
+      try { obsidian.setIcon(resumeChip.createSpan({ cls: "lexvoice-recruit-chip-icon" }), hasResume ? "check" : "alert-triangle"); } catch { /* intentionally empty */ }
+      resumeChip.createSpan({ text: hasResume ? "简历已填" : "简历未填" });
+      if (ctx.seniority) chips.createSpan({ cls: "lexvoice-recruit-chip", text: ctx.seniority });
+      if (ctx.interviewer) chips.createSpan({ cls: "lexvoice-recruit-chip", text: `面试官 ${ctx.interviewer}` });
+    } else {
+      chips.createSpan({ cls: "lexvoice-recruit-chip is-warn", text: "点铅笔注入 JD / 简历" });
+    }
+  }
+
+  // 招聘上下文内联编辑视图：替掉原来的弹窗。顶部返回 + 分组表单（岗位→候选人→本场面试）+ 底部固定操作。
+  // 逻辑复用 recruit/ 里已测的纯函数（归一/JD库/PDF抽取/生成提纲），这里只搭外壳与布局，不重写流程。
+  // 招聘上下文内联编辑视图。严格按《招聘评估·界面设计规范》搭建：白卡 + 分组细线标题 + 裸文字按钮（绝无
+  // Obsidian 按钮方框/阴影）+ PDF 文件卡 + iOS 开关 + 底部固定操作。文字按钮一律用 <span>，从源头杜绝按钮 chrome。
+  renderRecruitContextInline(root) {
+    const settings = this.plugin.settings;
+    if (!this._recruitDraft) this._recruitDraft = normalizeRecruitContext({ ...(settings.recruitContext || {}) });
+    const ctx = this._recruitDraft;
+
+    const page = root.createDiv({ cls: "lexvoice-rcx-page" });
+    const card = page.createDiv({ cls: "lexvoice-rcx-card" });
+
+    // 裸文字按钮（无底色/边框/阴影）：图标 + 文案。永远不用 <button>。
+    const txtBtn = (parent, text, icon, onClick) => {
+      const b = parent.createSpan({ cls: "lexvoice-rcx-txtbtn", attr: { role: "button", tabindex: "0" } });
+      if (icon) { try { obsidian.setIcon(b.createSpan({ cls: "lexvoice-rcx-txtbtn-icon" }), icon); } catch { /* intentionally empty */ } }
+      b.createSpan({ text });
+      b.onclick = onClick;
+      return b;
+    };
+
+    // —— §1 顶部标题栏 ——
+    const top = card.createDiv({ cls: "lexvoice-rcx-top" });
+    const back = top.createSpan({ cls: "lexvoice-rcx-back", attr: { role: "button", tabindex: "0", "aria-label": "返回", title: "返回" } });
+    try { obsidian.setIcon(back, "chevron-left"); } catch { back.setText("‹"); }
+    back.onclick = () => { this._recruitEditing = false; this._recruitDraft = null; this._recruitResumePdfName = ""; this.render(); };
+    const titles = top.createDiv({ cls: "lexvoice-rcx-titles" });
+    titles.createDiv({ cls: "lexvoice-rcx-title", text: "招聘评估" });
+    titles.createDiv({ cls: "lexvoice-rcx-sub", text: "填好岗位与候选人，整理时据此生成评估与提纲" });
+    top.createSpan({ cls: "lexvoice-rcx-badge", text: settings.recruitContext && settings.recruitContext.savedAt ? "已存" : "草稿" });
+
+    // —— 表单（可滚动）——
+    const form = card.createDiv({ cls: "lexvoice-rcx-form" });
+    const mkGroup = (t, decorate) => {
+      const g = form.createDiv({ cls: "lexvoice-rcx-group" });
+      const titleRow = g.createDiv({ cls: "lexvoice-rcx-group-title" });
+      titleRow.createSpan({ cls: "lexvoice-rcx-group-name", text: t });
+      titleRow.createSpan({ cls: "lexvoice-rcx-group-line" });
+      if (typeof decorate === "function") decorate(titleRow);
+      return g;
+    };
+    const mkField = (parent, label, action) => {
+      const f = parent.createDiv({ cls: "lexvoice-rcx-field" });
+      if (label || action) {
+        const lr = f.createDiv({ cls: "lexvoice-rcx-label-row" });
+        if (label) lr.createEl("label", { cls: "lexvoice-rcx-lbl", text: label });
+        if (action) txtBtn(lr, action.text, action.icon, action.onClick);
+      }
+      return f;
+    };
+    const bindText = (parent, label, key, ph) => {
+      const f = mkField(parent, label);
+      const inp = f.createEl("input", { cls: "lexvoice-rcx-in", attr: { type: "text", placeholder: ph || "" } });
+      inp.value = ctx[key] || "";
+      inp.addEventListener("input", () => { ctx[key] = inp.value; });
+      return inp;
+    };
+    const bindTextarea = (parent, field, key, ph, rows, onChange) => {
+      const ta = field.createEl("textarea", { cls: "lexvoice-rcx-ta", attr: { placeholder: ph || "", rows: String(rows || 3) } });
+      ta.value = ctx[key] || "";
+      ta.addEventListener("input", () => { ctx[key] = ta.value; if (typeof onChange === "function") onChange(); });
+      return ta;
+    };
+    const pick = (items, onPick, placeholder) => {
+      if (!items.length) { new obsidian.Notice("暂无可选项"); return; }
+      const modal = new (class extends obsidian.FuzzySuggestModal {
+        getItems() { return items; }
+        getItemText(it) { return it.label; }
+        onChooseItem(it) { onPick(it.value); }
+      })(this.app);
+      modal.setPlaceholder(placeholder || "输入以筛选…");
       modal.open();
     };
-    if (hasJd) {
-      const meta = card.createDiv({ cls: "lexvoice-recruit-card-meta" });
-      const flags = [];
-      flags.push(hasResume ? "简历已填" : "简历未填");
-      if (ctx.seniority) flags.push(ctx.seniority);
-      if (ctx.interviewer) flags.push(`面试官 ${ctx.interviewer}`);
-      meta.setText(flags.join(" · "));
+
+    // —— §3 岗位 ——
+    const gJob = mkGroup("岗位");
+    const jobGrid = gJob.createDiv({ cls: "lexvoice-rcx-grid2" });
+    bindText(jobGrid, "应聘岗位", "position", "如：社招负责人");
+    bindText(jobGrid, "岗位资历", "seniority", "如：资深");
+
+    let jdLib = [];
+    try { jdLib = getRecruitJdLibrary(settings) || []; } catch { jdLib = []; }
+    const jdField = mkField(gJob, "岗位 JD", jdLib.length ? { text: "从历史选择", icon: "rotate-ccw", onClick: () => pick(
+      jdLib.map((it) => ({ label: it.position || getRecruitJdPreview(it.jd) || "（未命名 JD）", value: it })),
+      (it) => { applyRecruitJdLibraryItem(ctx, it); ctx.interviewBrief = ""; this.render(); },
+      "选择历史 JD",
+    ) } : undefined);
+    bindTextarea(jdField, jdField, "jd", "粘贴岗位 JD…", 4, () => { ctx.interviewBrief = ""; });
+    const jdSaveRow = jdField.createDiv({ cls: "lexvoice-rcx-field-foot" });
+    txtBtn(jdSaveRow, "存为招聘项目", "plus", () => {
+      if (!ctx.jd || !ctx.jd.trim()) { new obsidian.Notice("先填岗位 JD 再存为项目"); return; }
+      try { upsertRecruitJdLibrary(settings, normalizeRecruitContext(ctx)); void this.plugin.saveSettings(); new obsidian.Notice("已存为招聘项目"); }
+      catch (e) { new obsidian.Notice("存为项目失败：" + ((e && e.message) || e)); }
+    });
+
+    const noteField = mkField(gJob, "评估侧重");
+    bindTextarea(noteField, noteField, "customNote", "想重点考察的特质，例如：客户思维、主观能动性、抗压…", 2);
+
+    // —— §4 候选人 ——
+    const gCand = mkGroup("候选人");
+    bindText(gCand, "姓名", "candidateName", "如：王亚运");
+    const resumeField = mkField(gCand, "候选人简历", { text: "从 PDF 导入", icon: "upload", onClick: () => {
+      const pdfs = (this.app.vault.getFiles() || []).filter((f) => (f.extension || "").toLowerCase() === "pdf");
+      pick(pdfs.map((f) => ({ label: f.path, value: f })), async (file) => {
+        try {
+          new obsidian.Notice("正在解析 PDF…");
+          let text = await extractPdfTextBestEffort(this.app, file);
+          if (settings.recruitResumeDesensitize !== false) text = desensitizeResumeText(text);
+          ctx.resume = text || "";
+          ctx.interviewBrief = "";
+          this._recruitResumePdfName = file.name || file.path;
+          this.render();
+          new obsidian.Notice("简历已导入");
+        } catch (e) { new obsidian.Notice("PDF 解析失败：" + ((e && e.message) || e)); }
+      }, "选择简历 PDF（本库内）");
+    } });
+    if (this._recruitResumePdfName) {
+      const fc = resumeField.createDiv({ cls: "lexvoice-rcx-filecard" });
+      try { obsidian.setIcon(fc.createDiv({ cls: "lexvoice-rcx-filecard-icon" }), "file"); } catch { /* intentionally empty */ }
+      const mid = fc.createDiv({ cls: "lexvoice-rcx-filecard-mid" });
+      mid.createDiv({ cls: "lexvoice-rcx-filecard-name", text: this._recruitResumePdfName });
+      mid.createDiv({ cls: "lexvoice-rcx-filecard-status", text: "已解析" });
+      const del = fc.createSpan({ cls: "lexvoice-rcx-filecard-del", attr: { role: "button", tabindex: "0", "aria-label": "移除", title: "移除" } });
+      try { obsidian.setIcon(del, "x"); } catch { del.setText("×"); }
+      del.onclick = () => { ctx.resume = ""; ctx.interviewBrief = ""; this._recruitResumePdfName = ""; this.render(); };
     }
+    bindTextarea(resumeField, resumeField, "resume", "粘贴或从 PDF 导入简历文本…", 3, () => { ctx.interviewBrief = ""; this._recruitResumePdfName = ""; });
+
+    // —— §4 本场面试 ——
+    const gInt = mkGroup("本场面试");
+    const intGrid = gInt.createDiv({ cls: "lexvoice-rcx-grid2" });
+    bindText(intGrid, "面试轮次", "round", "如：终面");
+    bindText(intGrid, "面试官", "interviewer", "如：李总");
+
+    const doGenerate = async (btn) => {
+      if (!ctx.jd || !ctx.jd.trim()) { new obsidian.Notice("先填岗位 JD 再生成提纲"); return; }
+      const normalized = normalizeRecruitContext(ctx);
+      normalized.savedAt = Date.now();
+      settings.recruitContext = normalized;
+      this._recruitDraft = normalized;
+      try { upsertRecruitJdLibrary(settings, normalized); } catch { /* intentionally empty */ }
+      await this.plugin.saveSettings();
+      const old = btn ? btn.textContent : "";
+      if (btn) { btn.classList.add("is-busy"); btn.setText("生成中…"); }
+      try {
+        const brief = await getRecruitInterviewOutline(this.plugin, settings.recruitContext);
+        settings.recruitContext.interviewBrief = brief || "";
+        this._recruitDraft = settings.recruitContext;
+        await this.plugin.saveSettings();
+        new obsidian.Notice("面试提纲已生成");
+        this.render();
+      } catch (e) {
+        if (btn) { btn.classList.remove("is-busy"); btn.setText(old || "生成面试提纲"); }
+        new obsidian.Notice("生成失败：" + ((e && e.message) || e));
+      }
+    };
+
+    // —— §5 面试提纲（生成结果，Markdown 渲染成排版，绝不显示原始 # ## **）——
+    if (ctx.interviewBrief && ctx.interviewBrief.trim()) {
+      const gBrief = mkGroup("面试提纲", (titleRow) => {
+        const badge = titleRow.createSpan({ cls: "lexvoice-rcx-genbadge" });
+        try { obsidian.setIcon(badge.createSpan({ cls: "lexvoice-rcx-genbadge-icon" }), "sparkles"); } catch { /* intentionally empty */ }
+        badge.createSpan({ text: "已生成" });
+        txtBtn(titleRow, "重新生成", "rotate-ccw", () => { void doGenerate(null); });
+      });
+      const result = gBrief.createDiv({ cls: "lexvoice-rcx-result markdown-rendered" });
+      try { void obsidian.MarkdownRenderer.render(this.app, ctx.interviewBrief.trim(), result, "", this); }
+      catch { result.createEl("pre", { text: ctx.interviewBrief.trim() }); }
+    }
+
+    // —— §6 底部固定操作栏 ——
+    const bottom = card.createDiv({ cls: "lexvoice-rcx-bottom" });
+    const swRow = bottom.createDiv({ cls: "lexvoice-rcx-switch-row" });
+    const sw = swRow.createEl("label", { cls: "lexvoice-rcx-switch" });
+    const cb = sw.createEl("input", { attr: { type: "checkbox" } });
+    cb.checked = settings.recruitAlwaysAskOnStart === false;
+    sw.createSpan({ cls: "lexvoice-rcx-switch-track" });
+    swRow.createSpan({ cls: "lexvoice-rcx-switch-label", text: "下次直接套用此上下文，不再询问" });
+    cb.addEventListener("change", async () => { settings.recruitAlwaysAskOnStart = !cb.checked; await this.plugin.saveSettings(); });
+
+    const btnRow = bottom.createDiv({ cls: "lexvoice-rcx-btn-row" });
+    const draftBtn = btnRow.createEl("button", { cls: "lexvoice-rcx-btn-secondary", attr: { type: "button" }, text: "保存草稿" });
+    draftBtn.onclick = async () => {
+      const normalized = normalizeRecruitContext(ctx);
+      normalized.savedAt = Date.now();
+      settings.recruitContext = normalized;
+      this._recruitDraft = normalized;
+      try { upsertRecruitJdLibrary(settings, normalized); } catch { /* intentionally empty */ }
+      await this.plugin.saveSettings();
+      new obsidian.Notice("已保存招聘上下文");
+    };
+    const genBtn = btnRow.createEl("button", { cls: "lexvoice-rcx-btn-primary", attr: { type: "button" } });
+    try { obsidian.setIcon(genBtn.createSpan({ cls: "lexvoice-rcx-btn-icon" }), "file-text"); } catch { /* intentionally empty */ }
+    genBtn.createSpan({ text: "生成面试提纲" });
+    genBtn.onclick = () => { void doGenerate(genBtn); };
   }
 
   renderQueueInbox(root) {
@@ -13094,6 +13443,15 @@ class LexVoicePlugin extends obsidian.Plugin {
     this.syncBubbleVisibility();
   }
 
+  // 打开大纲面板并进招聘上下文「内联编辑」视图（替掉原来的 flow:"settings" 弹窗）。
+  async openRecruitContextInline() {
+    if (!isRecruitFeatureUnlocked(this.settings)) { new obsidian.Notice("招聘评估功能未解锁"); return; }
+    await this.openOutlineView();
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_OUTLINE);
+    const view = leaves.length ? leaves[0].view : null;
+    if (view && typeof view.render === "function") { view._recruitEditing = true; view.render(); }
+  }
+
   // 判断实时纪要面板是否真正在 viewport 中可见
   // 三种"不可见"情况都要识别：
   //   1. leaf 不存在
@@ -13180,25 +13538,10 @@ class LexVoicePlugin extends obsidian.Plugin {
       ? continuationInfo.mode
       : getEffectivePolishMode(this.settings, this._oneShotPolishMode || this.settings.polishMode);
     if (mode === "recruit") {
-      this._currentRecruitContext = null;
-      if (this.settings.recruitAlwaysAskOnStart && !this._skipRecruitPrompt) {
-        const result = await new Promise((resolve) => {
-          const modal = new RecruitContextModal(this.app, this, {
-            flow: "recording",
-            onConfirm: (action, ctx) => resolve({ action, ctx }),
-          });
-          modal.open();
-        });
-        if (result.action === "cancel") {
-          return; // 用户关掉了 modal，不开录音
-        }
-        if (result.action !== "skip") {
-          this._currentRecruitContext = result.ctx;
-        }
-      } else {
-        const savedCtx = normalizeRecruitContext(this.settings.recruitContext);
-        this._currentRecruitContext = hasRecruitContextContent(savedCtx) ? savedCtx : null;
-      }
+      // 录音前不再弹窗：直接用已存的招聘上下文开录。要改上下文（尤其每场现导当场候选人简历），
+      // 事先点对象卡片的铅笔进内联编辑即可——录音入口不再打断。
+      const savedCtx = normalizeRecruitContext(this.settings.recruitContext);
+      this._currentRecruitContext = hasRecruitContextContent(savedCtx) ? savedCtx : null;
     }
     try {
       this.clearRecordingIssue();
@@ -14138,9 +14481,7 @@ class LexVoicePlugin extends obsidian.Plugin {
   renderHrActions(source, el) {
     el.empty();
     const bar = el.createDiv({ cls: "lexvoice-hr-actions" });
-    bar.createEl("button", { cls: "mod-cta", text: "＋ 新建面试" }).onclick = () => {
-      new RecruitContextModal(this.app, this, { flow: "settings", onConfirm: () => { /* intentionally empty */ } }).open();
-    };
+    bar.createEl("button", { cls: "mod-cta", text: "＋ 新建面试" }).onclick = () => { void this.openRecruitContextInline(); };
     bar.createEl("button", { text: "＋ 新建招聘项目" }).onclick = () => this.openNewRecruitProjectDialog();
   }
 
@@ -14167,7 +14508,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       {
         title: "AGENDA",
         items: [
-          { label: "新建面试", action: () => new RecruitContextModal(this.app, this, { flow: "settings", onConfirm: () => { /* intentionally empty */ } }).open() },
+          { label: "新建面试", action: () => void this.openRecruitContextInline() },
           { label: "新建项目", action: () => this.openNewRecruitProjectDialog() },
         ],
       },
