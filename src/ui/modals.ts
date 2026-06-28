@@ -7,7 +7,7 @@ import { diagnosticError } from '../shared/util-key-diag';
 import { classifyImportTextFileForModal, enumerateAudioDevices, lexvoiceConfirm, makeImportTextCheckboxId } from './helpers';
 import { formatElapsed, pad } from '../shared/util-common';
 import { desensitizeResumeText } from '../outline-text';
-import { applyRecruitJdLibraryItem, createRecruitProject, extractPdfTextBestEffort, getRecruitContextCopy, getRecruitInterviewOutline, getRecruitJdLibrary, getRecruitJdPreview, isRecruitFeatureUnlocked, listResumePdfs, normalizeRecruitContext, parseJdProject, upsertRecruitJdLibrary } from '../recruit';
+import { applyRecruitJdLibraryItem, createRecruitProject, extractCandidateNameFromResumeText, extractPdfTextBestEffort, getRecruitContextCopy, getRecruitInterviewOutline, getRecruitJdLibrary, getRecruitJdPreview, isRecruitFeatureUnlocked, listResumePdfs, normalizeRecruitContext, parseJdProject, upsertRecruitJdLibrary } from '../recruit';
 import { AUDIO_EXT, IMPORT_TEXT_CATEGORY_CONFIG, IMPORT_TEXT_CATEGORY_ORDER, TEXT_IMPORT_EXT } from '../shared/catalog-import';
 import { callLlm } from '../llm/core';
 import { mimeFromExt } from '../shared/util-audio';
@@ -730,8 +730,11 @@ export class RecruitContextModal extends obsidian.Modal {
       position: saved.position || "",
       round: saved.round || "初面",
       interviewer: saved.interviewer || "",
+      interviewScene: saved.interviewScene || "",
       seniority: saved.seniority || "",
       customNote: saved.customNote || "",
+      previousInterviewNote: saved.previousInterviewNote || "",
+      previousNotePath: saved.previousNotePath || "",
       // F2：恢复上次选中的招聘项目（让重开 Modal 仍显示已选项目与其综合素质）
       jdFile: saved.jdFile || "",
       generalOutline: saved.generalOutline || "",
@@ -814,11 +817,14 @@ export class RecruitContextModal extends obsidian.Modal {
             new obsidian.Notice("该 PDF 没有可提取的文本（可能是扫描件），请手动粘贴简历内容", 7000);
             return;
           }
+          const candidateName = extractCandidateNameFromResumeText(text, file && (file.name || file.basename || file.path));
           if (this.plugin.settings.recruitResumeDesensitize !== false) text = desensitizeResumeText(text);
           this.ctx.resume = text;
+          if (candidateName) this.ctx.candidateName = candidateName;
           this.clearCachedInterviewBrief();
           if (this.formEls.resume) this.formEls.resume.value = text;
-          new obsidian.Notice("已提取简历文本，可在下方编辑");
+          if (candidateName && this.formEls.candidateName) this.formEls.candidateName.value = candidateName;
+          new obsidian.Notice("已提取 PDF 文本，请核查内容");
         })(); });
       }
     }
@@ -853,10 +859,10 @@ export class RecruitContextModal extends obsidian.Modal {
 
     addMetaInput("候选人姓名", "candidateName", "如：某候选人");
     addMetaInput("应聘岗位", "position", "如：高级 OD（AI 方向）");
-    addMetaSelect("面试轮次", "round", ["初面", "二面", "终面", "复试", "交叉面"]);
-    addMetaInput("面试官", "interviewer", "如：某用人经理");
+    addMetaSelect("面试轮次", "round", ["初面", "二面", "终面"]);
+    addMetaSelect("面试场景", "interviewScene", ["业务面", "HR 面", "领导面"]);
     addMetaSelect("岗位资历", "seniority", ["", "初级", "中级", "高级", "资深", "总监"]);
-    addMetaInput("自定义提示", "customNote", "（可选）特殊关注点，会作为评价关注点使用");
+    addMetaInput("本轮评估重点", "customNote", "（可选）本轮特别要验证的点");
 
     // recruitAlwaysAskOnStart 的唯一写入点：此前该键没有任何 UI 可改，等于不可关的常量。
     const askRow = contentEl.createDiv({ cls: "lexvoice-recruit-ask-row" });

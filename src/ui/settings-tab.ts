@@ -1259,8 +1259,8 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         .length;
     };
 
-    const createPathSetting = (name, desc, value, placeholder, onSave, refreshDesc) => {
-      const setting = new obsidian.Setting(c).setName(name).setDesc(desc);
+    const createPathSetting = (parent, name, desc, value, placeholder, onSave, refreshDesc) => {
+      const setting = new obsidian.Setting(parent).setName(name).setDesc(desc);
       setting.addText(t => t.setValue(value || "")
         .setPlaceholder(placeholder)
         .onChange(async v => {
@@ -1271,63 +1271,6 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       if (refreshDesc) refreshDesc(setting);
       return setting;
     };
-
-    new obsidian.Setting(c).setName("纪要信息对象").setHeading();
-    const intro = c.createDiv({ cls: "setting-item-description lexvoice-section-hint" });
-    intro.setText("每篇纪要是统一入口：纪要保存完整上下文与可回听证据；ASR 热词、人员资料、学习卡片、待办卡片是从纪要中沉淀出的四类信息对象，分别服务转写准确、人员沉淀、学习复用与行动跟踪。");
-
-    const objectList = c.createEl("ul", { cls: "lexvoice-object-model-list" });
-    [
-      ["ASR 热词", "服务转写准确率，只保存术语、名称和易错写法。"],
-      ["人员资料", "服务本地关系沉淀，一人一页，默认不随请求发送。"],
-      ["学习卡片", "服务长期学习复用，包括概念、机制、案例、QA、追问和观点。"],
-      ["待办卡片", "服务行动跟踪，只承接明确可执行事项。"],
-    ].forEach(([name, desc]) => {
-      const li = objectList.createEl("li");
-      li.createSpan({ cls: "lexvoice-object-model-name", text: name });
-      li.createSpan({ text: "：" + desc });
-    });
-
-    new obsidian.Setting(c).setName("对象提取").setHeading();
-    c.createDiv({ cls: "setting-item-description lexvoice-section-hint" })
-      .setText("提取遵循“候选 → 确认 → 入库”。当前可直接扫描纪要库生成 ASR 热词和人员建议；学习卡片和待办卡片通过已确认的卡片文件进入对应墙面。");
-
-    new obsidian.Setting(c).setName("转写完成后自动沉淀")
-      .setDesc("关闭（默认）：转写完成不自动沉淀，省 token；需要时在实时纪要面板手动点「沉淀」再扫描入库。开启：每次转写/整理完成后，自动扫描纪要、把学习卡片与待办写入对应墙面（按量计费，无需逐条确认）。")
-      .addToggle(t => t.setValue(!!this.plugin.settings.sedimentAutoExtract).onChange(async v => { this.plugin.settings.sedimentAutoExtract = v; await this.plugin.saveSettings(); }));
-
-    const pendingPeopleSuggestions = normalizePeopleSuggestionCache(this.plugin.settings.peopleSuggestionCache).pending;
-    const ignoredPeopleSuggestions = normalizePeopleSuggestionIgnores(this.plugin.settings.peopleSuggestionIgnores);
-    new obsidian.Setting(c).setName("扫描纪要库")
-      .setDesc("从转写纪要文件夹读取纪要，并把文本发送到当前配置的大模型服务进行提取（按量计费）。涉密或敏感纪要建议改用本地大模型后再扫描。ASR 热词直接写入热词表；人员建议先进入确认面板，确认后才写入人员资料。")
-      .addButton(b => b.setButtonText("提取 ASR 热词").onClick(async () => this._extractVocabFromLibrary(refreshVocabStatus)))
-      .addButton(b => b.setButtonText("提取人员建议").onClick(async () => this.plugin.suggestPeopleDirectoryFromLibrary()));
-
-    new obsidian.Setting(c).setName("人员建议")
-      .setDesc(`待确认 ${pendingPeopleSuggestions.length} 条；已忽略 ${ignoredPeopleSuggestions.length} 条。已有人员资料只在本地用于匹配和去重，不随扫描请求发送。`)
-      .addButton(b => b.setButtonText("查看待确认").setDisabled(!pendingPeopleSuggestions.length).onClick(async () => { await this.plugin.openCachedPeopleDirectorySuggestions(); this.display(); }))
-      .addButton(b => b.setButtonText("查看已忽略").setDisabled(!ignoredPeopleSuggestions.length).onClick(async () => { await this.plugin.openIgnoredPeopleDirectorySuggestions(); this.display(); }));
-
-    new obsidian.Setting(c).setName("重复人员合并")
-      .setDesc("按人员 frontmatter 的「姓名」识别历史重复页（如 王传鹏 / 王传鹏-2），合并资料、改写纪要引用，并把重复页移到 LexVoice/归档/重复人员。")
-      .addButton(b => b.setButtonText("合并重复人员").onClick(async () => {
-        const ok = await lexvoiceConfirm(this.app, "合并重复人员档案？", "LexVoice 会把同名人员页合并到主档案，改写所有指向重复页的 wiki 链接，并将重复页移到归档目录。建议先确保同步已完成。", "开始合并");
-        if (!ok) return;
-        try {
-          const result = await this.plugin.mergeDuplicatePeopleDirectory();
-          new obsidian.Notice(result.merged
-            ? `已合并 ${result.merged} 个重复人员页，更新 ${result.updatedLinks} 篇引用`
-            : "没有发现需要合并的重复人员页");
-          this.display();
-        } catch (e) {
-          console.error("[LexVoice] merge duplicate people failed", e);
-          new obsidian.Notice(`合并重复人员失败：${(e && e.message) || e}`, 8000);
-        }
-      }));
-
-    new obsidian.Setting(c).setName("对象保存位置").setHeading();
-    c.createDiv({ cls: "setting-item-description lexvoice-section-hint" })
-      .setText("这些路径都是当前 Obsidian 库内的相对路径。建议让纪要、对象和视图分层保存：纪要用于追溯，对象用于复用，视图用于浏览。");
 
     const refreshVocabStatus = async (setting) => {
       const path = this.plugin.settings.vocabularyFile;
@@ -1347,75 +1290,8 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       }
     };
 
-    const vocabPathSetting = createPathSetting("ASR 热词表", "用于保存转写热词、专有名词和易错写法。", this.plugin.settings.vocabularyFile || DEFAULT_SETTINGS.vocabularyFile, "LexVoice/词汇表.md",
-      async v => { this.plugin.settings.vocabularyFile = v || DEFAULT_SETTINGS.vocabularyFile; },
-      refreshVocabStatus);
-
-    createPathSetting("人员资料文件夹", "一人一篇 Markdown，用于长期维护姓名、常用称呼、角色、组织和相关纪要。", this.plugin.settings.peopleDirectoryFolder || DEFAULT_SETTINGS.peopleDirectoryFolder, "LexVoice/人员",
-      async v => { this.plugin.settings.peopleDirectoryFolder = v || DEFAULT_SETTINGS.peopleDirectoryFolder; },
-      async setting => {
-        try {
-          const people = await loadPeopleDirectory(this.plugin);
-          setting.setDesc(`当前 ${people.length} 位人员。人员资料默认只在本地读取。`);
-        } catch (e) {
-          setting.setDesc(`读取失败：${e.message || e}`);
-        }
-      });
-
-    createPathSetting("学习卡片文件夹", "用于保存概念、机制、案例、QA、追问和观点卡片。", this.plugin.settings.learningCardsFolder || DEFAULT_SETTINGS.learningCardsFolder, "LexVoice/学习卡片",
-      async v => { this.plugin.settings.learningCardsFolder = v || DEFAULT_SETTINGS.learningCardsFolder; },
-      async setting => {
-        const count = countMarkdownInFolder(this.plugin.settings.learningCardsFolder || DEFAULT_SETTINGS.learningCardsFolder);
-        setting.setDesc(`当前 ${count} 张学习卡片。卡片负责复用，原始依据仍回链到纪要。`);
-      });
-
-    createPathSetting("待办卡片文件夹", "用于保存从纪要中确认后的行动项卡片。", this.plugin.settings.todoCardsFolder || DEFAULT_SETTINGS.todoCardsFolder, "LexVoice/待办卡片",
-      async v => { this.plugin.settings.todoCardsFolder = v || DEFAULT_SETTINGS.todoCardsFolder; },
-      async setting => {
-        const count = countMarkdownInFolder(this.plugin.settings.todoCardsFolder || DEFAULT_SETTINGS.todoCardsFolder);
-        setting.setDesc(`当前 ${count} 张待办卡片。待办卡片适合跟踪跨会议、跨项目的行动项。`);
-      });
-
-    createPathSetting("视图文件夹", "保存 LexVoice 生成的知识墙和辅助 Base。", this.plugin.settings.lexVoiceBasesFolder || DEFAULT_SETTINGS.lexVoiceBasesFolder, "LexVoice/视图",
-      async v => { this.plugin.settings.lexVoiceBasesFolder = v || DEFAULT_SETTINGS.lexVoiceBasesFolder; });
-
-    new obsidian.Setting(c).setName("浏览与检索").setHeading();
-    c.createDiv({ cls: "setting-item-description lexvoice-section-hint" })
-      .setText("主入口只保留内容墙；Base 只用于高级筛选、核对和批量表格，不再作为学习 / 概念 / 待办的重复入口。");
-
-    new obsidian.Setting(c).setName("内容墙（主入口）")
-      .setDesc("用于日常浏览和回看沉淀对象。学习卡片、概念和待办都以 Markdown 墙呈现，不再单独维护同名 Base。")
-      .addButton(b => b.setButtonText("对象总览").setCta().onClick(() => this.plugin.openObjectWall()))
-      .addButton(b => b.setButtonText("学习卡片").onClick(() => this.plugin.openLearningWall("learning")))
-      .addButton(b => b.setButtonText("概念").onClick(() => this.plugin.openLearningWall("concept")))
-      .addButton(b => b.setButtonText("待办").onClick(() => this.plugin.openTodoWall()));
-
-    new obsidian.Setting(c).setName("高级表格（Base）")
-      .setDesc("只保留需要表格能力的入口：人员资料和全部纪要明细。适合筛选、核对、批量检查，不承担对象墙展示。")
-      .addButton(b => b.setButtonText("人员资料").onClick(() => this.plugin.openPeopleBase()))
-      .addButton(b => b.setButtonText("全部纪要").onClick(() => this.plugin.openLexVoiceDetailBase()))
-      .addButton(b => b.setButtonText("补齐 Base").onClick(async () => {
-        try {
-          const r = await this.plugin.createLexVoiceBases({ overwrite: false });
-          new obsidian.Notice(`Base 创建完成：新建 ${r.created} 个，跳过 ${r.skipped} 个`);
-        } catch (e) {
-          console.error(e);
-          new obsidian.Notice(`创建失败：${e.message || e}`);
-        }
-      }))
-      .addButton(b => b.setButtonText("归档旧对象 Base").onClick(async () => {
-        try {
-          await this.plugin.archiveLegacyObjectBaseViews();
-        } catch (e) {
-          console.error(e);
-          new obsidian.Notice(`归档失败：${e.message || e}`);
-        }
-      }));
-
-    new obsidian.Setting(c).setName("对象维护").setHeading();
-    new obsidian.Setting(c).setName("ASR 热词表")
-      .setDesc("打开热词表进行人工维护。热词只用于提高转写时的专有名词识别，不承载人员关系。默认文件名「词汇表.md」为历史沿用，可改名。")
-      .addButton(b => b.setButtonText("打开/创建").onClick(async () => {
+    let vocabPathSetting = null;
+    const openVocabularyFile = async () => {
         const path = this.plugin.settings.vocabularyFile;
         if (!path) { new obsidian.Notice("请先填写文件路径"); return; }
         const norm = obsidian.normalizePath(path);
@@ -1432,21 +1308,157 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
             await this.plugin.app.vault.modify(file, formatVocabularyMarkdown(parseVocabularyGroups(content), this.plugin.settings.industryProfile));
             new obsidian.Notice("已整理为分区热词表");
           }
-          await refreshVocabStatus(vocabPathSetting);
+          if (vocabPathSetting) await refreshVocabStatus(vocabPathSetting);
           await this.plugin.app.workspace.getLeaf(false).openFile(file);
+        }
+    };
+
+    const pendingPeopleSuggestions = normalizePeopleSuggestionCache(this.plugin.settings.peopleSuggestionCache).pending;
+    const ignoredPeopleSuggestions = normalizePeopleSuggestionIgnores(this.plugin.settings.peopleSuggestionIgnores);
+    const peopleCount = countMarkdownInFolder(this.plugin.settings.peopleDirectoryFolder || DEFAULT_SETTINGS.peopleDirectoryFolder);
+    const learningCount = countMarkdownInFolder(this.plugin.settings.learningCardsFolder || DEFAULT_SETTINGS.learningCardsFolder);
+    const todoCount = countMarkdownInFolder(this.plugin.settings.todoCardsFolder || DEFAULT_SETTINGS.todoCardsFolder);
+
+    new obsidian.Setting(c).setName("信息对象").setHeading();
+    c.createDiv({ cls: "setting-item-description lexvoice-section-hint" })
+      .setText("从纪要中沉淀人员、学习卡片、待办和转写词表。对象用于复用，视图用于浏览；纪要仍是原始证据和回听入口。");
+
+    const overview = c.createDiv({ cls: "lexvoice-object-overview-grid" });
+    const makeObjectCard = (title, countText, desc, actionText, onClick) => {
+      const btn = overview.createEl("button", { cls: "lexvoice-object-overview-card", attr: { type: "button" } });
+      btn.createDiv({ cls: "lexvoice-object-overview-title", text: title });
+      btn.createDiv({ cls: "lexvoice-object-overview-count", text: countText });
+      btn.createDiv({ cls: "lexvoice-object-overview-desc", text: desc });
+      btn.createDiv({ cls: "lexvoice-object-overview-action", text: actionText });
+      btn.onclick = onClick;
+      return btn;
+    };
+    makeObjectCard("人员", `${peopleCount} 位`, "会议里出现的人，一人一页，关联相关纪要。", "打开人员库", () => this.plugin.openPeopleBase());
+    makeObjectCard("学习卡片", `${learningCount} 张`, "观点、机制、案例、QA 等可复用知识。", "打开卡片墙", () => this.plugin.openLearningWall("learning"));
+    makeObjectCard("待办", `${todoCount} 条`, "从纪要确认出的行动项，可勾选追踪。", "打开待办墙", () => this.plugin.openTodoWall());
+    const vocabCard = makeObjectCard("转写词表", "读取中", "术语、专名和易错写法，用于提升转写准确率。", "打开词表", () => openVocabularyFile());
+
+    (async () => {
+      const countEl = vocabCard.querySelector(".lexvoice-object-overview-count");
+      try {
+        const path = obsidian.normalizePath(this.plugin.settings.vocabularyFile || DEFAULT_SETTINGS.vocabularyFile);
+        const file = this.plugin.app.vault.getAbstractFileByPath(path);
+        if (!(file instanceof obsidian.TFile)) { if (countEl) countEl.setText("0 个"); return; }
+        const groups = parseVocabularyGroups(await this.plugin.app.vault.cachedRead(file));
+        if (countEl) countEl.setText(`${countVocabularyGroups(groups)} 个`);
+      } catch {
+        if (countEl) countEl.setText("读取失败");
+      }
+    })();
+
+    new obsidian.Setting(c).setName("转写完成后自动沉淀")
+      .setDesc("默认关闭以节省 token。开启后，转写/整理完成会自动扫描当前纪要并写入学习卡片与待办；人员和词表仍保留确认/维护流程。")
+      .addToggle(t => t.setValue(!!this.plugin.settings.sedimentAutoExtract).onChange(async v => { this.plugin.settings.sedimentAutoExtract = v; await this.plugin.saveSettings(); }));
+
+    new obsidian.Setting(c).setName("补全对象库").setHeading();
+    new obsidian.Setting(c).setName("从历史纪要补全")
+      .setDesc(`人员建议待确认 ${pendingPeopleSuggestions.length} 条，已忽略 ${ignoredPeopleSuggestions.length} 条。扫描会调用当前大模型服务，涉密纪要建议使用本地模型。`)
+      .addButton(b => b.setButtonText("提取人员建议").setCta().onClick(async () => this.plugin.suggestPeopleDirectoryFromLibrary()))
+      .addButton(b => b.setButtonText("提取转写词表").onClick(async () => this._extractVocabFromLibrary(async () => { if (vocabPathSetting) await refreshVocabStatus(vocabPathSetting); })))
+      .addButton(b => b.setButtonText("待确认").setDisabled(!pendingPeopleSuggestions.length).onClick(async () => { await this.plugin.openCachedPeopleDirectorySuggestions(); this.display(); }))
+      .addButton(b => b.setButtonText("已忽略").setDisabled(!ignoredPeopleSuggestions.length).onClick(async () => { await this.plugin.openIgnoredPeopleDirectorySuggestions(); this.display(); }));
+
+    new obsidian.Setting(c).setName("人员去重")
+      .setDesc("按人员属性「姓名」识别重复页，合并资料、改写纪要引用，并把重复页归档。适合处理同一人被新建成 -1 / -2 的情况。")
+      .addButton(b => b.setButtonText("合并重复人员").onClick(async () => {
+        const ok = await lexvoiceConfirm(this.app, "合并重复人员档案？", "LexVoice 会把同名人员页合并到主档案，改写所有指向重复页的 wiki 链接，并将重复页移到归档目录。建议先确保同步已完成。", "开始合并");
+        if (!ok) return;
+        try {
+          const result = await this.plugin.mergeDuplicatePeopleDirectory();
+          new obsidian.Notice(result.merged
+            ? `已合并 ${result.merged} 个重复人员页，更新 ${result.updatedLinks} 篇引用`
+            : "没有发现需要合并的重复人员页");
+          this.display();
+        } catch (e) {
+          console.error("[LexVoice] merge duplicate people failed", e);
+          new obsidian.Notice(`合并重复人员失败：${(e && e.message) || e}`, 8000);
+        }
+      }));
+
+    new obsidian.Setting(c).setName("浏览入口").setHeading();
+    new obsidian.Setting(c).setName("对象墙")
+      .setDesc("日常浏览入口。对象总览支持按类型筛选；学习、概念和待办也可以单独打开。")
+      .addButton(b => b.setButtonText("对象总览").setCta().onClick(() => this.plugin.openObjectWall()))
+      .addButton(b => b.setButtonText("学习卡片").onClick(() => this.plugin.openLearningWall("learning")))
+      .addButton(b => b.setButtonText("概念").onClick(() => this.plugin.openLearningWall("concept")))
+      .addButton(b => b.setButtonText("待办").onClick(() => this.plugin.openTodoWall()));
+
+    new obsidian.Setting(c).setName("明细表格")
+      .setDesc("用于核对和批量筛选，不作为主展示入口。")
+      .addButton(b => b.setButtonText("人员资料").onClick(() => this.plugin.openPeopleBase()))
+      .addButton(b => b.setButtonText("全部纪要").onClick(() => this.plugin.openLexVoiceDetailBase()));
+
+    const advanced = c.createEl("details", { cls: "lexvoice-settings-details" });
+    advanced.createEl("summary", { text: "高级设置：保存位置、扫描记录、隐私策略" });
+    const advancedBody = advanced.createDiv({ cls: "lexvoice-settings-details-body" });
+
+    new obsidian.Setting(advancedBody).setName("对象保存位置").setHeading();
+    advancedBody.createDiv({ cls: "setting-item-description lexvoice-section-hint" })
+      .setText("这些路径都是当前 Obsidian 库内的相对路径。一般不需要修改；迁移资料库结构时再调整。");
+
+    vocabPathSetting = createPathSetting(advancedBody, "转写词表文件", "用于保存专有名词、术语和易错写法。", this.plugin.settings.vocabularyFile || DEFAULT_SETTINGS.vocabularyFile, "LexVoice/词汇表.md",
+      async v => { this.plugin.settings.vocabularyFile = v || DEFAULT_SETTINGS.vocabularyFile; },
+      refreshVocabStatus);
+
+    createPathSetting(advancedBody, "人员资料文件夹", "一人一篇 Markdown，用于长期维护姓名、常用称呼、角色、组织和相关纪要。", this.plugin.settings.peopleDirectoryFolder || DEFAULT_SETTINGS.peopleDirectoryFolder, "LexVoice/人员",
+      async v => { this.plugin.settings.peopleDirectoryFolder = v || DEFAULT_SETTINGS.peopleDirectoryFolder; },
+      async setting => {
+        try {
+          const people = await loadPeopleDirectory(this.plugin);
+          setting.setDesc(`当前 ${people.length} 位人员。人员资料默认只在本地读取。`);
+        } catch (e) {
+          setting.setDesc(`读取失败：${e.message || e}`);
+        }
+      });
+
+    createPathSetting(advancedBody, "学习卡片文件夹", "用于保存概念、机制、案例、QA、追问和观点卡片。", this.plugin.settings.learningCardsFolder || DEFAULT_SETTINGS.learningCardsFolder, "LexVoice/学习卡片",
+      async v => { this.plugin.settings.learningCardsFolder = v || DEFAULT_SETTINGS.learningCardsFolder; },
+      async setting => {
+        const count = countMarkdownInFolder(this.plugin.settings.learningCardsFolder || DEFAULT_SETTINGS.learningCardsFolder);
+        setting.setDesc(`当前 ${count} 张学习卡片。卡片负责复用，原始依据仍回链到纪要。`);
+      });
+
+    createPathSetting(advancedBody, "待办卡片文件夹", "用于保存从纪要中确认后的行动项卡片。", this.plugin.settings.todoCardsFolder || DEFAULT_SETTINGS.todoCardsFolder, "LexVoice/待办卡片",
+      async v => { this.plugin.settings.todoCardsFolder = v || DEFAULT_SETTINGS.todoCardsFolder; },
+      async setting => {
+        const count = countMarkdownInFolder(this.plugin.settings.todoCardsFolder || DEFAULT_SETTINGS.todoCardsFolder);
+        setting.setDesc(`当前 ${count} 张待办卡片。待办卡片适合跟踪跨会议、跨项目的行动项。`);
+      });
+
+    createPathSetting(advancedBody, "视图文件夹", "保存 LexVoice 生成的对象墙和辅助 Base。", this.plugin.settings.lexVoiceBasesFolder || DEFAULT_SETTINGS.lexVoiceBasesFolder, "LexVoice/视图",
+      async v => { this.plugin.settings.lexVoiceBasesFolder = v || DEFAULT_SETTINGS.lexVoiceBasesFolder; });
+
+    new obsidian.Setting(advancedBody).setName("转写词表维护")
+      .setDesc("打开词表进行人工维护；如是旧格式，会自动整理为分区热词表。")
+      .addButton(b => b.setButtonText("打开/创建").onClick(openVocabularyFile));
+
+    new obsidian.Setting(advancedBody).setName("表格视图维护")
+      .setDesc("用于高级筛选和核对。日常浏览请优先使用对象墙。")
+      .addButton(b => b.setButtonText("补齐表格视图").onClick(async () => {
+        try {
+          const r = await this.plugin.createLexVoiceBases({ overwrite: false });
+          new obsidian.Notice(`表格视图创建完成：新建 ${r.created} 个，跳过 ${r.skipped} 个`);
+        } catch (e) {
+          console.error(e);
+          new obsidian.Notice(`创建失败：${e.message || e}`);
         }
       }));
 
     const vocabScanCount = countKnowledgeExtractionHistory(this.plugin.settings, "vocabulary");
     const peopleScanCount = countKnowledgeExtractionHistory(this.plugin.settings, "people");
-    new obsidian.Setting(c).setName("纪要扫描记录")
-      .setDesc(`ASR 热词已扫描 ${vocabScanCount} 篇；人员建议已扫描 ${peopleScanCount} 篇。清空记录后，修改过或已存在的纪要可重新进入扫描。重新扫描会再次调用大模型服务，云端按量产生费用。`)
-      .addButton(b => b.setButtonText("清空热词记录").setDisabled(!vocabScanCount).onClick(async () => {
-        const ok = await lexvoiceConfirm(this.app, "清空热词扫描记录？", `${vocabScanCount} 篇纪要将重新进入扫描范围；重新扫描会再次调用大模型服务，云端按量产生费用。`, "清空");
+    new obsidian.Setting(advancedBody).setName("纪要扫描记录")
+      .setDesc(`转写词表已扫描 ${vocabScanCount} 篇；人员建议已扫描 ${peopleScanCount} 篇。清空记录后，修改过或已存在的纪要可重新进入扫描。`)
+      .addButton(b => b.setButtonText("清空词表记录").setDisabled(!vocabScanCount).onClick(async () => {
+        const ok = await lexvoiceConfirm(this.app, "清空词表扫描记录？", `${vocabScanCount} 篇纪要将重新进入扫描范围；重新扫描会再次调用大模型服务，云端按量产生费用。`, "清空");
         if (!ok) return;
         this.plugin.clearKnowledgeExtractionHistory("vocabulary");
         await this.plugin.saveSettings();
-        new obsidian.Notice("已清空 ASR 热词扫描记录");
+        new obsidian.Notice("已清空转写词表扫描记录");
         this.display();
       }))
       .addButton(b => b.setButtonText("清空人员记录").setDisabled(!peopleScanCount).onClick(async () => {
@@ -1458,14 +1470,13 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         this.display();
       }));
 
-    new obsidian.Setting(c).setName("隐私与上下文").setHeading();
     const transcribeProvider = resolveTranscribeProvider(this.plugin);
     const asrScope = isLocalServiceEndpoint(transcribeProvider.endpoint) ? "当前转写服务识别为本地或局域网" : "当前转写服务识别为云端";
     const llmScope = isLocalLlmEndpoint(this.plugin.settings.llmEndpoint) ? "当前大模型服务识别为本地或局域网" : "当前大模型服务识别为云端";
     const modeLabel = { privacy: "隐私优先", hotwords: "人名热词", localFull: "本地增强" }[normalizePeopleContextMode(this.plugin.settings.peopleContextMode)] || "隐私优先";
     const consentText = hasPeopleHotwordsConsent(this.plugin.settings) ? `已于 ${this.plugin.settings.peopleHotwordsConsentAt} 授权人名热词。` : "尚未授权人名热词。";
 
-    new obsidian.Setting(c).setName("人员资料使用策略")
+    new obsidian.Setting(advancedBody).setName("人员资料使用策略")
       .setDesc(`${modeLabel}。${asrScope}；${llmScope}。${consentText}`)
       .addDropdown(d => d
         .addOption("privacy", "隐私优先：不发送人员资料")

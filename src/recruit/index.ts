@@ -104,10 +104,16 @@ export function seniorityCalibrationLines(seniority) {
     return [`**资历校准（本岗为「${s}」）**：要求能独立承担常规事务。未闭环/未独立主导可记风险但未必是红旗；核心领域需达「能上手实操」级，仅「接触过」级在核心项上可扣分。`];
   }
   if (/高级|资深|专家|senior|staff/i.test(s)) {
-    return [`**资历校准（本岗为「${s}」）**：按 senior 标尺从严——独立主导范围、量化交付、方法论、跨部门影响必须有证据；核心能力仅「接触过」级、结果未闭环、未激活的潜在优势均按红旗处理。`];
+    return [
+      `**资历校准（本岗为「${s}」）**：按 senior 标尺从严——独立主导范围、量化交付、方法论、跨部门影响必须有证据；核心能力仅「接触过」级、结果未闭环、未激活的潜在优势均按红旗处理。`,
+      "- **管理素质要求**：高级/资深不默认要求完整团队管理，但要观察横向影响力、项目牵引、带教/方法沉淀和资源协调能力；若 JD 明确带团队，则按管理者维度追问。",
+    ];
   }
   if (/总监|负责人|head|director|lead|管理|vp|经理/i.test(s)) {
-    return [`**资历校准（本岗为「${s}」）**：按管理者标尺——必须考察组织设计、团队搭建、预算/资源、机制建设、业务取舍与关键风险兜底；缺这些维度证据即为重大缺口。`];
+    return [
+      `**资历校准（本岗为「${s}」）**：按管理者标尺——必须考察组织设计、团队搭建、预算/资源、机制建设、业务取舍与关键风险兜底；缺这些维度证据即为重大缺口。`,
+      "- **管理素质要求**：必须验证团队搭建、目标拆解、授权与纠偏、跨部门协同、冲突处理、成本/预算意识、不可逆风险兜底和 90 天优先级。",
+    ];
   }
   return [`**资历校准**：岗位资历「${s}」，按该层级标杆校准评分严格度。`];
 }
@@ -118,11 +124,19 @@ export function buildRecruitContextPrefix(ctx) {
   if (ctx.position) parts.push(`**应聘岗位**：${ctx.position}`);
   if (ctx.candidateName) parts.push(`**候选人**：${ctx.candidateName}`);
   if (ctx.round) parts.push(`**轮次**：${ctx.round}`);
-  if (ctx.interviewer) parts.push(`**面试官**：${ctx.interviewer}`);
+  if (ctx.interviewScene) parts.push(`**面试场景**：${ctx.interviewScene}`);
+  else if (ctx.interviewer) parts.push(`**面试场景/旧面试官字段**：${ctx.interviewer}`);
   if (ctx.seniority) parts.push(`**岗位资历级别**：${ctx.seniority}（按此 seniority 校准评分严格度）`);
   if (ctx.customNote) {
-    parts.push(`**特殊关注点（面试官最在意的重点考核项）**：${ctx.customNote}`);
+    parts.push(`**本轮评估重点（JD 自动提取 + 用户手动补充 + 上轮待验证点）**：${ctx.customNote}`);
     parts.push(`⚠️ **强制要求**：最终纪要必须在「录用建议」下方输出「重点考核项核验」一节，对上述每个特殊关注点逐项核验——它常是软性素质，未必被直接问到，要从候选人回答各题时的**侧面表现**里找正反证据并**引用原话**；全场都找不到证据就如实标「本场未触及，建议二面专项考察」。`);
+  }
+  if (ctx.previousInterviewNote) {
+    parts.push("");
+    parts.push("### 上一轮面试纪要（用于连续招聘决策）");
+    if (ctx.previousNotePath) parts.push(`来源：${ctx.previousNotePath}`);
+    parts.push(truncateForLlmPrompt(String(ctx.previousInterviewNote).trim(), 2600));
+    parts.push("要求：评估时先提取上一轮已确认、风险点、待追问和不必重复的问题；本轮只补验证，不重复低价值题。");
   }
   if (ctx.jd) {
     parts.push("");
@@ -152,6 +166,8 @@ export function buildRecruitContextPrefix(ctx) {
   parts.push("");
   parts.push("**评分纪律提醒**：");
   parts.push("- 默认假设候选人不达标，需看到正向证据才加分");
+  parts.push("- **全局证据判断**：不要把单题未体现直接判为不具备；必须跨所有问答聚合正向证据、负向证据和未观察到项");
+  parts.push("- 输出能力判断前先区分三类：明确正向证据 / 明确负向证据 / 本场未观察到；「未观察到」只能进入待追问，不能直接当作扣死理由");
   parts.push("- 把 JD 拆成 3-5 条硬性要求 + 1-3 条加分项，逐条评估");
   parts.push("- 简历 vs 面试陈述若有矛盾，必须列入风险点");
   parts.push("- 行业/经验跨度若 JD 不允许，必须作为硬扣分项");
@@ -164,13 +180,13 @@ export function buildRecruitContextPrefix(ctx) {
 export function buildRecruitInterviewBriefStrategy(ctx) {
   const round = String(ctx && ctx.round || "").trim() || "初面";
   const seniority = String(ctx && ctx.seniority || "").trim() || "未指定";
-  const interviewer = String(ctx && ctx.interviewer || "").trim();
+  const scene = String(ctx && (ctx.interviewScene || ctx.interviewer) || "").trim();
   const roundKey = round.replace(/\s+/g, "").toLowerCase();
-  const interviewerText = interviewer || "未指定面试官";
+  const sceneText = scene || "未指定场景";
   const lines = [
     `- 本场轮次：${round}。`,
     `- 岗位资历：${seniority}。`,
-    `- 面试官/角色：${interviewerText}。`,
+    `- 面试场景：${sceneText}。`,
     "",
     "### 轮次策略",
   ];
@@ -183,22 +199,22 @@ export function buildRecruitInterviewBriefStrategy(ctx) {
   } else if (/hr面|人力面/.test(roundKey)) {
     lines.push("- HR 面重点：动机、稳定性、薪酬/期望、文化适配、管理风格、风险项解释。");
     lines.push("- 追问风格：用行为事件验证，不要只问主观偏好。");
-  } else if (/终面|终试|总监面|董事长|老板|ceo|vp|合伙人/.test(roundKey + interviewerText.toLowerCase())) {
+  } else if (/终面|终试|总监面|董事长|老板|ceo|vp|合伙人/.test(roundKey + sceneText.toLowerCase())) {
     lines.push("- 终面重点：战略理解、组织适配、业务迁移、风险承担、入职 90 天优先级、长期动机。");
     lines.push("- 追问风格：少问流程细节，多问判断标准、取舍逻辑、业务视角和不可逆决策。");
   } else {
     lines.push("- 未明确轮次时：默认按“事实核验 + 专业深挖 + 动机风险”平衡设计。");
   }
-  lines.push("", "### 面试官角色策略");
-  if (/董事长|老板|ceo|创始人|合伙人|集团|总裁|vp|高管/i.test(interviewerText)) {
-    lines.push("- 高层面试：问题必须上升到业务、组织、战略、价值观和关键风险，不要输出招聘专员式基础核验题。");
+  lines.push("", "### 面试场景策略");
+  if (/领导|董事长|老板|ceo|创始人|合伙人|集团|总裁|vp|高管/i.test(sceneText)) {
+    lines.push("- 领导面：问题必须上升到业务、组织、战略、价值观和关键风险，不要输出招聘专员式基础核验题。");
     lines.push("- 必须包含：为什么现在换机会、为什么适合本公司、过往最大判断失误、90 天优先级。");
-  } else if (/招聘|hr|人力|人才|组织|od/i.test(interviewerText)) {
-    lines.push("- 招聘/HR 面试：重点验证简历真实性、动机稳定性、岗位基本匹配、薪酬预期、组织适配和风险解释。");
-  } else if (/业务|用人|部门|负责人|总监|经理|leader|李总|王总|张总/i.test(interviewerText)) {
-    lines.push("- 用人经理面试：重点验证能否解决本岗位真实业务问题、跨部门推动、交付质量和上手路径。");
+  } else if (/hr|人力|招聘|人才|组织|od/i.test(sceneText)) {
+    lines.push("- HR 面：重点验证简历真实性、动机稳定性、薪酬预期、组织适配、沟通方式、管理风格和风险解释。");
+  } else if (/业务|用人|专业|部门/i.test(sceneText)) {
+    lines.push("- 业务面：重点验证能否解决本岗位真实业务问题、专业深度、跨部门推动、交付质量和上手路径。");
   } else {
-    lines.push("- 面试官角色不明时：默认按用人经理视角输出，兼顾少量动机和风险问题。");
+    lines.push("- 面试场景不明时：默认按业务面输出，兼顾少量动机和风险问题。");
   }
   lines.push("", "### 岗位资历策略");
   if (/初级|junior|助理|专员/i.test(seniority)) {
@@ -223,31 +239,34 @@ export async function generateInterviewBriefForRecruit(plugin, ctx, opts) {
   if (ctx.seniority) meta.push(`岗位资历：${ctx.seniority}`);
   if (ctx.candidateName) meta.push(`候选人：${ctx.candidateName}`);
   if (ctx.round) meta.push(`轮次：${ctx.round}`);
-  if (ctx.interviewer) meta.push(`面试官：${ctx.interviewer}`);
+  if (ctx.interviewScene) meta.push(`面试场景：${ctx.interviewScene}`);
+  else if (ctx.interviewer) meta.push(`面试场景：${ctx.interviewer}`);
   const metaLine = meta.length ? meta.join(" · ") + "\n\n" : "";
   const jdBlock = ctx.jd ? `## 岗位 JD\n${String(ctx.jd).trim()}\n\n` : "";
   const resumeBlock = ctx.resume ? `## 候选人简历\n${String(ctx.resume).trim()}\n\n` : "";
-  const focusBlock = ctx.customNote ? `## 面试官特别想考察的点（必须单独设计如何验证）\n${String(ctx.customNote).trim()}\n\n` : "";
+  const focusBlock = ctx.customNote ? `## 本轮评估重点（必须单独设计如何验证）\n${String(ctx.customNote).trim()}\n\n` : "";
   const generalBlock = general ? `## 已有通用提纲（这些题已覆盖，请**不要重复**，只补针对本候选人的深挖题）\n${general}\n\n` : "";
   const prevBlock = prevPending.length ? `## 上一轮面试遗留的「待澄清」点\n${prevPending.map(p => "- " + p).join("\n")}\n\n` : "";
+  const prevNoteBlock = ctx.previousInterviewNote ? `## 用户导入的上一轮面试纪要（必须先提取已确认 / 风险点 / 待追问 / 不必重复）\n来源：${ctx.previousNotePath || "未指定"}\n${truncateForLlmPrompt(String(ctx.previousInterviewNote).trim(), 3200)}\n\n` : "";
   const strategyBlock = buildRecruitInterviewBriefStrategy(ctx);
   const sys = "你是集团级面试官提纲助手，不是招聘专员。你擅长把 JD 与候选人简历之间的张力转成高质量面试问题，帮助面试官验证战略匹配、动机稳定性、组织取舍、风险底线和真实主导程度。";
-  const user = `这是一场面试**开始前**的准备。请基于下面的 JD、候选人简历、面试轮次、岗位资历、面试官角色和面试官关注点，生成${general ? "**针对这位候选人**的现场提词卡（通用题已在上面通用提纲覆盖，本次聚焦简历×JD 的针对性深挖，不要重复通用题）" : "一份**现场面试提词卡**"}，供面试官面试中快速扫读和照着追问。
+  const user = `这是一场面试**开始前**的准备。请基于下面的 JD、候选人简历、面试轮次、面试场景、岗位资历、本轮评估重点和上一轮面试信息，生成${general ? "**针对这位候选人**的现场提词卡（通用题已在上面通用提纲覆盖，本次聚焦简历×JD 的针对性深挖，不要重复通用题）" : "一份**现场面试提词卡**"}，供面试官面试中快速扫读和照着追问。
 
 ## 角色定位
 
-你不是在生成普通 HR 题库。你要先判断本场面试官的视角：
-- 如果面试官是董事长 / CEO / 创始人 / 集团高管：问题要少而重，关注战略理解、岗位动机、组织取舍、长期稳定性、风险底线和入职后优先级。
-- 如果面试官是招聘负责人 / HRD：问题可更多追简历真实性、项目细节、数据口径、职责边界和风险解释。
-- 如果面试官是用人部门负责人：问题更关注入职后能否解决业务问题、跨部门协同、交付质量和落地路径。
+你不是在生成普通 HR 题库。你要先判断本场面试场景：
+- 业务面：验证能不能解决岗位真实业务问题、专业深度、项目主导程度、协同和落地路径。
+- HR 面：验证动机稳定性、组织适配、薪酬/预期、沟通风格、管理风格、风险解释和软性素质。
+- 领导面：问题要少而重，关注战略理解、岗位动机、组织取舍、长期稳定性、风险底线和入职后优先级。
 
 ## 必须先内部完成的分析
 
-请先在内部完成下面 4 步判断，不要输出分析过程：
+请先在内部完成下面 5 步判断，不要输出分析过程：
 1. 从 JD 中提取岗位真正要解决的 3-5 个组织问题、关键能力和做不好会造成的风险。
 2. 从简历中提取最强匹配证据、最大不确定点、可能夸大的成果或需要核验的数字、行业/规模/团队/职级迁移风险、稳定性和动机风险。
 3. 找出 JD 与简历之间的张力：看似匹配但场景不同、规模落差、项目很多但主导程度不明、技术/系统投入的长期成本不明、AI/自动化成果的 ROI 口径不明。
-4. 根据面试官角色选择最值得问的 6-8 个问题。
+4. 若有上一轮纪要，提取「已确认 / 风险点 / 待追问 / 不必重复」，本轮优先验证未确认点，不重复低价值问题。
+5. 根据面试轮次、面试场景、岗位资历和上一轮信息选择最值得问的 6-8 个问题。
 
 ## 出题规则
 
@@ -257,8 +276,8 @@ export async function generateInterviewBriefForRecruit(plugin, ctx, opts) {
 - 每个必问问题都必须绑定至少一个具体来源：JD 要求 + 简历事实。若简历缺失，则明确写"简历材料不足，仅基于 JD"。
 - 好问题要逼候选人讲取舍、边界、代价、失败、底线和口径，不要只让候选人复述经历。
 - 主问必须短，追问必须是线索，不要写成长段完整问题。
-- 若有"面试官特别想考察的点"，必须进入「本场目标」或「必问问题」，不能只放备用题库。
-${prevPending.length ? "- 上一轮遗留的「待澄清」点务必逐条转成追问题，优先进入必问问题；每题标「上轮遗留」。\n" : ""}- 直接输出 Markdown，不要前言、不要解释、不要代码围栏。
+- 若有"本轮评估重点"，必须进入「本场目标」或「必问问题」，不能只放备用题库。
+${(prevPending.length || ctx.previousInterviewNote) ? "- 上一轮遗留的「待澄清」点务必逐条转成追问题，优先进入必问问题；每题标「上轮遗留」。\n- 上一轮已经充分确认的事项不要重复问，除非本轮要做反向验证或压力验证。\n" : ""}- 直接输出 Markdown，不要前言、不要解释、不要代码围栏。
 
 ## 董事长/高管终面优先主题
 
@@ -320,7 +339,7 @@ ${prevPending.length ? "- 上一轮遗留的「待澄清」点务必逐条转成
 ## 本场出题策略
 ${strategyBlock}
 
-${metaLine}${jdBlock}${resumeBlock}${focusBlock}${generalBlock}${prevBlock}`;
+${metaLine}${jdBlock}${resumeBlock}${focusBlock}${generalBlock}${prevBlock}${prevNoteBlock}`;
   const text = await callLlm(plugin, sys, user, { timeoutMs: 60000 });
   let md = stripModeSuggestionBlocks(String(text || "")).trim();
   md = md.replace(/^```(?:markdown|md)?\s*\r?\n?/i, "").replace(/\r?\n?```\s*$/i, "").trim();
@@ -476,12 +495,19 @@ export function buildCompactRecruitContextPrefix(ctx) {
   if (ctx.position) parts.push(`- 应聘岗位：${ctx.position}`);
   if (ctx.candidateName) parts.push(`- 候选人：${ctx.candidateName}`);
   if (ctx.round) parts.push(`- 轮次：${ctx.round}`);
-  if (ctx.interviewer) parts.push(`- 面试官：${ctx.interviewer}`);
+  if (ctx.interviewScene) parts.push(`- 面试场景：${ctx.interviewScene}`);
+  else if (ctx.interviewer) parts.push(`- 面试场景：${ctx.interviewer}`);
   if (ctx.seniority) parts.push(`- 岗位资历级别：${ctx.seniority}`);
   for (const line of seniorityCalibrationLines(ctx.seniority)) parts.push(line);
   if (ctx.customNote) {
-    parts.push(`- 特殊关注点（重点考核项）：${truncateForLlmPrompt(ctx.customNote, 900)}`);
+    parts.push(`- 本轮评估重点：${truncateForLlmPrompt(ctx.customNote, 900)}`);
     parts.push(`- ⚠️ 必须在结论下方输出「重点考核项核验」，逐项从文本里找正反证据（含侧面体现）并引用，找不到就标「未触及，建议二面核查」。`);
+  }
+  if (ctx.previousInterviewNote) {
+    parts.push("", "### 上一轮面试纪要（用于连续招聘决策）");
+    if (ctx.previousNotePath) parts.push(`来源：${ctx.previousNotePath}`);
+    parts.push(truncateForLlmPrompt(String(ctx.previousInterviewNote).trim(), 1800));
+    parts.push("- 评估时区分：已确认、风险点、待追问、不必重复；不要把单题未体现直接判为不具备，要做全局证据判断。");
   }
   if (ctx.jd) {
     parts.push("", "### JD（用于拆解硬性要求和加分项）");
@@ -525,6 +551,8 @@ export function buildRecruitTextImportMergePrompt(joined, recruitContext) {
     "## 招聘评估纪律",
     "",
     "- 先按 JD 拆出硬性要求、加分项；并**严格遵守上文「资历校准」一节**——按岗位资历（初级/中级/高级/资深/总监）定标尺，初级岗不得用 senior 标准苛求。",
+    "- **全局证据判断**：不要把单题未体现直接判为不具备；必须跨所有问答聚合正向证据、负向证据和未观察到项。",
+    "- 输出能力判断前先区分三类：明确正向证据 / 明确负向证据 / 本场未观察到；「未观察到」只能进入待追问，不能直接当作扣死理由。",
     "- 正向证据才加分；但初级岗的「结果未闭环/非独立主导/核心领域仅『接触过』级」按资历校准**降级为「待观察·可培养」，不计红旗、不作硬扣分**。",
     "- 诚实、不夸大、承认边界属于基础职业素养，不单独算亮点（但可作为某素质达成的侧证）。",
     "- 简历与文本陈述矛盾、硬性资质缺失（学历/证照/语言不达 JD 必备项），必须列入风险/红旗。",
@@ -637,8 +665,11 @@ export function normalizeRecruitContext(ctx) {
     position: String(raw.position || "").trim(),
     round: String(raw.round || "初面").trim() || "初面",
     interviewer: String(raw.interviewer || "").trim(),
+    interviewScene: String(raw.interviewScene || "").trim(),
     seniority: String(raw.seniority || "").trim(),
     customNote: String(raw.customNote || "").trim(),
+    previousInterviewNote: String(raw.previousInterviewNote || raw.previousNote || "").trim(),
+    previousNotePath: String(raw.previousNotePath || "").trim(),
     // F2 招聘项目化：选中 JD 项目时携带的派生上下文（供注入与落盘 frontmatter 用）
     jdFile: String(raw.jdFile || "").trim(),                       // 项目 JD 文件路径（落盘时写 frontmatter 的 jd 链接）
     generalOutline: String(raw.generalOutline || "").trim(),        // 统一面试提纲
@@ -654,7 +685,7 @@ export function normalizeRecruitContext(ctx) {
 
 export function hasRecruitContextContent(ctx) {
   const c = normalizeRecruitContext(ctx);
-  return !!(c.jd || c.resume || c.candidateName || c.position || c.interviewer || c.seniority || c.customNote);
+  return !!(c.jd || c.resume || c.candidateName || c.position || c.interviewScene || c.interviewer || c.seniority || c.customNote || c.previousInterviewNote);
 }
 
 export function normalizeRecruitJdSignatureText(text) {
@@ -720,6 +751,7 @@ export function applyRecruitJdLibraryItem(ctx, item) {
   ctx.position = source.position;
   ctx.seniority = source.seniority;
   ctx.customNote = source.customNote;
+  ctx.interviewScene = source.interviewScene;
 }
 
 export function getRecruitJdPreview(jd) {
@@ -794,6 +826,48 @@ export async function extractPdfTextBestEffort(app, file) {
     console.warn("[LexVoice] PDF 文本提取失败，回退手动粘贴", e);
     return "";
   }
+}
+
+export function extractCandidateNameFromResumeText(text, fileName = "") {
+  const isLikelyName = (value) => {
+    const s = String(value || "").trim();
+    if (!/^[\u4e00-\u9fa5·]{2,8}$/.test(s)) return false;
+    return !/^(工作经历|项目经历|教育经历|自我评价|基本信息|个人信息|求职意向|联系方式|候选人|简历|电话|邮箱|年龄|工作年限|现居住地|性别)$/.test(s);
+  };
+  const firstMatch = (source, patterns) => {
+    const s = String(source || "");
+    for (const pattern of patterns) {
+      const m = s.match(pattern);
+      if (m && isLikelyName(m[1])) return m[1].trim();
+    }
+    return "";
+  };
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 20);
+  const labeled = firstMatch(lines.join("\n"), [
+    /(?:候选人姓名|姓名|姓名信息)\s*[:：]\s*([\u4e00-\u9fa5·]{2,8})/,
+    /([\u4e00-\u9fa5·]{2,8})\s*(?:先生|女士)\b/,
+  ]);
+  if (labeled) return labeled;
+  for (const line of lines.slice(0, 8)) {
+    const direct = firstMatch(line, [
+      /^([\u4e00-\u9fa5·]{2,8})(?=\s*(?:电话|手机|邮箱|年龄|工作年限|工作经历|求职意向|性别|$))/,
+      /^([\u4e00-\u9fa5·]{2,8})\s+[0-9A-Za-z]/,
+    ]);
+    if (direct) return direct;
+  }
+  const stem = String(fileName || "")
+    .replace(/\.[^.]+$/, "")
+    .replace(/[_\s]+/g, "-")
+    .trim();
+  const fileCandidate = firstMatch(stem, [
+    /^([\u4e00-\u9fa5·]{2,8})(?:[-—_（(]|$)/,
+    /(?:简历|候选人)[-—_（(]?([\u4e00-\u9fa5·]{2,8})/,
+  ]);
+  return fileCandidate || "";
 }
 
 export function listResumePdfs(app, resumeFolderPath) {
@@ -1087,7 +1161,7 @@ export function renderRecruitHomepageTemplate() {
     "",
     "- 新建招聘项目 → 创建面试提纲 → 录音 / 导入 → 生成评估 → 项目统计自动更新",
     "- 候选人池按候选人聚合多轮面试；岗位文件夹里的 `.base` 只看该岗位候选人。",
-    "- 董事长 / 终面 / 招聘负责人等不同面试场景，可以通过招聘上下文里的轮次和面试官生成不同问题。",
+    "- 业务面 / HR 面 / 领导面等不同面试场景，可以通过招聘上下文里的轮次和场景生成不同问题。",
     "",
   ].join("\n");
 }

@@ -213,8 +213,11 @@ export const DEFAULT_SETTINGS = {
     position: "",
     round: "",
     interviewer: "",
+    interviewScene: "",
     seniority: "",  // 初级 / 中级 / 高级 / 资深 / 总监
     customNote: "",
+    previousInterviewNote: "",
+    previousNotePath: "",
     interviewBrief: "",
     savedAt: null,
   },

@@ -1780,6 +1780,10 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   font-weight: var(--font-semibold);
 }
 
+.lexvoice-outline-ai-body > ul > li.lexvoice-recruit-node {
+  font-weight: var(--font-normal);
+}
+
 .lexvoice-outline-ai-body ul.lexvoice-outline-time-rail {
   --lexvoice-outline-rail-x: 52px;
   --lexvoice-outline-rail-content-x: 72px;
@@ -2559,6 +2563,7 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   align-items: center;
   gap: 5px;
   font-size: 11px;
+  font-weight: 600;
   color: var(--text-muted);
 }
 .lexvoice-recruit-turn.is-candidate .lexvoice-recruit-who {
@@ -2571,10 +2576,14 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   width: 84%;
   box-sizing: border-box;
   font-size: 13px;
+  font-weight: var(--font-normal);
   line-height: 1.5;
   padding: 8px 11px;
   color: var(--text-normal);
   border-radius: 11px;
+}
+.lexvoice-recruit-bubble-line {
+  font-weight: var(--font-normal);
 }
 .lexvoice-recruit-turn.is-interviewer .lexvoice-recruit-bubble {
   background: color-mix(in srgb, var(--text-muted) 13%, var(--background-primary));
@@ -2630,6 +2639,7 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
 .lexvoice-recruit-ai-item.is-followup .lexvoice-recruit-ai-label { color: #c2410c; }
 .lexvoice-recruit-ai-body {
   font-size: 13px;
+  font-weight: var(--font-normal);
   line-height: 1.5;
   color: var(--text-muted);
 }
@@ -5461,6 +5471,95 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   font-weight: var(--font-semibold);
 }
 
+.lexvoice-object-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--size-4-2);
+  margin: var(--size-4-2) 0 var(--size-4-4);
+}
+
+.lexvoice-object-overview-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+  min-height: 104px;
+  padding: var(--size-4-2);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  box-shadow: none;
+  font-family: inherit;
+  height: auto;
+  text-align: left;
+  white-space: normal;
+  cursor: pointer;
+}
+
+.lexvoice-object-overview-card:hover {
+  border-color: var(--background-modifier-border-hover);
+  background: var(--background-modifier-hover);
+}
+
+.lexvoice-object-overview-title {
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+}
+
+.lexvoice-object-overview-count {
+  color: var(--text-accent);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.lexvoice-object-overview-desc {
+  flex: 1;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: var(--line-height-normal);
+}
+
+.lexvoice-object-overview-action {
+  color: var(--text-accent);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-medium);
+}
+
+@media (max-width: 760px) {
+  .lexvoice-object-overview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 460px) {
+  .lexvoice-object-overview-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.lexvoice-settings-details {
+  margin: var(--size-4-4) 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+}
+
+.lexvoice-settings-details > summary {
+  cursor: pointer;
+  padding: var(--size-4-3);
+  color: var(--text-normal);
+  font-weight: var(--font-semibold);
+}
+
+.lexvoice-settings-details-body {
+  padding: 0 var(--size-4-3) var(--size-4-3);
+}
+
+.lexvoice-settings-details-body > .setting-item:first-child {
+  border-top: 0;
+}
+
 /* 设置页通用 textarea —— 占满宽度，原生字体 */
 .lexvoice-textarea {
   width: 100%;
@@ -6290,8 +6389,9 @@ select.lexvoice-recruit-input.dropdown {
 }
 
 .lexvoice-outline-head.is-idle .lexvoice-recruit-card {
+  position: relative;
   margin-top: 0;
-  padding: 11px 14px;
+  padding: 11px 34px 11px 14px;
   border-color: color-mix(in srgb, var(--background-modifier-border) 82%, var(--text-accent) 18%);
   border-radius: 10px;
   background: color-mix(in srgb, var(--background-primary) 94%, var(--background-secondary) 6%);
@@ -6331,6 +6431,8 @@ select.lexvoice-recruit-input.dropdown {
 }
 
 .lexvoice-outline-head.is-idle .lexvoice-recruit-card-title {
+  flex: 1 1 170px;
+  min-width: 112px;
   color: color-mix(in srgb, var(--text-normal) 84%, var(--text-accent) 16%);
   font-size: 15px;
   font-weight: 650;
@@ -6363,10 +6465,12 @@ select.lexvoice-recruit-input.dropdown {
 
 /* 状态 chip：简历已填 ✓ / 资历 / 面试官——克制的圆角小标签（状态指示，非按钮）。 */
 .lexvoice-recruit-card-chips {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
+  flex: 0 1 auto;
   gap: 6px;
-  margin-top: 9px;
+  margin-top: 0;
+  min-width: 0;
 }
 .lexvoice-recruit-chip {
   display: inline-flex;
@@ -6408,33 +6512,39 @@ select.lexvoice-recruit-input.dropdown {
 .lexvoice-rcx-page {
   height: 100%;
   box-sizing: border-box;
-  padding: 0;
+  padding: 0 18px;
   background: transparent;
-  display: block;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   font-family: var(--font-interface);
 }
 .lexvoice-rcx-card {
   width: 100%;
   max-width: none;
   margin: 0;
+  height: 100%;
   min-height: 0;
   display: flex;
   flex-direction: column;
   background: transparent;
   border-radius: 0;
   box-shadow: none;
-  overflow: visible;
+  overflow: hidden;
 }
 
 /* §1 顶部标题栏 */
 .lexvoice-rcx-top {
+  position: sticky;
+  top: 0;
+  z-index: 6;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 4px 0 12px;
-  border-bottom: 1px solid var(--background-modifier-border);
+  margin: 0 -18px;
+  padding: 4px 18px 12px;
+  background: var(--background-primary);
 }
 .lexvoice-rcx-back {
   flex: 0 0 auto;
@@ -6465,8 +6575,9 @@ select.lexvoice-recruit-input.dropdown {
 .lexvoice-rcx-form {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: visible;
-  padding: 14px 0 16px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 14px 0 18px;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -6475,10 +6586,14 @@ select.lexvoice-recruit-input.dropdown {
 .lexvoice-rcx-group-title { display: flex; align-items: center; gap: 8px; }
 .lexvoice-rcx-group-name { flex: 0 0 auto; font-size: 13px; font-weight: 600; color: var(--text-normal); }
 .lexvoice-rcx-group-line { flex: 1 1 auto; height: 1px; background: var(--background-modifier-border); }
-.lexvoice-rcx-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+.lexvoice-rcx-grid2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 11px;
+}
 .lexvoice-rcx-field { display: block; }
-.lexvoice-rcx-label-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.lexvoice-rcx-label-row .lexvoice-rcx-lbl { flex: 1 1 auto; margin-bottom: 0; }
+.lexvoice-rcx-label-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: nowrap; }
+.lexvoice-rcx-label-row .lexvoice-rcx-lbl { flex: 1 1 auto; min-width: 0; margin-bottom: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lexvoice-rcx-lbl { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
 /* 文字按钮：无底色/边框/阴影，纯文字 + 图标。 */
 .lexvoice-rcx-txtbtn {
@@ -6498,6 +6613,7 @@ select.lexvoice-recruit-input.dropdown {
 .lexvoice-rcx-in,
 .lexvoice-rcx-ta {
   width: 100%;
+  min-width: 0;
   box-sizing: border-box;
   border: 1px solid var(--background-modifier-border);
   border-radius: 9px;
@@ -6506,7 +6622,91 @@ select.lexvoice-recruit-input.dropdown {
   font-family: inherit;
 }
 .lexvoice-rcx-in { padding: 9px 11px; font-size: 14px; }
-.lexvoice-rcx-ta { padding: 10px 12px; font-size: 13.5px; line-height: 1.55; color: var(--text-normal); resize: none; }
+select.lexvoice-rcx-in.dropdown {
+  height: 38px;
+  min-height: 38px;
+  padding: 0 34px 0 11px;
+  line-height: normal;
+}
+.lexvoice-rcx-select-field {
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 9px;
+  background: var(--background-modifier-form-field);
+  padding: 0 0 0 10px;
+}
+.lexvoice-rcx-select-field .lexvoice-rcx-label-row {
+  margin: 0;
+  min-width: 0;
+}
+.lexvoice-rcx-select-field .lexvoice-rcx-lbl {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.lexvoice-rcx-select-field .lexvoice-rcx-menu-trigger {
+  min-height: 36px;
+  height: 36px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0 9px 0 0;
+  border-radius: 0;
+  justify-content: flex-end;
+}
+.lexvoice-rcx-select-field .lexvoice-rcx-menu-trigger:hover,
+.lexvoice-rcx-select-field .lexvoice-rcx-menu-trigger:focus {
+  border-color: transparent;
+  background: transparent;
+}
+.lexvoice-rcx-select-field .lexvoice-rcx-menu-trigger:focus {
+  outline: none;
+}
+.lexvoice-rcx-select-field .lexvoice-rcx-menu-trigger .lex-ms-label {
+  flex: 0 1 auto;
+  color: var(--text-normal);
+  text-align: right;
+  font-size: 13px;
+  font-weight: 500;
+}
+.lexvoice-rcx-select-field .lexvoice-rcx-menu-trigger:hover .lex-ms-label,
+.lexvoice-rcx-select-field .lexvoice-rcx-menu-trigger:focus .lex-ms-label {
+  color: var(--text-accent);
+}
+.lexvoice-rcx-select-field .lexvoice-rcx-menu-trigger .lex-ms-chev {
+  margin-left: 2px;
+}
+.lexvoice-rcx-select-field select.lexvoice-rcx-in.dropdown {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  height: 36px;
+  min-height: 36px;
+  padding-left: 0;
+}
+.lexvoice-rcx-select-field:focus-within {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+}
+.lexvoice-rcx-select-field select.lexvoice-rcx-in.dropdown:focus {
+  outline: none;
+  box-shadow: none;
+}
+.lexvoice-rcx-ta {
+  height: 118px;
+  min-height: 118px;
+  max-height: 118px;
+  padding: 10px 12px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-normal);
+  resize: none;
+}
 .lexvoice-rcx-in:focus,
 .lexvoice-rcx-ta:focus { outline: none; border-color: var(--interactive-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 16%, transparent); }
 .lexvoice-rcx-field-foot { display: flex; justify-content: flex-end; margin-top: 7px; }
@@ -6559,6 +6759,9 @@ select.lexvoice-recruit-input.dropdown {
   border: 1px solid var(--background-modifier-border);
   border-radius: 12px;
   padding: 15px;
+  height: min(360px, 42vh);
+  max-height: min(360px, 42vh);
+  overflow: auto;
   font-size: 13px;
   line-height: 1.6;
   color: var(--text-normal);
@@ -6603,16 +6806,30 @@ select.lexvoice-recruit-input.dropdown {
   align-items: center;
   justify-content: center;
 }
+.lexvoice-rcx-empty {
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.55;
+  background: var(--background-primary-alt);
+}
 
 /* §6 底部固定操作栏 */
 .lexvoice-rcx-bottom {
+  position: relative;
+  bottom: auto;
+  z-index: 4;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 12px 0 0;
+  margin-top: 12px;
+  padding: 12px 0 18px;
   border-top: 1px solid var(--background-modifier-border);
-  background: transparent;
+  background: var(--background-primary);
+  box-shadow: 0 -14px 18px var(--background-primary);
 }
 .lexvoice-rcx-switch-row { display: flex; align-items: center; gap: 9px; }
 .lexvoice-rcx-switch { position: relative; flex: 0 0 auto; width: 34px; height: 20px; cursor: pointer; }
@@ -6657,10 +6874,10 @@ select.lexvoice-recruit-input.dropdown {
   align-items: center;
   justify-content: center;
   gap: 7px;
-  border: none;
+  border: 1px solid transparent;
   background: var(--interactive-accent);
   color: var(--text-on-accent);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   padding: 11px 0;
 }
@@ -8024,16 +8241,18 @@ select.lexvoice-recruit-input.dropdown {
    否则它会被推到下一行、把「对象」标签挤到上方（错位/换行 bug）。 */
 
 .lexvoice-outline-head.is-idle .lexvoice-recruit-card {
+  position: relative;
   min-height: 36px;
   margin-top: 4px;
-  padding: 7px 12px;
+  padding: 7px 32px 7px 12px;
   border: 0.5px solid var(--lex-border-line);
   border-radius: 10px;
   background: transparent;
 }
 
 .lexvoice-outline-head.is-idle .lexvoice-recruit-card-head {
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px 8px;
 }
 
 .lexvoice-outline-head.is-idle .lexvoice-recruit-card-dot {
@@ -8042,6 +8261,8 @@ select.lexvoice-recruit-input.dropdown {
 }
 
 .lexvoice-outline-head.is-idle .lexvoice-recruit-card-title {
+  flex: 1 1 170px;
+  min-width: 112px;
   color: var(--lex-text-primary);
   font-size: 12px;
   font-weight: 650;
@@ -8056,6 +8277,9 @@ select.lexvoice-recruit-input.dropdown {
 }
 
 .lexvoice-outline-head.is-idle .lexvoice-recruit-card-edit {
+  position: absolute;
+  top: 8px;
+  right: 12px;
   color: var(--lex-text-secondary);
   font-size: 12px;
 }
@@ -8319,6 +8543,8 @@ select.lexvoice-recruit-input.dropdown {
   height: 3px;
   border-radius: 2px;
   background: var(--lex-border-active-soft);
+  cursor: pointer;
+  touch-action: none;
 }
 
 .lexvoice-recording-finish-fill,
@@ -8338,6 +8564,7 @@ select.lexvoice-recruit-input.dropdown {
   border-radius: 50%;
   background: var(--lex-primary-action);
   transform: translate(-50%, -50%);
+  cursor: grab;
 }
 
 .lexvoice-recording-finish-times,
