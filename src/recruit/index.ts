@@ -4,6 +4,7 @@ import * as obsidian from "obsidian";
 import { FRONTMATTER_SCHEMA } from '../shared/catalog-modes';
 import { truncateForLlmPrompt, stripMarkdownDetailsWrapper, applyBriefingLanguageInstruction, getSessionMetaDurationMs, getSegmentsDurationMs } from '../shared/util-text';
 import { serializeRequiredQualities, extractMarkdownSection, sanitizeProjectFolderName } from '../outline-text';
+import { ensureVaultFolder } from '../shared/util-note';
 import { JOBPORTRAIT_SYSTEM_PROMPT } from '../prompts/recruit-hrbp';
 import { getBriefingMergeMaxTokens } from '../llm/config';
 import { callLlm, callBriefingMergeLlm, stripModeSuggestionBlocks } from '../llm/core';
@@ -1092,18 +1093,20 @@ export async function ensureRecruitAggregateBase(app, jdFolderPath) {
 
 export async function createRecruitProject(app, jdFolderPath, rawName, fm, jdBody) {
   const root = obsidian.normalizePath(jdFolderPath || "JD");
-  if (!(app.vault.getAbstractFileByPath(root) instanceof obsidian.TFolder)) {
-    await app.vault.createFolder(root);
-  }
+  await ensureVaultFolder(app, root);
+  if (!(app.vault.getAbstractFileByPath(root) instanceof obsidian.TFolder)) throw new Error(`招聘项目库路径不可用：${root}`);
   const name = sanitizeProjectFolderName(rawName);
   const folderPath = obsidian.normalizePath(`${root}/${name}`);
   if (app.vault.getAbstractFileByPath(folderPath)) throw new Error(`项目「${name}」已存在，请换个名字`);
-  await app.vault.createFolder(folderPath);
+  await ensureVaultFolder(app, folderPath);
+  if (!(app.vault.getAbstractFileByPath(folderPath) instanceof obsidian.TFolder)) throw new Error(`项目文件夹创建失败：${folderPath}`);
   const mdPath = obsidian.normalizePath(`${folderPath}/${name}.md`);
   const basePath = obsidian.normalizePath(`${folderPath}/${name}.base`);
   await app.vault.create(mdPath, renderRecruitJdTemplate(Object.assign({}, fm, { 职位名: name }), jdBody));
   await app.vault.create(basePath, renderRecruitCandidateBase(DEFAULT_RECRUIT_QUALITIES.map(q => q.素质)));
   await ensureRecruitAggregateBase(app, root);
+  if (!(app.vault.getAbstractFileByPath(mdPath) instanceof obsidian.TFile)) throw new Error(`岗位 JD 创建失败：${mdPath}`);
+  if (!(app.vault.getAbstractFileByPath(basePath) instanceof obsidian.TFile)) throw new Error(`候选人看板创建失败：${basePath}`);
   return { name, folderPath, mdPath, basePath };
 }
 

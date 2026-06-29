@@ -2350,6 +2350,38 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
 /* 自定义菜单（mkSelect 弹出的 Obsidian Menu，挂了 lexvoice-ms-menu 类，只影响我们自己的下拉）：
    ① 无图标——隐藏左侧图标占位槽，让文本左对齐、左右留白对称；
    ② 当前项不用色点，只把文字变成主题色来区分，所有项文本起点一致、不被色点顶偏。 */
+/* LexVoice context menus use Obsidian Menu. Keep icons readable across themes. */
+body .menu.lexvoice-menu .menu-item-icon,
+body .lexvoice-menu .menu-item-icon {
+  --icon-size: 16px;
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-inline-end: 8px;
+  color: var(--text-muted);
+}
+
+body .menu.lexvoice-menu .menu-item-icon svg,
+body .menu.lexvoice-menu .menu-item-icon .svg-icon,
+body .lexvoice-menu .menu-item-icon svg,
+body .lexvoice-menu .menu-item-icon .svg-icon {
+  width: 16px !important;
+  min-width: 16px;
+  height: 16px !important;
+  min-height: 16px;
+  stroke-width: 2;
+}
+
+body .menu.lexvoice-menu .menu-item:hover .menu-item-icon,
+body .menu.lexvoice-menu .menu-item.selected .menu-item-icon,
+body .lexvoice-menu .menu-item:hover .menu-item-icon,
+body .lexvoice-menu .menu-item.selected .menu-item-icon {
+  color: var(--text-normal);
+}
+
 .menu.lexvoice-ms-menu .menu-item-icon { display: none; }
 .menu.lexvoice-ms-menu .menu-item {
   padding-left: 14px;
@@ -4530,13 +4562,14 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px 10px;
+  gap: 8px;
   flex-wrap: wrap;
   margin: 5px 0 17px;
 }
-/* 纪要搜索框：独占一行（flex 100% 强制换行），日期/模板筛选 chip 落到下一行。 */
+/* 纪要搜索框：和日期/模板筛选共用一行，窄窗格下再自然换行。 */
 .lexvoice-outline-recent-search {
-  flex: 1 1 100%;
+  flex: 1 1 150px;
+  min-width: 128px;
   box-sizing: border-box;
   height: 32px;
   padding: 0 11px;
@@ -4553,11 +4586,11 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
 .lexvoice-outline-recent-search::placeholder { color: var(--text-muted); }
 
 .lexvoice-outline-recent-filters {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 9px;
+  gap: 8px;
 }
 
 /* 筛选 chip：软胶囊，不再用 Obsidian 默认 button 的白底硬框。
@@ -6629,57 +6662,52 @@ select.lexvoice-rcx-in.dropdown {
   line-height: normal;
 }
 .lexvoice-rcx-select-field {
-  min-height: 38px;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  box-sizing: border-box;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 9px;
-  background: var(--background-modifier-form-field);
-  padding: 0 0 0 10px;
+  display: block;
+  min-height: 0;
 }
 .lexvoice-rcx-select-field .lexvoice-rcx-label-row {
-  margin: 0;
-  min-width: 0;
+  margin-bottom: 6px;
 }
 .lexvoice-rcx-select-field .lexvoice-rcx-lbl {
-  margin: 0;
+  margin-bottom: 0;
   font-size: 12px;
   color: var(--text-muted);
 }
 .lexvoice-rcx-select-field .lexvoice-rcx-menu-trigger {
-  min-height: 36px;
-  height: 36px;
-  border: 0;
-  background: transparent;
+  width: 100%;
+  min-height: 38px;
+  height: 38px;
+  box-sizing: border-box;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-modifier-form-field);
   box-shadow: none;
-  padding: 0 9px 0 0;
-  border-radius: 0;
-  justify-content: flex-end;
+  padding: 0 11px;
+  border-radius: 9px;
+  justify-content: space-between;
 }
 .lexvoice-rcx-select-field .lexvoice-rcx-menu-trigger:hover,
 .lexvoice-rcx-select-field .lexvoice-rcx-menu-trigger:focus {
-  border-color: transparent;
-  background: transparent;
+  border-color: var(--interactive-accent);
+  background: var(--background-modifier-form-field);
 }
 .lexvoice-rcx-select-field .lexvoice-rcx-menu-trigger:focus {
   outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 16%, transparent);
 }
 .lexvoice-rcx-select-field .lexvoice-rcx-menu-trigger .lex-ms-label {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--text-normal);
-  text-align: right;
+  text-align: left;
   font-size: 13px;
   font-weight: 500;
 }
 .lexvoice-rcx-select-field .lexvoice-rcx-menu-trigger:hover .lex-ms-label,
 .lexvoice-rcx-select-field .lexvoice-rcx-menu-trigger:focus .lex-ms-label {
-  color: var(--text-accent);
+  color: var(--text-normal);
 }
 .lexvoice-rcx-select-field .lexvoice-rcx-menu-trigger .lex-ms-chev {
-  margin-left: 2px;
+  margin-left: 8px;
 }
 .lexvoice-rcx-select-field select.lexvoice-rcx-in.dropdown {
   border: 0;
@@ -6688,10 +6716,6 @@ select.lexvoice-rcx-in.dropdown {
   height: 36px;
   min-height: 36px;
   padding-left: 0;
-}
-.lexvoice-rcx-select-field:focus-within {
-  border-color: var(--interactive-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 16%, transparent);
 }
 .lexvoice-rcx-select-field select.lexvoice-rcx-in.dropdown:focus {
   outline: none;

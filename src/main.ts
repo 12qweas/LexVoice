@@ -8552,7 +8552,7 @@ class OutlineView extends obsidian.ItemView {
       actions.createEl("button", { text: "..." }).onclick = (evt) => {
         const menu = new obsidian.Menu();
         for (const item of opts.moreActions) menu.addItem(mi => mi.setTitle(item.text).onClick(item.action));
-        menu.showAtMouseEvent(evt);
+        this.showLexVoiceMenuAtMouse(menu, evt);
       };
     }
     if (opts.desc) group.createDiv({ cls: "lexvoice-deposit-group-desc", text: opts.desc });
@@ -10908,6 +10908,42 @@ class OutlineView extends obsidian.ItemView {
     });
   }
 
+  markLexVoiceMenu(menu, extraClass = "") {
+    const apply = (dom) => {
+      if (!dom || !dom.classList) return false;
+      dom.classList.add("lexvoice-menu");
+      if (extraClass) dom.classList.add(extraClass);
+      const inner = dom.matches && dom.matches(".menu") ? dom : dom.querySelector && dom.querySelector(".menu");
+      if (inner && inner.classList) {
+        inner.classList.add("lexvoice-menu");
+        if (extraClass) inner.classList.add(extraClass);
+      }
+      return true;
+    };
+    const mark = () => {
+      try {
+        if (apply(menu && menu.dom)) return;
+        const menus = Array.from(activeDocument.querySelectorAll(".menu"));
+        const dom = menus[menus.length - 1];
+        apply(dom);
+      } catch {
+        /* intentionally empty */
+      }
+    };
+    mark();
+    window.requestAnimationFrame(mark);
+  }
+
+  showLexVoiceMenuAtMouse(menu, evt, extraClass = "") {
+    menu.showAtMouseEvent(evt);
+    this.markLexVoiceMenu(menu, extraClass);
+  }
+
+  showLexVoiceMenuAtPosition(menu, position, extraClass = "") {
+    menu.showAtPosition(position);
+    this.markLexVoiceMenu(menu, extraClass);
+  }
+
   showRecentFilterMenu(evt, kind, options, currentValue) {
     evt.preventDefault();
     evt.stopPropagation();
@@ -10935,10 +10971,10 @@ class OutlineView extends obsidian.ItemView {
       const menuWidthHint = 240;
       const x = Math.max(8, Math.min(Math.round(rect.left), Math.max(8, window.innerWidth - menuWidthHint - 8)));
       const y = Math.max(8, Math.min(Math.round(rect.bottom + 8), Math.max(8, window.innerHeight - 8)));
-      menu.showAtPosition({ x, y });
+      this.showLexVoiceMenuAtPosition(menu, { x, y });
       return;
     }
-    menu.showAtMouseEvent(evt);
+    this.showLexVoiceMenuAtMouse(menu, evt);
   }
 
   renderRecentFilterBar(parent, allRecents) {
@@ -11171,7 +11207,7 @@ class OutlineView extends obsidian.ItemView {
           });
       });
     }
-    menu.showAtMouseEvent(evt);
+    this.showLexVoiceMenuAtMouse(menu, evt);
   }
 
   showVariantContextMenu(evt, file, sourcePath) {
@@ -11193,7 +11229,7 @@ class OutlineView extends obsidian.ItemView {
       try { await trashLexVoiceFile(this.plugin.app, file); this.plugin.refreshOutlineView(); }
       catch (e) { console.error(e); new obsidian.Notice("删除失败", 6000); }
     }));
-    menu.showAtMouseEvent(evt);
+    this.showLexVoiceMenuAtMouse(menu, evt);
   }
 
   showRecentNoteContextMenu(evt, file, beginRename) {
@@ -11294,7 +11330,7 @@ class OutlineView extends obsidian.ItemView {
         .setIcon("trash-2")
         .onClick(() => this.confirmDeleteRecentNote(file));
     });
-    menu.showAtMouseEvent(evt);
+    this.showLexVoiceMenuAtMouse(menu, evt);
   }
 
   async retryRecentTranscription(file) {
@@ -11753,10 +11789,27 @@ class OutlineView extends obsidian.ItemView {
 
     let jdLib = [];
     try { jdLib = getRecruitJdLibrary(settings) || []; } catch { jdLib = []; }
-    const saveAsRecruitProject = () => {
-      if (!ctx.jd || !ctx.jd.trim()) { new obsidian.Notice("先填岗位 JD 再存为项目"); return; }
-      try { upsertRecruitJdLibrary(settings, normalizeRecruitContext(ctx)); void this.plugin.saveSettings(); new obsidian.Notice("已存为招聘项目"); }
-      catch (e) { new obsidian.Notice("存为项目失败：" + ((e && e.message) || e)); }
+    const saveAsRecruitProject = async () => {
+      const jdText = String(ctx.jd || "").trim();
+      if (!jdText) { new obsidian.Notice("先填岗位 JD 再存为项目"); return; }
+      const projectName = String(ctx.position || "").trim() || getRecruitJdPreview(jdText) || "未命名项目";
+      try {
+        const res = await createRecruitProject(
+          this.app,
+          settings.recruitJdFolderPath,
+          projectName,
+          { 职位名: projectName, 序列: "招聘", 状态: "招聘中", 岗位资历: ctx.seniority || "" },
+          jdText,
+        );
+        ctx.jdFile = res.mdPath;
+        ctx.position = ctx.position || res.name;
+        ctx.interviewBrief = "";
+        upsertRecruitJdLibrary(settings, normalizeRecruitContext(ctx));
+        await this.plugin.saveSettings();
+        new obsidian.Notice(`已创建招聘项目三件套：${res.name}`);
+        this.render();
+      }
+      catch (e) { new obsidian.Notice("创建招聘项目失败：" + ((e && e.message) || e)); }
     };
     const jdField = mkField(gJob, "岗位 JD", jdLib.length ? { text: "从历史选择", icon: "rotate-ccw", onClick: () => pick(
       jdLib.map((it) => ({ label: it.position || getRecruitJdPreview(it.jd) || "（未命名 JD）", value: it })),
