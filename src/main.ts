@@ -9840,6 +9840,8 @@ class OutlineView extends obsidian.ItemView {
     if (_pref && REPOLISH_PREFERENCE_PRESETS[_pref]) moreSummaryParts.push(REPOLISH_PREFERENCE_PRESETS[_pref].label);
     const _tm = this.plugin.settings.thinkingMode;
     if (_tm === "fast") moreSummaryParts.push("快速模式"); else if (_tm === "reasoning") moreSummaryParts.push("推理模式");
+    const _seg = Number(this.plugin.settings.segmentIntervalMinutes) || 5;
+    moreSummaryParts.push(`${_seg} 分钟/段`);
     if (moreSummaryParts.length) moreToggle.createSpan({ cls: "lexvoice-outline-more-summary", text: moreSummaryParts.join(" · ") });
     moreToggle.onclick = () => {
       this._sidebarMoreExpanded = !moreWrap.hasClass("is-expanded");
@@ -9864,6 +9866,49 @@ class OutlineView extends obsidian.ItemView {
         this.scheduleUpdate();
       },
     });
+
+    const segmentRow = moreBody.createDiv({ cls: "lexvoice-outline-control-row lexvoice-outline-segment-row" });
+    segmentRow.createEl("span", { cls: "lexvoice-outline-control-label", text: "分段间隔" });
+    const segmentField = segmentRow.createDiv({ cls: "lexvoice-outline-number-field" });
+    const segmentInput = segmentField.createEl("input", {
+      cls: "lexvoice-outline-number-input",
+      attr: {
+        type: "number",
+        min: "0.5",
+        max: "30",
+        step: "0.5",
+        inputmode: "decimal",
+        value: String(this.plugin.settings.segmentIntervalMinutes || 5),
+        "aria-label": "转写分段间隔，单位分钟",
+      },
+    });
+    segmentField.createSpan({ cls: "lexvoice-outline-number-unit", text: "分钟" });
+    segmentRow.createDiv({
+      cls: "lexvoice-outline-control-hint",
+      text: "每隔多少分钟切一段，单位分钟。有效范围 0.5-30。",
+    });
+    const saveSegmentInterval = async () => {
+      const n = parseFloat(String(segmentInput.value || "").trim());
+      if (!isFinite(n)) {
+        segmentInput.value = String(this.plugin.settings.segmentIntervalMinutes || 5);
+        return;
+      }
+      const clamped = Math.min(30, Math.max(0.5, n));
+      segmentInput.value = String(clamped);
+      if (clamped !== n) new obsidian.Notice(`分段间隔已按有效范围 0.5-30 调整为 ${clamped} 分钟`);
+      if (Number(this.plugin.settings.segmentIntervalMinutes) === clamped) return;
+      this.plugin.settings.segmentIntervalMinutes = clamped;
+      await this.plugin.saveSettings();
+    };
+    segmentInput.onchange = () => { void saveSegmentInterval(); };
+    segmentInput.onblur = () => { void saveSegmentInterval(); };
+    segmentInput.onkeydown = (evt) => {
+      if (evt.key === "Enter") segmentInput.blur();
+      if (evt.key === "Escape") {
+        segmentInput.value = String(this.plugin.settings.segmentIntervalMinutes || 5);
+        segmentInput.blur();
+      }
+    };
 
     // 偏好 + 思考 并排一行（紧凑双列），方案在上独占一行——压扁「更多设置」。
     const pairRow = moreBody.createDiv({ cls: "lexvoice-outline-control-pair" });
@@ -14568,6 +14613,10 @@ class LexVoicePlugin extends obsidian.Plugin {
         percent: 62,
         detail: textImport ? "正在把导入文本交给大模型结构化整理" : "正在把分段转写合并成最终纪要",
       });
+      if (session.mode === "recruit" && session.recruitContext) {
+        session.recruitContext = await this.resolveRecruitProjectContext(session.recruitContext);
+        writeSession.recruitContext = session.recruitContext;
+      }
       this.beginTaskMeter();
       polished = await mergeAndPolish(this, segmentsForFinal.map(s => ({
         index: s.index, startOffsetMs: s.startOffsetMs, endOffsetMs: s.endOffsetMs, text: s.text,
@@ -14750,6 +14799,61 @@ class LexVoicePlugin extends obsidian.Plugin {
   }
 
   // F4.2：把招聘评估纪要移到对应 JD 项目文件夹，命名 候选人-轮次-MMDD(-N)。用 fileManager.renameFile（同步更新反链）。
+  async resolveRecruitProjectContext(rc) {
+    const ctx = normalizeRecruitContext(rc || {});
+    const getJdFile = (path) => {
+      const file = this.app.vault.getAbstractFileByPath(obsidian.normalizePath(path || ""));
+      return file instanceof obsidian.TFile ? file : null;
+    };
+    const applyProject = async (base, jdFilePath, fallbackPosition) => {
+      const next = normalizeRecruitContext(Object.assign({}, base, { jdFile: jdFilePath }));
+      if (!next.position && fallbackPosition) next.position = fallbackPosition;
+      try {
+        const parsed = await parseJdProject(this.app, jdFilePath);
+        if (!next.jd && parsed["岗位描述"]) next.jd = parsed["岗位描述"];
+        if (!next.seniority && parsed["岗位资历"]) next.seniority = parsed["岗位资历"];
+        if (!next.generalOutline && parsed["统一提纲"]) next.generalOutline = parsed["统一提纲"];
+        if ((!next.requiredQualities || !next.requiredQualities.length) && parsed["综合素质"]) {
+          next.requiredQualities = parsed["综合素质"];
+        }
+      } catch {
+        /* intentionally empty */
+      }
+      return next;
+    };
+    const norm = (value) => sanitizeProjectFolderName(String(value || ""))
+      .toLowerCase()
+      .replace(/[\s\-_/\\（）()·.]+/g, "");
+    if (ctx.jdFile && getJdFile(ctx.jdFile)) return ctx;
+
+    const candidates = [
+      ctx.position,
+      getRecruitJdPreview(ctx.jd),
+    ].map(norm).filter(Boolean);
+    const matchesCandidate = (value) => {
+      const v = norm(value);
+      return !!v && candidates.some(c => c === v || c.includes(v) || v.includes(c));
+    };
+
+    const saved = normalizeRecruitContext(this.settings.recruitContext || {});
+    if (saved.jdFile && getJdFile(saved.jdFile)) {
+      if (!candidates.length || matchesCandidate(saved.position) || matchesCandidate(getRecruitJdPreview(saved.jd))) {
+        return await applyProject(Object.assign({}, saved, ctx), saved.jdFile, saved.position);
+      }
+    }
+
+    if (candidates.length) {
+      const projects = listJDProjects(this.app, this.settings.recruitJdFolderPath);
+      const matched = (projects || []).find(project =>
+        project && project.hasJd && project.jdFilePath &&
+        (matchesCandidate(project.position) || matchesCandidate(project.name))
+      );
+      if (matched) return await applyProject(ctx, matched.jdFilePath, matched.position || matched.name);
+    }
+
+    return ctx;
+  }
+
   async relocateRecruitNote(session, rc) {
     try {
       if (!rc || !rc.jdFile) return null;
@@ -18135,9 +18239,13 @@ ${source}`;
     }
     await this.app.vault.modify(file, next);
     let targetFile = file;
+    const recruitContext = task.mode === "recruit"
+      ? await this.resolveRecruitProjectContext(task.recruitContext || null)
+      : task.recruitContext;
+    if (task.mode === "recruit") task.recruitContext = recruitContext;
     // 招聘评估重试：与 finalizeSession 一致，移到 JD 项目文件夹 + 候选人-轮次-MMDD 命名（否则项目统计漏算这一场）。
-    const renamed = (task.mode === "recruit" && task.recruitContext && task.recruitContext.jdFile)
-      ? await this.relocateRecruitNote({ mdPath: file.path, recruitContext: task.recruitContext }, task.recruitContext)
+    const renamed = (task.mode === "recruit" && recruitContext && recruitContext.jdFile)
+      ? await this.relocateRecruitNote({ mdPath: file.path, recruitContext }, recruitContext)
       : await this.renameMarkdownWithGeneratedTitle(file, polished, task.mode);
     if (renamed instanceof obsidian.TFile) targetFile = renamed;
     try {

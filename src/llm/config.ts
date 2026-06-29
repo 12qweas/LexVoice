@@ -71,6 +71,7 @@ export const LLM_SERVICE_PRESETS = [
     id: "mimo",
     label: "小米 MiMo",
     endpoint: "https://api.xiaomimimo.com/v1",
+    altEndpoints: ["https://token-plan-cn.xiaomimimo.com/v1"],
     endpointHelp: "小米 MiMo 的 OpenAI 兼容 API Base URL，填到 /v1 即可，LexVoice 会自动补全 /chat/completions。与 MiMo 语音转写共用同一个地址和密钥。",
     keyHelp: "填写小米 MiMo 平台的访问密钥（API Key）。同一把 Key 既能用于语音转写（mimo-v2.5-asr）也能用于 AI 整理（mimo-v2.5-pro），无需分别申请。",
     modelPlaceholder: "mimo-v2.5-pro",
@@ -192,6 +193,7 @@ export const ONE_CARD_PROVIDERS = {
     asrProvider: "apimimo",
     llmPreset: "mimo",
     llmEndpoint: "https://api.xiaomimimo.com/v1",
+    tokenPlanEndpoint: "https://token-plan-cn.xiaomimimo.com/v1",
     llmModel: "mimo-v2.5-pro",
     applyDesc: "已用同一把 MiMo Key 配好语音转写（mimo-v2.5-asr）和 AI 整理（mimo-v2.5-pro）。",
   },
@@ -276,7 +278,7 @@ export function applyLlmProfileToWorkingConfig(settings, id) {
 export function inferLlmServicePresetId(settings) {
   const current = comparableLlmEndpoint(settings && settings.llmEndpoint);
   if (!current) return "";
-  const matched = LLM_SERVICE_PRESETS.find(p => p.endpoint && comparableLlmEndpoint(p.endpoint) === current);
+  const matched = LLM_SERVICE_PRESETS.find(p => llmPresetEndpointMatches(p, current));
   return matched ? matched.id : "";
 }
 
@@ -285,9 +287,16 @@ export function getActiveLlmServicePresetId(settings) {
   const preset = getLlmServicePreset(saved);
   if (!preset) return inferLlmServicePresetId(settings);
   if (!preset.endpoint) return saved;
-  return comparableLlmEndpoint(preset.endpoint) === comparableLlmEndpoint(settings && settings.llmEndpoint)
+  return llmPresetEndpointMatches(preset, settings && settings.llmEndpoint)
     ? saved
     : inferLlmServicePresetId(settings);
+}
+
+function llmPresetEndpointMatches(preset, endpoint) {
+  const current = comparableLlmEndpoint(endpoint);
+  if (!preset || !current) return false;
+  if (preset.endpoint && comparableLlmEndpoint(preset.endpoint) === current) return true;
+  return Array.isArray(preset.altEndpoints) && preset.altEndpoints.some(ep => comparableLlmEndpoint(ep) === current);
 }
 
 export function getLlmOutputCeiling(settings) {

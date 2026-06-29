@@ -28,6 +28,18 @@ export const LV_SETTINGS_TABS = [
   { id: "updates",  label: "更新" },
 ];
 
+function resolveOneCardProviderEndpoint(cfg, apiKey) {
+  if (!cfg) return "";
+  const normal = String(cfg.llmEndpoint || "").trim();
+  const tokenPlan = String(cfg.tokenPlanEndpoint || "").trim();
+  if (!tokenPlan) return normal;
+  const key = String(apiKey || "").trim().toLowerCase();
+  if (!key) return normal;
+  if (key.startsWith("tp-") || key.includes("token-plan")) return tokenPlan;
+  if (key.startsWith("sk-")) return normal;
+  return normal;
+}
+
 export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
@@ -148,12 +160,13 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     if (!k) return false;
     const s = this.plugin.settings;
     const providers = s.transcribeProviders || (s.transcribeProviders = {});
+    const endpoint = resolveOneCardProviderEndpoint(cfg, k);
     // 转写：填 Key + 恢复该 provider 的推荐地址/模型/协议 + 设为当前转写服务
     const dft = DEFAULT_SETTINGS.transcribeProviders[cfg.asrProvider] || {};
     const cur = providers[cfg.asrProvider] || {};
     providers[cfg.asrProvider] = Object.assign({}, cur, {
       name: cur.name || dft.name,
-      endpoint: dft.endpoint || cur.endpoint || "",
+      endpoint: cfg.asrEndpoint || endpoint || dft.endpoint || cur.endpoint || "",
       model: dft.model || cur.model || "",
       language: cur.language || dft.language || "auto",
       protocol: dft.protocol || cur.protocol,
@@ -162,7 +175,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     s.activeTranscribeProvider = cfg.asrProvider;
     // AI 整理（LLM）：套预设 + 填 Key + 模型
     s.llmServicePreset = cfg.llmPreset;
-    s.llmEndpoint = cfg.llmEndpoint;
+    s.llmEndpoint = endpoint || cfg.llmEndpoint;
     if (cfg.llmModel) s.llmModel = cfg.llmModel;
     s.llmApiKey = k;
     // 自动存成一套完整 API 方案（带转写快照），出现在 API 页顶部可一键重选；同名方案就地覆盖、不重复堆叠
