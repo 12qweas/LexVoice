@@ -1241,7 +1241,7 @@ ${fmSchema}
 
 ${frontmatterSection}**整体结构原则**：顶部用 callout 做结构化速览（摘要、必要时的决策清单/录用建议），**主体内容贴近原文按实际推进顺序展开**——用三级标题 + 散文段落叙述，不强行套"讨论要点 / 分歧 / 暂行结论"等模板框。关键判断引用用普通 \`> \` blockquote 即可，不要为每个话题再套 callout。
 
-**待办任务语法**：凡是正文中出现待办 / 行动项 / 下一步，请统一使用 Markdown todo 任务列表，不要用表格、普通项目符号或 \`TODO:\` 前缀。格式：\`- [ ] 责任人：<人> 事项：<具体动作> 截止：<时间>\`；如果位于 callout 内，保留引用前缀写成 \`> - [ ] ...\`。无法判断责任人或截止时间时**直接省略该字段**（不写「未提及」），也不要编造。
+**待办任务语法**：凡是正文中出现待办 / 行动项 / 下一步，请统一使用 Markdown todo 任务列表，不要用表格、普通项目符号或 \`TODO:\` 前缀。格式以事项为主：\`- [ ] 事项：<具体动作>\`；只有明确出现时再补 \`责任人：<人>\` 和 \`截止：<时间>\`。如果位于 callout 内，保留引用前缀写成 \`> - [ ] ...\`。无法判断责任人或截止时间时**直接省略该字段**（不写「未提及」），也不要编造。
 
 **回听锚点**：如果输入分段标题中出现形如 \`[[音频文件|时间]]\` 的 Obsidian 音频链接，可以把对应链接复制到主要小节标题或关键原话后面，作为回听入口。只在内容明显来自该分段时添加；不确定就不加。不要编造音频文件名、时间或链接；每个主要小节最多放 1 个锚点，避免满屏链接。
 
@@ -4931,6 +4931,49 @@ function normalizeTaskText(line) {
   return t;
 }
 
+function cleanTodoFieldValue(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[，,。；;、\s]+$/g, "")
+    .trim();
+}
+
+function isEmptyTodoFieldValue(value) {
+  const t = cleanTodoFieldValue(value);
+  return !t || /^(无|暂无|没有|未提及|未明确|未指定|未知|不适用|跳过|待定|tbd|n\/a|na|null|none|-)$/i.test(t);
+}
+
+function cleanTodoOwnerValue(value) {
+  const parts = String(value || "")
+    .split(/[\/／、,，;；]|(?:\s+和\s+)/)
+    .map(cleanTodoFieldValue)
+    .filter(Boolean)
+    .filter(part => !/^(主讲人|发言人\d*|说话人\d*|相关方|业务需求方|负责人|某负责人|某同学|参会人|参与者|人员|未提及|未明确|未指定|未知|待定)$/i.test(part));
+  return parts.join("、");
+}
+
+function scrubBriefingTodoPlaceholders(markdown) {
+  return String(markdown || "").split(/\r?\n/).map(line => {
+    const match = line.match(/^(\s*>?\s*[-*+]\s+\[[ xX]\]\s+)(.*)$/);
+    if (!match) return line;
+    let body = match[2] || "";
+    body = body.replace(/责任人：\s*([^：\n]*?)(?=\s*(?:事项：|截止：|优先级：|$))/g, (_, value) => {
+      const owner = cleanTodoOwnerValue(value);
+      return owner ? `责任人：${owner} ` : "";
+    });
+    body = body.replace(/截止：\s*([^：\n]*?)(?=\s*(?:责任人：|事项：|优先级：|$))/g, (_, value) => {
+      const due = cleanTodoFieldValue(value);
+      return isEmptyTodoFieldValue(due) ? "" : `截止：${due} `;
+    });
+    body = body.replace(/优先级：\s*([^：\n]*?)(?=\s*(?:责任人：|事项：|截止：|$))/g, (_, value) => {
+      const priority = cleanTodoFieldValue(value);
+      return isEmptyTodoFieldValue(priority) ? "" : `优先级：${priority} `;
+    });
+    body = body.replace(/\s{2,}/g, " ").trim();
+    return match[1] + body;
+  }).join("\n");
+}
+
 function extractActionItems(markdown) {
   const lines = String(markdown || "").split(/\r?\n/);
   const items = [];
@@ -5290,7 +5333,7 @@ function postProcessBriefingOutput(rawOutput, mode, sessionMeta, originalFrontma
     try { llmFm = obsidian.parseYaml(fmMatch[1]); } catch { llmFm = null; }
     body = stripped.slice(fmMatch[0].length).replace(/^\n+/, "");
   }
-  body = normalizeLexVoiceCallouts(body);
+  body = scrubBriefingTodoPlaceholders(normalizeLexVoiceCallouts(body));
 
   // base frontmatter 选择：重整时优先用 originalFrontmatter（保留用户改动），首次用 LLM 输出。
   // 随后只保留当前模式 schema 内的内容字段，避免 LLM 擅自加入 date/location/decision 等重复字段。
@@ -9851,7 +9894,7 @@ class OutlineView extends obsidian.ItemView {
 
     // API 方案快捷切换：复用设置页「API 方案」(llmProfiles)，侧边栏一键切换整套「转写 + AI 整理」配置。
     const schemeProfiles = Array.isArray(this.plugin.settings.llmProfiles) ? this.plugin.settings.llmProfiles : [];
-    const schemeRow = moreBody.createDiv({ cls: "lexvoice-outline-control-row" });
+    const schemeRow = moreBody.createDiv({ cls: "lexvoice-outline-control-row lexvoice-outline-scheme-row" });
     schemeRow.createEl("span", { cls: "lexvoice-outline-control-label", text: "方案" });
     mkSelect(schemeRow, {
       current: this.plugin.settings.activeLlmProfile || "",
@@ -9867,46 +9910,45 @@ class OutlineView extends obsidian.ItemView {
       },
     });
 
-    const segmentRow = moreBody.createDiv({ cls: "lexvoice-outline-control-row lexvoice-outline-segment-row" });
-    segmentRow.createEl("span", { cls: "lexvoice-outline-control-label", text: "分段间隔" });
-    const segmentField = segmentRow.createDiv({ cls: "lexvoice-outline-number-field" });
-    const segmentInput = segmentField.createEl("input", {
-      cls: "lexvoice-outline-number-input",
+    const segmentField = schemeRow.createDiv({ cls: "lexvoice-outline-segment-inline" });
+    segmentField.createSpan({ cls: "lexvoice-outline-segment-label", text: "分段" });
+    const formatSegmentInterval = (value: number): string => {
+      const normalized = Math.round(value * 10) / 10;
+      return Number.isInteger(normalized) ? String(normalized) : String(normalized);
+    };
+    const segmentValue = segmentField.createEl("button", {
+      cls: "lexvoice-outline-segment-value",
+      text: formatSegmentInterval(Number(this.plugin.settings.segmentIntervalMinutes) || 5),
       attr: {
-        type: "number",
-        min: "0.5",
-        max: "30",
-        step: "0.5",
-        inputmode: "decimal",
-        value: String(this.plugin.settings.segmentIntervalMinutes || 5),
+        type: "button",
         "aria-label": "转写分段间隔，单位分钟",
+        title: "滚轮调整分段间隔",
       },
     });
-    segmentField.createSpan({ cls: "lexvoice-outline-number-unit", text: "分钟" });
-    segmentRow.createDiv({
-      cls: "lexvoice-outline-control-hint",
-      text: "每隔多少分钟切一段，单位分钟。有效范围 0.5-30。",
-    });
-    const saveSegmentInterval = async () => {
-      const n = parseFloat(String(segmentInput.value || "").trim());
-      if (!isFinite(n)) {
-        segmentInput.value = String(this.plugin.settings.segmentIntervalMinutes || 5);
-        return;
-      }
-      const clamped = Math.min(30, Math.max(0.5, n));
-      segmentInput.value = String(clamped);
-      if (clamped !== n) new obsidian.Notice(`分段间隔已按有效范围 0.5-30 调整为 ${clamped} 分钟`);
+    segmentField.createSpan({ cls: "lexvoice-outline-segment-unit", text: "分" });
+    const setSegmentInterval = async (nextValue: number) => {
+      const clamped = Math.min(30, Math.max(0.5, Math.round(nextValue * 10) / 10));
+      segmentValue.setText(formatSegmentInterval(clamped));
       if (Number(this.plugin.settings.segmentIntervalMinutes) === clamped) return;
       this.plugin.settings.segmentIntervalMinutes = clamped;
       await this.plugin.saveSettings();
     };
-    segmentInput.onchange = () => { void saveSegmentInterval(); };
-    segmentInput.onblur = () => { void saveSegmentInterval(); };
-    segmentInput.onkeydown = (evt) => {
-      if (evt.key === "Enter") segmentInput.blur();
-      if (evt.key === "Escape") {
-        segmentInput.value = String(this.plugin.settings.segmentIntervalMinutes || 5);
-        segmentInput.blur();
+    const stepSegmentInterval = async (delta: number) => {
+      const current = Number(this.plugin.settings.segmentIntervalMinutes) || 5;
+      await setSegmentInterval(current + delta);
+    };
+    segmentValue.onwheel = (evt) => {
+      evt.preventDefault();
+      segmentValue.focus();
+      void stepSegmentInterval(evt.deltaY > 0 ? -1 : 1);
+    };
+    segmentValue.onkeydown = (evt) => {
+      if (evt.key === "ArrowUp" || evt.key === "ArrowRight") {
+        evt.preventDefault();
+        void stepSegmentInterval(1);
+      } else if (evt.key === "ArrowDown" || evt.key === "ArrowLeft") {
+        evt.preventDefault();
+        void stepSegmentInterval(-1);
       }
     };
 

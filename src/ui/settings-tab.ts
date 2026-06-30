@@ -330,10 +330,6 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     oneCardRow.addButton(b => b.setButtonText("应用").setCta().onClick(async () => {
       if (!oneCardKey) { new obsidian.Notice("请先填写 API Key", 4000); return; }
       const cfg = ONE_CARD_PROVIDERS[oneCardProviderId];
-      const ok = await lexvoiceConfirm(this.app, `用一把 ${cfg.label} Key 配好转写 + AI 整理？`,
-        `将把「转写服务」和「大模型服务」都切换为 ${cfg.label}，并填入这把 Key，存成一套「${cfg.label}」方案。会覆盖当前转写服务和大模型服务的地址/模型/密钥（其它已保存的方案不受影响）。`,
-        "应用");
-      if (!ok) return;
       const done = await this.applyOneCardProvider(oneCardProviderId, oneCardKey);
       if (done) {
         new obsidian.Notice(cfg.applyDesc + " 已存为方案，可在「API」页顶部切换。点「检测」可测连通性。", 8000);
