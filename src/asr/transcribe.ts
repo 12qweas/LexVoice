@@ -7,6 +7,7 @@ import { buildVocabularyPrompt, applyVocabularyCorrections, loadVocabularyGroups
 import { buildPeopleHotwordsForAsr } from '../people';
 import { lexvoiceArrayBufferToBase64 } from './clients';
 import { extractTranscriptText } from './speaker-labels';
+import { cleanApimimoAsrRepeatedLoops } from './apimimo-clean';
 
 export function normalizeAsrConcurrency(value) {
   const n = Number(value);
@@ -361,6 +362,16 @@ export async function transcribeAudioWithApimimo(plugin, provider, blob, mime, v
     }
   }
   const rawText = parts.join(" ").replace(/\s+/g, " ").trim();
+  const cleaned = cleanApimimoAsrRepeatedLoops(rawText);
+  if (cleaned.suppressedChars > 0) {
+    try {
+      await plugin.logDiagnostic("warn", "asr.apimimo_repeat_detected", "APIMiMo 转写疑似存在重复循环，已保留原始转写", {
+        suppressedChars: cleaned.suppressedChars,
+        suppressedRepeats: cleaned.suppressedRepeats,
+        chunkCount: chunks.length,
+      });
+    } catch { /* intentionally empty */ }
+  }
   return applyVocabularyCorrections(rawText, vocabularyGroups).trim();
 }
 

@@ -2996,6 +2996,230 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
   height: 14px;
 }
 
+.lexvoice-note-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.lexvoice-note-ask-head,
+.lexvoice-note-ask-title,
+.lexvoice-note-ask-actions,
+.lexvoice-note-ask-answer-head,
+.lexvoice-note-ask-error {
+  display: flex;
+  align-items: center;
+}
+
+.lexvoice-note-ask-head {
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 24px;
+}
+
+.lexvoice-note-ask-title {
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--font-ui-smaller);
+  font-weight: 650;
+  color: var(--text-normal);
+}
+
+.lexvoice-note-ask-title-icon,
+.lexvoice-note-ask-title-icon svg {
+  width: 14px;
+  height: 14px;
+  color: var(--text-accent);
+  flex: 0 0 auto;
+}
+
+.lexvoice-note-ask-note {
+  min-width: 0;
+  max-width: 52%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--background-secondary) 72%, transparent);
+}
+
+.lexvoice-note-ask-input-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--background-secondary) 58%, transparent);
+}
+
+.lexvoice-note-ask-input {
+  width: 100%;
+  min-height: 74px;
+  resize: vertical;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-normal);
+  font-family: inherit;
+  font-size: var(--font-ui-small);
+  line-height: 1.55;
+  padding: 2px 4px;
+  box-shadow: none;
+}
+
+.lexvoice-note-ask-input:focus {
+  border-color: transparent;
+  box-shadow: none;
+  outline: none;
+}
+
+.lexvoice-note-ask-actions {
+  justify-content: flex-end;
+}
+
+.lexvoice-note-ask-submit,
+.lexvoice-note-ask-write {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  border-radius: 8px;
+  font-size: var(--font-ui-smaller);
+  font-weight: 560;
+}
+
+.lexvoice-note-ask-submit {
+  min-width: 74px;
+  padding: 5px 12px;
+  border: 0;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  box-shadow: none;
+}
+
+.lexvoice-note-ask-submit:not(:disabled):hover {
+  background: var(--interactive-accent-hover);
+  color: var(--text-on-accent);
+}
+
+.lexvoice-note-ask-button-icon,
+.lexvoice-note-ask-button-icon svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.lexvoice-note-ask-submit .lexvoice-note-ask-button-icon svg {
+  color: currentColor;
+}
+
+.lexvoice-note-ask-submit:disabled,
+.lexvoice-note-ask-write:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.lexvoice-note-ask-error {
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--background-modifier-error);
+  color: var(--text-error);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.45;
+}
+
+.lexvoice-note-ask-error-icon,
+.lexvoice-note-ask-error-icon svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.lexvoice-note-ask-answer {
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 22%, var(--background-modifier-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--background-primary) 94%, var(--interactive-accent) 5%);
+  padding: 12px;
+  box-shadow: inset 2px 0 0 var(--interactive-accent);
+}
+
+.lexvoice-note-ask-answer-head {
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.lexvoice-note-ask-answer-label {
+  font-size: var(--font-ui-smaller);
+  font-weight: 650;
+  color: var(--text-accent);
+}
+
+.lexvoice-note-ask-write {
+  border: 1px solid var(--background-modifier-border);
+  background: color-mix(in srgb, var(--background-primary) 88%, transparent);
+  color: var(--text-muted);
+  padding: 4px 10px;
+}
+
+.lexvoice-note-ask-write:not(:disabled):hover {
+  color: var(--text-accent);
+  border-color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
+}
+
+.lexvoice-note-ask-question {
+  margin-bottom: 10px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--background-secondary) 72%, transparent);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.5;
+}
+
+.lexvoice-note-ask-answer-body {
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  line-height: 1.65;
+}
+
+.lexvoice-note-ask-answer-body > :first-child {
+  margin-top: 0;
+}
+
+.lexvoice-note-ask-answer-body > :last-child {
+  margin-bottom: 0;
+}
+
+.lexvoice-note-ask-empty {
+  padding: 16px 14px;
+  border: 1px dashed color-mix(in srgb, var(--interactive-accent) 22%, var(--background-modifier-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--background-secondary) 45%, transparent);
+  text-align: center;
+}
+
+.lexvoice-note-ask-empty-title {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-weight: 650;
+  margin-bottom: 5px;
+}
+
+.lexvoice-note-ask-empty-desc {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.55;
+}
+
 .lexvoice-outline-extract {
   gap: 10px;
 }
