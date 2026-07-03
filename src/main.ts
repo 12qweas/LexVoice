@@ -12501,6 +12501,8 @@ class OutlineView extends obsidian.ItemView {
     this.outlineRunSeq = (this.outlineRunSeq || 0) + 1;
     this.outlineRunning = false;
     this.outlineQueued = false;
+    // 一并清掉会话级生成死锁与退避，让"停止等待"真正解卡——否则锁没释放，后续刷新还会堵在同一把锁上，越点越死。
+    try { const s = this.plugin.session; if (s) { s._outlineGenLock = Promise.resolve(); markRealtimeOutlineSuccess(s); } } catch { /* intentionally empty */ }
     this.plugin.logDiagnostic("warn", "outline.cancel_waiting", "用户停止等待实时大纲生成", {
       segmentCount: this.plugin.session && this.plugin.session.segments ? this.plugin.session.segments.length : 0,
       lastOutlineSegmentCount: this.lastOutlineSegmentCount,
@@ -12516,6 +12518,15 @@ class OutlineView extends obsidian.ItemView {
     const session = this.plugin.session;
     if (!session || session.segments.length === 0) return;
     this.syncSessionOutline(session);
+    // 手动强制刷新 = 硬复位：清掉可能卡住的运行标志 / 会话级生成死锁 / 退避——绝不因"前面某轮卡死"把手动刷新也一起挡掉。
+    // 让在飞的旧轮结果作废（seq++，其 finally 靠 runSeq 校验不再回写），并重置那把可能永不释放的 _outlineGenLock。
+    if (force) {
+      this.outlineRunSeq = (this.outlineRunSeq || 0) + 1;
+      this.outlineRunning = false;
+      this.outlineQueued = false;
+      try { session._outlineGenLock = Promise.resolve(); } catch { /* intentionally empty */ }
+      try { markRealtimeOutlineSuccess(session); } catch { /* intentionally empty */ }
+    }
     if (this.outlineRunning) { this.outlineQueued = true; return; }
     const local = isLocalLlmEndpoint(this.plugin.settings && this.plugin.settings.llmEndpoint);
     if (!shouldRunRealtimeOutline(session, { silent, local, force })) return;
@@ -12528,6 +12539,7 @@ class OutlineView extends obsidian.ItemView {
       const result = await this.plugin.generateRealtimeOutlineForSession(session, {
         timeoutMs: local ? baseTimeout * 2 : baseTimeout,
         silent,
+        force,
         maxTokens: REALTIME_OUTLINE_SILENT_MAX_TOKENS,
         local,
       });
@@ -14086,7 +14098,11 @@ class LexVoicePlugin extends obsidian.Plugin {
     const prevLock = session._outlineGenLock || Promise.resolve();
     let releaseLock = () => { /* intentionally empty */ };
     session._outlineGenLock = new Promise((r) => { releaseLock = r; });
-    try { await prevLock; } catch { /* intentionally empty */ }
+    // 等上一轮释放锁，但绝不无限等：正常调用会在自己的 timeoutMs 内结束并释放锁（比锁等待窗短，不会误并发）；
+    // 只有上一轮"真卡死"（LLM 挂起、连超时都没掐掉）时，最多等一个略长于超时的窗口就放行——保证一次卡死
+    // 不会永久拖垮之后每一轮大纲（含收尾补大纲）。这是死锁的兜底，配合手动刷新的即时硬复位。
+    const lockWaitMs = (Number(opts.timeoutMs) || REALTIME_OUTLINE_SILENT_TIMEOUT_MS) + 5000;
+    try { await Promise.race([prevLock, new Promise((r) => window.setTimeout(r, lockWaitMs))]); } catch { /* intentionally empty */ }
     try {
       return await this._genOutlineInner(session, opts);
     } finally {
@@ -14139,6 +14155,8 @@ class LexVoicePlugin extends obsidian.Plugin {
       payload: { max_tokens: maxTokens },
       priority: opts.final ? "normal" : "background",
       noRetry: !opts.final,
+      // 实时大纲是"快速结构化抽取"，强制关思维链（无视全局思考档）：更快、更省，且避免推理内容/前言污染输出踩软失败。
+      thinkingMode: "fast",
     });
     const parsed = parseRealtimeOutlineResponse(raw, session.realtimeOutline, session.realtimeOutlineMemory);
     // attachUntimed:true 只用于模型本轮 fresh 输出——把无锚点延续行降级挂靠为上一节点子项，
@@ -14158,24 +14176,38 @@ class LexVoicePlugin extends obsidian.Plugin {
         workbenchChars: workbenchSignature.length,
         rejectedReason: validation.reason,
       };
-      // 软失败：已有可用旧大纲时，本轮不合格也不 throw（throw 会进退避且不推进游标→同窗反复被拒、刷屏）。
-      // 保留旧大纲；游标只推到"留最后 N 段重试窗"的低水位（单调不减），给被判不合格的延续内容下一轮再
-      // 进窗、再综合的机会。但连续软失败超过上限就推满游标放弃这批——否则每 30s 周期性重综合同一窗口烧
-      // token（软失败走 success 路径清了退避，唯一闸是 30s 间隔门，不限次会无限重试）。
-      if (session.realtimeOutline && String(session.realtimeOutline).trim()) {
-        session._outlineSoftFailStreak = (Number(session._outlineSoftFailStreak) || 0) + 1;
-        if (session._outlineSoftFailStreak <= 3) {
-          session.realtimeOutlineSegmentCount = Math.max(
-            Number(session.realtimeOutlineSegmentCount) || 0,
-            Math.max(0, processedSegmentCount - REALTIME_OUTLINE_MIN_NEW_SEGMENTS)
-          );
-        } else {
-          session.realtimeOutlineSegmentCount = processedSegmentCount;
+      // 判废原因写进诊断日志（之前只塞进 window、没进日志，长会议冻结时无据可查）。
+      try {
+        await this.logDiagnostic("warn", "outline.soft_rejected", "实时大纲本轮判废", {
+          reason: validation.reason,
+          force: !!opts.force,
+          mode: session.mode,
+          segmentCount: session.segments.length,
+          processedSegmentCount,
+          hasOld: !!(session.realtimeOutline && String(session.realtimeOutline).trim()),
+        });
+      } catch { /* intentionally empty */ }
+      // 手动强制刷新（opts.force）：不保留旧版，落到下面冻结合并、采纳本轮"尽力而为"的结果——
+      // 用户点了刷新就是要"按当前转写出大纲"，绝不因不合格就卡着不动。
+      if (!opts.force) {
+        // 软失败：已有可用旧大纲时，本轮不合格也不 throw（throw 会进退避且不推进游标→同窗反复被拒、刷屏）。
+        // 保留旧大纲；游标只推到"留最后 N 段重试窗"的低水位（单调不减）。连续软失败超上限就推满游标放弃这批。
+        if (session.realtimeOutline && String(session.realtimeOutline).trim()) {
+          session._outlineSoftFailStreak = (Number(session._outlineSoftFailStreak) || 0) + 1;
+          if (session._outlineSoftFailStreak <= 3) {
+            session.realtimeOutlineSegmentCount = Math.max(
+              Number(session.realtimeOutlineSegmentCount) || 0,
+              Math.max(0, processedSegmentCount - REALTIME_OUTLINE_MIN_NEW_SEGMENTS)
+            );
+          } else {
+            session.realtimeOutlineSegmentCount = processedSegmentCount;
+          }
+          return session.realtimeOutline;
         }
-        return session.realtimeOutline;
+        // 还没有任何大纲(开头几轮)：保持 throw，触发正常重试/退避。
+        throw new Error(`实时大纲输出格式不合格：${validation.reason}`);
       }
-      // 还没有任何大纲(开头几轮)：保持 throw，触发正常重试/退避。
-      throw new Error(`实时大纲输出格式不合格：${validation.reason}`);
+      // opts.force：不 return、不 throw，落到下面的冻结合并采纳本轮结果。
     }
     // 冻结合并：本轮通过验证的"新输出"（≤8 话题的近窗结果）并入已有状态——历史话题冻结、
     // 只更新"进行中的最后一个话题" + 追加真正的新话题。大纲因此全部内容稳定存在、只在末尾增量生长；

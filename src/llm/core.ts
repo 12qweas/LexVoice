@@ -306,7 +306,7 @@ export async function requestLlmChatCompletion(plugin, messages, options) {
   if (!isMoonshotKimiModel(endpoint, llmModel)) basePayload.temperature = 0.3;
   const payload = Object.assign(basePayload, options && options.payload ? options.payload : {});
   // 思考档：default 不动请求；fast 关思维链 / reasoning 显式开——仅对已核实可控的服务注入对应参数，其它不动。
-  try { applyThinkingParam(payload, plugin.settings.thinkingMode, endpoint, llmModel); } catch { /* intentionally empty */ }
+  try { applyThinkingParam(payload, (options && options.thinkingMode) || plugin.settings.thinkingMode, endpoint, llmModel); } catch { /* intentionally empty */ }
   payload.stream = streamWanted;
   const payloadText = JSON.stringify(payload);
   // Obsidian requestUrl 兜底不支持流式，单独准备一份 stream:false 的 payload 给它用。
