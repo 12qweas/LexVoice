@@ -399,138 +399,138 @@ export class QueueModal extends obsidian.Modal {
   constructor(app, plugin) { super(app); this.plugin = plugin; }
   onOpen() {
     const { contentEl } = this;
-    // 静态 Modal 默认停在打开瞬间；处理中时会定时重渲染让"当前步骤/进度"实时走动。先清旧定时器避免叠加。
+    // 静态 Modal 默认停在打开瞬间；处理中时定时重渲染让进度实时走动。先清旧定时器避免叠加。
     if (this._activityTimer) { window.clearInterval(this._activityTimer); this._activityTimer = null; }
     contentEl.empty();
-    contentEl.createEl("h2", { text: "LexVoice 处理进度" });
+    contentEl.addClass("lexvoice-progress");
+    try { if (this.modalEl) this.modalEl.addClass("lexvoice-progress-modal"); } catch { /* intentionally empty */ }
 
     const allTasks = (this.plugin.queue && Array.isArray(this.plugin.queue.tasks)) ? this.plugin.queue.tasks : [];
-    const running = allTasks.filter(t => t && t.status === "running");
-    const pending = allTasks.filter(t => t && t.status !== "running");
+    const running = allTasks.filter((t) => t && t.status === "running");
+    const pending = allTasks.filter((t) => t && t.status !== "running");
     const completed = Array.isArray(this.plugin.completedWorkLog) ? this.plugin.completedWorkLog : [];
-    const activity = this.plugin.getCurrentActivityLabel ? this.plugin.getCurrentActivityLabel() : null;
-    const fmtDur = (ms) => { const s = Math.max(0, Math.round(Number(ms) / 1000)); if (s < 60) return `${s} 秒`; const m = Math.floor(s / 60), r = s % 60; if (m < 60) return r ? `${m} 分 ${r} 秒` : `${m} 分`; const h = Math.floor(m / 60), rm = m % 60; return rm ? `${h} 时 ${rm} 分` : `${h} 时`; };
+    const detail = this.plugin.getCurrentActivityDetail ? this.plugin.getCurrentActivityDetail() : null;
+    const activityLabel = this.plugin.getCurrentActivityLabel ? this.plugin.getCurrentActivityLabel() : null;
+    const active = !!(detail || activityLabel);
 
-    if (!running.length && !pending.length && !completed.length && !activity) {
-      contentEl.createEl("p", { text: "暂无处理任务。录音转写、AI 整理、重试任务的进度会显示在这里。" });
-      return;
-    }
-
+    const fmtDur = (ms) => { const s = Math.max(0, Math.round(Number(ms) / 1000)); if (s < 60) return `${s}秒`; const m = Math.floor(s / 60), r = s % 60; if (m < 60) return r ? `${m}分${r}秒` : `${m}分`; const h = Math.floor(m / 60), rm = m % 60; return rm ? `${h}时${rm}分` : `${h}时`; };
+    const fmtTime = (ms) => { try { return window.moment ? window.moment(ms).format("HH:mm:ss") : new Date(ms).toLocaleTimeString(); } catch { return ""; } };
+    const tokenLabel = (n, exact) => { const v = Number(n) || 0; if (v <= 0) return ""; const num = v >= 10000 ? (v / 10000).toFixed(1).replace(/\.0$/, "") + "万" : String(v); return `${exact ? "" : "≈"}${num}`; };
     const taskTitle = (t) => t.type === "transcribe" ? `转写重试 · 段${(t.segmentIndex || 0) + 1}`
       : t.type === "merge" ? `合并重试 · ${(t.segments || []).length} 段`
       : t.type === "generate-prompt" ? "提示词生成" : (t.type || "任务");
-    const section = (title) => {
-      const sec = contentEl.createDiv({ cls: "lexvoice-queue-section" });
-      sec.createEl("div", { cls: "lexvoice-queue-section-title", text: title });
-      return sec;
-    };
 
-    // —— 处理中（当前活动 + 正在跑的队列任务）——
-    if (activity || running.length) {
-      const sec = section(`处理中${running.length ? `（${running.length}）` : ""}`);
-      const list = sec.createDiv({ cls: "lexvoice-queue-list" });
-      const detail = this.plugin.getCurrentActivityDetail ? this.plugin.getCurrentActivityDetail() : null;
-      if (detail) {
-        const card = list.createDiv({ cls: "lexvoice-queue-row is-running lexvoice-activity-card" });
-        const info = card.createDiv({ cls: "lexvoice-queue-info" });
-        // 第一行：任务类型 · 模式 …（右）计数
-        const head = info.createDiv({ cls: "lexvoice-activity-head" });
-        head.createSpan({ cls: "lexvoice-activity-kind", text: detail.kind || "处理中" });
-        if (detail.modeLabel) {
-          head.createSpan({ cls: "lexvoice-activity-sep", text: "·" });
-          head.createSpan({ cls: "lexvoice-activity-mode", text: detail.modeLabel });
-        }
-        if (detail.count) head.createSpan({ cls: "lexvoice-activity-count", text: detail.count });
-        // 第二行：当前步骤（+百分比）
-        const hasPct = detail.percent != null && Number.isFinite(Number(detail.percent));
-        const stepText = (detail.step || "处理中") + (hasPct ? `（${Math.round(Number(detail.percent))}%）` : "");
-        info.createDiv({ cls: "lexvoice-activity-step", text: stepText });
-        // 进度条（仅在有百分比时显示）
-        if (hasPct) {
-          const track = info.createDiv({ cls: "lexvoice-activity-bar" });
-          const fill = track.createDiv({ cls: "lexvoice-activity-bar-fill" });
-          fill.style.width = Math.max(0, Math.min(100, Math.round(Number(detail.percent)))) + "%";
-        }
-        // 第三行：步骤说明
-        if (detail.stepDetail) info.createDiv({ cls: "lexvoice-activity-detail", text: detail.stepDetail });
-        // 第四行：实时已用时（AI 整理/重整/清稿等经 beginTaskMeter 的处理；面板每 1.2s 重渲染会走动）
-        const _tm = this.plugin._taskMeter;
-        if (_tm && _tm.startedAt) info.createDiv({ cls: "lexvoice-activity-detail", text: `已用时 ${fmtDur(Date.now() - _tm.startedAt)}` });
-      } else if (activity) {
-        const row = list.createDiv({ cls: "lexvoice-queue-row is-running" });
-        const aInfo = row.createDiv({ cls: "lexvoice-queue-info" });
-        aInfo.createEl("div", { cls: "lexvoice-queue-title", text: activity });
-        const _tm = this.plugin._taskMeter;
-        if (_tm && _tm.startedAt) aInfo.createEl("div", { cls: "lexvoice-queue-meta", text: `已用时 ${fmtDur(Date.now() - _tm.startedAt)}` });
-      }
-      // 正在跑的队列重试任务（与当前活动并列）
-      for (const t of running) {
-        const row = list.createDiv({ cls: "lexvoice-queue-row is-running" });
-        const info = row.createDiv({ cls: "lexvoice-queue-info" });
-        info.createEl("div", { cls: "lexvoice-queue-title", text: taskTitle(t) });
-        info.createEl("div", { cls: "lexvoice-queue-meta", text: t.mdPath || "" });
-      }
+    // —— 头部：标题 + 状态 ——
+    const head = contentEl.createDiv({ cls: "lexvoice-progress-head" });
+    const titleRow = head.createDiv({ cls: "lexvoice-progress-title-row" });
+    titleRow.createSpan({ cls: "lexvoice-progress-title", text: "处理进度" });
+    titleRow.createSpan({ cls: `lexvoice-progress-state${active ? " is-active" : ""}`, text: active ? "正在处理…" : "空闲" });
+
+    if (!running.length && !pending.length && !completed.length && !active) {
+      contentEl.createDiv({ cls: "lexvoice-progress-empty", text: "暂无处理任务。录音转写、AI 整理、重试任务的进度会显示在这里。" });
+      return;
     }
 
-    // —— 待处理 ——
+    // —— 进度条 + 概要 ——
+    const doneCount = completed.length;
+    const activeCount = (active ? 1 : 0) + running.length;
+    const total = doneCount + activeCount + pending.length;
+    let doneEquiv = doneCount;
+    if (detail && Number.isFinite(Number(detail.percent))) doneEquiv += Math.max(0, Math.min(1, Number(detail.percent) / 100));
+    else if (activeCount) doneEquiv += 0.4;
+    const percent = total ? Math.round(Math.min(100, (doneEquiv / total) * 100)) : 0;
+    const _tm = this.plugin._taskMeter;
+    const tmTok = _tm ? (Number(_tm.exactTokens) > 0 ? Number(_tm.exactTokens) : Math.round(((Number(_tm.inChars) || 0) + (Number(_tm.outChars) || 0)) / 2)) : 0;
+    const tmTokLabel = tokenLabel(tmTok, !!(_tm && _tm.hasExact && Number(_tm.exactTokens) > 0));
+
+    const bar = head.createDiv({ cls: "lexvoice-progress-bar" });
+    bar.createDiv({ cls: `lexvoice-progress-bar-fill${active ? " is-active" : ""}` }).style.width = percent + "%";
+    const sum = head.createDiv({ cls: "lexvoice-progress-summary" });
+    sum.createSpan({ cls: "lexvoice-progress-summary-left", text: `已完成 ${doneCount} / ${total}` });
+    const metaParts = [];
+    if (detail && detail.kind) metaParts.push(detail.kind);
+    if (_tm && _tm.startedAt) metaParts.push(fmtDur(Date.now() - _tm.startedAt));
+    if (tmTokLabel) metaParts.push(`${tmTokLabel} token`);
+    if (metaParts.length) sum.createSpan({ cls: "lexvoice-progress-summary-right", text: metaParts.join(" · ") });
+
+    // —— 任务列表：已完成（✓）→ 处理中（转圈）→ 待处理（脉冲点）——
+    const list = contentEl.createDiv({ cls: "lexvoice-progress-list" });
+    const makeRow = (kind) => {
+      const r = list.createDiv({ cls: `lexvoice-progress-row is-${kind}` });
+      return { ico: r.createDiv({ cls: "lexvoice-progress-ico" }), body: r.createDiv({ cls: "lexvoice-progress-body" }) };
+    };
+    const titleLine = (bodyEl, name, right, faint) => {
+      const tl = bodyEl.createDiv({ cls: "lexvoice-progress-line" });
+      tl.createSpan({ cls: `lexvoice-progress-name${faint ? " is-faint" : ""}`, text: name });
+      if (right) tl.createSpan({ cls: `lexvoice-progress-right${faint ? " is-faint" : ""}`, text: right });
+    };
+    const subLine = (bodyEl, text) => { if (text) bodyEl.createDiv({ cls: "lexvoice-progress-sub", text }); };
+
+    for (const c of completed) {
+      const { ico, body } = makeRow("done");
+      try { obsidian.setIcon(ico.createSpan({ cls: "lexvoice-progress-check" }), "check"); } catch { /* intentionally empty */ }
+      const right = [(c.durationMs > 0 ? fmtDur(c.durationMs) : ""), tokenLabel(c.tokens, c.tokensExact)].filter(Boolean).join(" · ");
+      titleLine(body, c.title || "完成", right, false);
+      subLine(body, `已完成${c.detail ? " · " + c.detail : ""}${c.at ? " · " + fmtTime(c.at) : ""}`);
+    }
+
+    if (active) {
+      const { ico, body } = makeRow("running");
+      ico.createSpan({ cls: "lexvoice-progress-spinner" });
+      const sess = this.plugin.session;
+      const fileName = sess && sess.mdPath ? String(sess.mdPath).split(/[\\/]/).pop().replace(/\.md$/i, "") : "";
+      const name = fileName || (detail ? [detail.kind, detail.modeLabel].filter(Boolean).join(" · ") : activityLabel) || "处理中";
+      const right = (_tm && _tm.startedAt) ? [fmtDur(Date.now() - _tm.startedAt), tmTokLabel].filter(Boolean).join(" · ") : "";
+      titleLine(body, name, right, false);
+      const stepBase = detail ? (detail.step || detail.kind || "处理中") : (activityLabel || "处理中");
+      const pctTxt = detail && Number.isFinite(Number(detail.percent)) ? `（${Math.round(Number(detail.percent))}%）` : "";
+      subLine(body, `${stepBase}${pctTxt}${detail && detail.count ? " · " + detail.count : ""}`);
+    }
+
+    for (const t of running) {
+      const { ico, body } = makeRow("running");
+      ico.createSpan({ cls: "lexvoice-progress-spinner" });
+      titleLine(body, taskTitle(t), "", false);
+      subLine(body, t.mdPath || "");
+    }
+
+    for (const t of pending) {
+      const { ico, body } = makeRow("pending");
+      ico.createSpan({ cls: "lexvoice-progress-dot" });
+      titleLine(body, taskTitle(t), `重试 ${t.retries || 0}/${this.plugin.settings.maxRetries || 3}`, true);
+      subLine(body, `${t.mdPath || "排队中…"}${t.lastError ? " · " + t.lastError : ""}`);
+      const acts = body.createDiv({ cls: "lexvoice-progress-rowacts" });
+      const retryBtn = acts.createSpan({ cls: "lexvoice-progress-link", attr: { role: "button", tabindex: "0" }, text: "重试" });
+      retryBtn.onclick = async () => { try { await this.plugin.queue.processOne(t); } catch { /* intentionally empty */ } this.onOpen(); };
+      const delBtn = acts.createSpan({ cls: "lexvoice-progress-link", attr: { role: "button", tabindex: "0" }, text: "删除" });
+      delBtn.onclick = async () => {
+        await this.plugin.queue.remove(t.id);
+        new obsidian.Notice("已删除任务：此分段不再自动重试，纪要中对应位置保持现状（可在纪要中右键重新发起）。", 6000);
+        this.onOpen();
+      };
+    }
+
+    // —— 待处理批量操作 ——
     if (pending.length) {
-      const sec = section(`待处理（${pending.length}）`);
-      const actionBar = sec.createDiv({ cls: "lexvoice-queue-actions" });
-      const retryAllBtn = actionBar.createEl("button", { text: `重试全部 (${pending.length})`, cls: "mod-cta" });
+      const foot = contentEl.createDiv({ cls: "lexvoice-progress-foot" });
+      const retryAllBtn = foot.createEl("button", { cls: "lexvoice-progress-btn mod-cta", text: `重试全部 (${pending.length})`, attr: { type: "button" } });
       retryAllBtn.onclick = async () => { await this.plugin.retryQueue(); this.onOpen(); };
-      const clearBtn = actionBar.createEl("button", { text: "清空待处理" });
+      const clearBtn = foot.createSpan({ cls: "lexvoice-progress-link", attr: { role: "button", tabindex: "0" }, text: "清空待处理" });
       clearBtn.onclick = async () => {
-        const n = this.plugin.queue.tasks.filter(t => t && t.status !== "running").length;
+        const n = this.plugin.queue.tasks.filter((t) => t && t.status !== "running").length;
         const ok = await lexvoiceConfirm(this.app, "清空待处理任务？",
           `清空后这 ${n} 个任务不再自动重试，对应纪要将停留在当前状态（之后可在纪要中右键重新发起转写/整理）。处理中的任务不受影响。`,
           "清空");
         if (!ok) return;
-        this.plugin.queue.tasks = this.plugin.queue.tasks.filter(t => t && t.status === "running");
+        this.plugin.queue.tasks = this.plugin.queue.tasks.filter((t) => t && t.status === "running");
         await this.plugin.saveAll();
         this.plugin.renderStatusBar();
         this.onOpen();
       };
-      const list = sec.createDiv({ cls: "lexvoice-queue-list" });
-      for (const t of pending) {
-        const row = list.createDiv({ cls: "lexvoice-queue-row" });
-        const info = row.createDiv({ cls: "lexvoice-queue-info" });
-        info.createEl("div", { cls: "lexvoice-queue-title", text: taskTitle(t) });
-        info.createEl("div", { cls: "lexvoice-queue-meta", text: `${t.mdPath || ""} · 重试 ${t.retries || 0}/${this.plugin.settings.maxRetries || 3}` });
-        if (t.lastError) info.createEl("div", { cls: "lexvoice-queue-error", text: t.lastError });
-        const actions = row.createDiv({ cls: "lexvoice-queue-row-actions" });
-        const retryBtn = actions.createEl("button", { text: "重试" });
-        retryBtn.onclick = async () => { try { await this.plugin.queue.processOne(t); } catch { /* intentionally empty */ } this.onOpen(); };
-        const delBtn = actions.createEl("button", { text: "删除" });
-        delBtn.onclick = async () => {
-          await this.plugin.queue.remove(t.id);
-          new obsidian.Notice("已删除任务：此分段不再自动重试，纪要中对应位置保持现状（可在纪要中右键重新发起）。", 6000);
-          this.onOpen();
-        };
-      }
     }
 
-    // —— 本次启动后已完成 ——
-    if (completed.length) {
-      const sec = section(`本次已完成（${completed.length}）`);
-      const list = sec.createDiv({ cls: "lexvoice-queue-list" });
-      const fmtTime = (ms) => {
-        try { return window.moment ? window.moment(ms).format("HH:mm:ss") : new Date(ms).toLocaleTimeString(); }
-        catch { return ""; }
-      };
-      for (const c of completed) {
-        const row = list.createDiv({ cls: "lexvoice-queue-row is-done" });
-        const info = row.createDiv({ cls: "lexvoice-queue-info" });
-        info.createEl("div", { cls: "lexvoice-queue-title", text: c.title || "完成" });
-        const tokLabel = (c.tokens && c.tokens > 0)
-          ? ` · ${c.tokensExact ? "" : "≈"}${c.tokens >= 10000 ? (c.tokens / 10000).toFixed(1).replace(/\.0$/, "") + "万" : c.tokens} token`
-          : "";
-        const durLabel = (c.durationMs && c.durationMs > 0) ? ` · 用时 ${fmtDur(c.durationMs)}` : "";
-        info.createEl("div", { cls: "lexvoice-queue-meta", text: `${fmtTime(c.at)}${c.detail ? " · " + c.detail : ""}${durLabel}${tokLabel}` });
-      }
-    }
-
-    // 处理中时每 1.2s 重渲染，让步骤名/百分比实时更新；空闲（无活动、无运行任务）即停止刷新。
-    if (activity || running.length) {
+    // 处理中时每 1.2s 重渲染，让步骤名/百分比实时更新；空闲即停止刷新。
+    if (active || running.length) {
       this._activityTimer = window.setInterval(() => { try { this.onOpen(); } catch { /* intentionally empty */ } }, 1200);
     }
   }

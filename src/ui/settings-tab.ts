@@ -1342,12 +1342,12 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       btn.onclick = onClick;
       return btn;
     };
-    makeObjectCard("人员", `${peopleCount} 位`, "会议里出现的人，一人一页，关联相关纪要。", "打开人员库", () => this.plugin.openPeopleBase());
-    makeObjectCard("学习卡片", `${learningCount} 张`, "观点、机制、案例、QA 等可复用知识。", "打开卡片墙", () => this.plugin.openLearningWall("learning"));
-    makeObjectCard("待办", `${todoCount} 条`, "从纪要确认出的行动项，可勾选追踪。", "打开待办墙", () => this.plugin.openTodoWall());
-    const vocabCard = makeObjectCard("转写词表", "读取中", "术语、专名和易错写法，用于提升转写准确率。", "打开词表", () => openVocabularyFile());
+    makeObjectCard("人员", `${peopleCount} 位`, "会议里出现的人，一人一页，关联相关纪要。", "打开人员库", () => { void this.plugin.openPeopleBase(); });
+    makeObjectCard("学习卡片", `${learningCount} 张`, "观点、机制、案例、QA 等可复用知识。", "打开卡片墙", () => { void this.plugin.openLearningWall("learning"); });
+    makeObjectCard("待办", `${todoCount} 条`, "从纪要确认出的行动项，可勾选追踪。", "打开待办墙", () => { void this.plugin.openTodoWall(); });
+    const vocabCard = makeObjectCard("转写词表", "读取中", "术语、专名和易错写法，用于提升转写准确率。", "打开词表", () => { void openVocabularyFile(); });
 
-    (async () => {
+    void (async () => {
       const countEl = vocabCard.querySelector(".lexvoice-object-overview-count");
       try {
         const path = obsidian.normalizePath(this.plugin.settings.vocabularyFile || DEFAULT_SETTINGS.vocabularyFile);
@@ -1392,14 +1392,14 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     new obsidian.Setting(c).setName("浏览入口").setHeading();
     new obsidian.Setting(c).setName("对象墙")
       .setDesc("日常浏览入口。对象总览支持按类型筛选；学习、概念和待办也可以单独打开。")
-      .addButton(b => b.setButtonText("对象总览").setCta().onClick(() => this.plugin.openObjectWall()))
-      .addButton(b => b.setButtonText("学习卡片").onClick(() => this.plugin.openLearningWall("learning")))
-      .addButton(b => b.setButtonText("概念").onClick(() => this.plugin.openLearningWall("concept")))
-      .addButton(b => b.setButtonText("待办").onClick(() => this.plugin.openTodoWall()));
+      .addButton(b => b.setButtonText("对象总览").setCta().onClick(() => { void this.plugin.openObjectWall(); }))
+      .addButton(b => b.setButtonText("学习卡片").onClick(() => { void this.plugin.openLearningWall("learning"); }))
+      .addButton(b => b.setButtonText("概念").onClick(() => { void this.plugin.openLearningWall("concept"); }))
+      .addButton(b => b.setButtonText("待办").onClick(() => { void this.plugin.openTodoWall(); }));
 
     new obsidian.Setting(c).setName("明细表格")
       .setDesc("用于核对和批量筛选，不作为主展示入口。")
-      .addButton(b => b.setButtonText("人员资料").onClick(() => this.plugin.openPeopleBase()))
+      .addButton(b => b.setButtonText("人员资料").onClick(() => { void this.plugin.openPeopleBase(); }))
       .addButton(b => b.setButtonText("全部纪要").onClick(() => this.plugin.openLexVoiceDetailBase()));
 
     const advanced = c.createEl("details", { cls: "lexvoice-settings-details" });

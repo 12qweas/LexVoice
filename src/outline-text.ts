@@ -97,11 +97,16 @@ export function getRealtimeOutlineAnchorTime(anchor) {
 export function cleanRealtimeOutlineItemText(text, maxChars = 120) {
   let value = String(text || "")
     .replace(/\[\[[^\]]+\|\d{1,2}:\d{2}(?::\d{2})?\]\]/g, "")
+    // 剥掉行尾未闭合的残缺锚点（如 "[[lex-202"）——模型截断/流式半写时会漏出 [[ 却没有闭合 ]]，
+    // 不清掉会当成正文渲染成一条乱码节点。只匹配"尾部不含 ]"的片段，绝不会碰到完整 [[x|MM:SS]]。
+    .replace(/\[\[[^\]]*$/, "")
     .replace(/^[\s\-*+>]+/, "")
     .replace(/^\d+[.)、．]\s*/, "")
     .replace(/\s+/g, " ")
     .trim();
   if (value.length > maxChars) value = value.slice(0, maxChars).trimEnd();
+  // 截断到 maxChars 时可能又切出半个锚点/半个 [[，再兜一次。
+  value = value.replace(/\[\[[^\]]*$/, "").trimEnd();
   return value;
 }
 

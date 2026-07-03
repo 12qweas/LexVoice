@@ -6,15 +6,21 @@
 //   · reasoning_effort: "low"|"high"     —— OpenAI(gpt-5/o系) / Gemini-2.5 / xAI(grok-mini/4) / Groq(推理模型)
 // 纯函数、无外部依赖，可独立单测。
 
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return -- Thinking controls mutate OpenAI-compatible request payloads whose shape varies by provider. */
 function hostOf(endpoint) {
   const raw = String(endpoint == null ? "" : endpoint).trim();
   try { return new URL(raw).hostname.toLowerCase(); } catch { return raw.toLowerCase(); }
+}
+
+function isTokenPlanEndpoint(endpoint) {
+  return /token-plan/i.test(String(endpoint || ""));
 }
 
 // 返回 { family, service } 或 null（null = 当前服务不支持调节思考档 → UI 应灰掉）。
 export function getThinkingControl(endpoint, model) {
   const host = hostOf(endpoint);
   const m = String(model == null ? "" : model).toLowerCase();
+  if (isTokenPlanEndpoint(endpoint)) return null;
   // enable_thinking 家族
   if (host.includes("xiaomimimo.com")) return { family: "enable_thinking", service: "小米 MiMo" };
   if (host.includes("siliconflow")) return { family: "enable_thinking", service: "硅基流动" };

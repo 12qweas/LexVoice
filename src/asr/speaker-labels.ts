@@ -12,6 +12,7 @@
 
 // 把原始说话人标识归一为友好标签：通用 ID（SPEAKER_00 / spk1 / 0…）按出现顺序编号为「说话人N」；
 // 已命名的说话人（如 "Alice"）原样保留。map 在一次调用内保持映射稳定。
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- ASR diarization payloads are provider-specific JSON; these helpers normalize untyped response objects defensively. */
 export function friendlySpeakerLabel(raw, map) {
   const key = String(raw == null ? "" : raw).trim();
   if (!key) return "";

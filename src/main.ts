@@ -3208,6 +3208,13 @@ function stripImportedTextSource(text) {
 const NOTE_ASK_CONTEXT_MAX_CHARS = 18000;
 const NOTE_ASK_TIMEOUT_MS = 75 * 1000;
 const NOTE_ASK_MAX_TOKENS = 1400;
+// 「试试这样问」快捷提问（无历史时显示在输入框下方，点击直接发起）。通用会议向，适配大多数纪要。
+const NOTE_ASK_SUGGESTIONS = [
+  "本次会议的核心结论？",
+  "有哪些待办，分别谁负责？",
+  "各方分歧点在哪里？",
+  "还有哪些风险或待澄清的问题？",
+];
 
 function stripLexVoiceAskBlocks(text) {
   return String(text || "").replace(/\n##\s+问一问\b[\s\S]*?(?=\n(?:---\s*\n+)?##\s+(?:📁\s*)?原始材料\b|\n<!--\s*LEXVOICE_SEDIMENT_BEGIN|$)/g, "\n");
@@ -6700,7 +6707,7 @@ class OutlineView extends obsidian.ItemView {
       sedimentSig,
       this.sedimentGroup || "person",
       this.sedimentSwitcherOpen ? 1 : 0,
-      askState ? `${askState.running ? 1 : 0}:${askState.question || ""}:${askState.answer || ""}:${askState.error || ""}:${askState.written ? 1 : 0}` : "",
+      askState ? `${askState.running ? 1 : 0}:${askState.multiSelect ? 1 : 0}:${askState.question || ""}:${askState.error || ""}:${(askState.followups || []).join("|")}:${Array.isArray(askState.entries) ? askState.entries.map((e) => `${e.id}${e.expanded ? "1" : "0"}${e.written ? "1" : "0"}${e.selected ? "1" : "0"}`).join(",") : ""}` : "",
       activeNote ? activeNote.path : "",
       activeNote ? activeNote.stat.mtime : 0,
     ].join("|");
@@ -6936,11 +6943,15 @@ class OutlineView extends obsidian.ItemView {
 
   getAskState(file) {
     const path = file instanceof obsidian.TFile ? obsidian.normalizePath(file.path) : "";
-    if (!path) return { question: "", answer: "", answerQuestion: "", error: "", running: false, written: false };
+    // entries: 本会话内该纪要的问答历史（最新在前），每条 { id, question, answer, ts, written, expanded }。
+    // followups: AI 在上一轮回答后生成的 3 个深度追问（供"接着可以问"chip 用）。
+    if (!path) return { question: "", error: "", running: false, entries: [], followups: [] };
     if (!this.noteAskByPath) this.noteAskByPath = {};
     if (!this.noteAskByPath[path]) {
-      this.noteAskByPath[path] = { question: "", answer: "", answerQuestion: "", error: "", running: false, written: false };
+      this.noteAskByPath[path] = { question: "", error: "", running: false, entries: [], followups: [] };
     }
+    if (!Array.isArray(this.noteAskByPath[path].entries)) this.noteAskByPath[path].entries = [];
+    if (!Array.isArray(this.noteAskByPath[path].followups)) this.noteAskByPath[path].followups = [];
     return this.noteAskByPath[path];
   }
 
@@ -6962,71 +6973,127 @@ class OutlineView extends obsidian.ItemView {
   renderAskPanel(root, file) {
     const state = this.getAskState(file);
     const sec = root.createDiv({ cls: "lexvoice-outline-section lexvoice-note-ask" });
+
+    // —— 头部（带下边框）：✦ 问一问 + 右侧纪要上下文 ——
     const head = sec.createDiv({ cls: "lexvoice-note-ask-head" });
     const title = head.createDiv({ cls: "lexvoice-note-ask-title" });
-    try { obsidian.setIcon(title.createSpan({ cls: "lexvoice-note-ask-title-icon" }), "message-circle-question"); } catch { /* intentionally empty */ }
+    try { obsidian.setIcon(title.createSpan({ cls: "lexvoice-note-ask-title-icon" }), "sparkles"); } catch { /* intentionally empty */ }
     title.createSpan({ text: "问一问" });
     head.createDiv({ cls: "lexvoice-note-ask-note", text: this.formatAskNoteTitle(file) });
 
-    const inputWrap = sec.createDiv({ cls: "lexvoice-note-ask-input-wrap" });
+    const body = sec.createDiv({ cls: "lexvoice-note-ask-body" });
+
+    // —— 输入区：文本框 + 底部（提示 + 提问按钮）。Enter 发送 / Shift+Enter 换行。 ——
+    // 输入条：复用「会中纪要」那条一行式圆角胶囊——透明输入 + 右侧裸主色发送图标。
+    const inputWrap = body.createDiv({ cls: "lexvoice-note-ask-input-wrap" });
     const textarea = inputWrap.createEl("textarea", {
       cls: "lexvoice-note-ask-input",
       attr: {
-        placeholder: "针对这篇纪要提问，例如：这次会议有哪些明确待办？有哪些风险还没解决？",
-        rows: "4",
+        placeholder: state.entries.length ? "继续问这段会议…" : "针对这篇纪要提问…",
+        rows: "1",
       },
     });
     textarea.value = state.question || "";
-    const actions = inputWrap.createDiv({ cls: "lexvoice-note-ask-actions" });
-    const askBtn = actions.createEl("button", {
-      cls: "mod-cta lexvoice-note-ask-submit",
-      attr: { type: "button" },
+    const askBtn = inputWrap.createEl("button", {
+      cls: `lexvoice-note-ask-submit${state.running ? " is-running" : ""}`,
+      attr: { type: "button", "aria-label": "提问", title: "提问（回车发送 · Shift+回车换行）" },
     });
-    try { obsidian.setIcon(askBtn.createSpan({ cls: "lexvoice-note-ask-button-icon" }), state.running ? "loader-2" : "send"); } catch { /* intentionally empty */ }
-    askBtn.createSpan({ text: state.running ? "回答中" : "提问" });
-    const updateAskButton = () => {
-      askBtn.disabled = !!state.running || !String(textarea.value || "").trim();
-    };
-    textarea.oninput = () => {
-      state.question = textarea.value;
-      state.written = false;
-      updateAskButton();
-    };
-    askBtn.onclick = () => {
-      state.question = textarea.value;
-      void this.askCurrentNote(file);
-    };
+    try { obsidian.setIcon(askBtn, state.running ? "loader-2" : "send"); } catch { askBtn.setText("问"); }
+    const updateAskButton = () => { askBtn.disabled = !!state.running || !String(textarea.value || "").trim(); };
+    const submit = () => { state.question = textarea.value; void this.askCurrentNote(file); };
+    textarea.oninput = () => { state.question = textarea.value; updateAskButton(); };
+    textarea.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
+        ev.preventDefault();
+        if (!askBtn.disabled) submit();
+      }
+    });
+    askBtn.onclick = submit;
     updateAskButton();
 
+    // —— 错误（进行中状态只靠「提问」按钮自转图标表达，不再另起一行文字）——
     if (state.error) {
-      const err = sec.createDiv({ cls: "lexvoice-note-ask-error" });
+      const err = body.createDiv({ cls: "lexvoice-note-ask-error" });
       try { obsidian.setIcon(err.createSpan({ cls: "lexvoice-note-ask-error-icon" }), "triangle-alert"); } catch { /* intentionally empty */ }
       err.createSpan({ text: state.error });
     }
 
-    if (state.answer) {
-      const answer = sec.createDiv({ cls: "lexvoice-note-ask-answer" });
-      const answerHead = answer.createDiv({ cls: "lexvoice-note-ask-answer-head" });
-      answerHead.createDiv({ cls: "lexvoice-note-ask-answer-label", text: "AI 回答" });
-      const writeBtn = answerHead.createEl("button", {
-        cls: "lexvoice-note-ask-write",
-        attr: { type: "button" },
-      });
-      try { obsidian.setIcon(writeBtn.createSpan({ cls: "lexvoice-note-ask-button-icon" }), state.written ? "check" : "file-plus-2"); } catch { /* intentionally empty */ }
-      writeBtn.createSpan({ text: state.written ? "已写入" : "写入纪要" });
-      writeBtn.disabled = !!state.running || !!state.written;
-      writeBtn.onclick = () => void this.writeAskAnswerToNote(file);
+    // —— 多选开关（有历史时显示；裸 span，无底图/无按钮外壳）——
+    if (state.entries.length) {
+      const bar = body.createDiv({ cls: "lexvoice-note-ask-multibar" });
+      const multiBtn = bar.createSpan({ cls: `lexvoice-note-ask-multi-toggle${state.multiSelect ? " is-active" : ""}`, attr: { role: "button", tabindex: "0", "aria-label": state.multiSelect ? "完成多选" : "多选" } });
+      try { obsidian.setIcon(multiBtn.createSpan({ cls: "lexvoice-note-ask-multi-icon" }), "check-square"); } catch { /* intentionally empty */ }
+      multiBtn.createSpan({ text: state.multiSelect ? "完成" : "多选" });
+      multiBtn.onclick = () => {
+        state.multiSelect = !state.multiSelect;
+        if (!state.multiSelect) for (const e of state.entries) e.selected = false;
+        this.render();
+      };
+    }
 
-      if (state.answerQuestion) {
-        answer.createDiv({ cls: "lexvoice-note-ask-question", text: state.answerQuestion });
+    // —— 历史问答手风琴（最新在前）——
+    if (state.entries.length) {
+      const list = body.createDiv({ cls: `lexvoice-note-ask-history${state.multiSelect ? " is-multi" : ""}` });
+      for (const entry of state.entries) {
+        const expanded = entry.expanded && !state.multiSelect;
+        const item = list.createDiv({ cls: `lexvoice-note-ask-item${expanded ? " is-expanded" : ""}${entry.selected ? " is-selected" : ""}` });
+        const row = item.createDiv({ cls: "lexvoice-note-ask-item-head" });
+        if (state.multiSelect) {
+          const box = row.createSpan({ cls: "lexvoice-note-ask-check" });
+          try { obsidian.setIcon(box, entry.selected ? "check-square" : "square"); } catch { box.setText(entry.selected ? "☑" : "☐"); }
+        } else {
+          try { obsidian.setIcon(row.createSpan({ cls: "lexvoice-note-ask-chevron" }), entry.expanded ? "chevron-down" : "chevron-right"); } catch { /* intentionally empty */ }
+        }
+        const main = row.createDiv({ cls: "lexvoice-note-ask-item-main" });
+        main.createDiv({ cls: "lexvoice-note-ask-item-q", text: entry.question });
+        const rel = this.formatAskEntryTime(entry.ts);
+        const metaText = entry.written ? (rel ? `${rel} · 已写入` : "已写入") : (rel ? `${rel} · AI 回答` : "AI 回答");
+        main.createDiv({ cls: "lexvoice-note-ask-item-meta", text: metaText });
+        if (!state.multiSelect) {
+          const writeBtn = row.createEl("button", {
+            cls: `lexvoice-note-ask-write${entry.written ? " is-written" : ""}`,
+            attr: { type: "button", "aria-label": entry.written ? "已写入纪要" : "写入纪要", title: entry.written ? "已写入纪要" : "写入纪要" },
+          });
+          try { obsidian.setIcon(writeBtn, entry.written ? "check" : "file-plus-2"); } catch { /* intentionally empty */ }
+          writeBtn.onclick = (ev) => { ev.stopPropagation(); void this.writeAskAnswerToNote(file, entry.id); };
+        }
+        row.onclick = () => {
+          if (state.multiSelect) entry.selected = !entry.selected;
+          else entry.expanded = !entry.expanded;
+          this.render();
+        };
+        if (expanded) {
+          const abody = item.createDiv({ cls: "lexvoice-note-ask-answer-body" });
+          const rendered = obsidian.MarkdownRenderer.render(this.app, entry.answer, abody, file.path, this);
+          void Promise.resolve(rendered);
+        }
       }
-      const body = answer.createDiv({ cls: "lexvoice-note-ask-answer-body" });
-      const rendered = obsidian.MarkdownRenderer.render(this.app, state.answer, body, file.path, this);
-      void Promise.resolve(rendered);
-    } else if (!state.running) {
-      const empty = sec.createDiv({ cls: "lexvoice-note-ask-empty" });
-      empty.createDiv({ cls: "lexvoice-note-ask-empty-title", text: "基于原始转写回答" });
-      empty.createDiv({ cls: "lexvoice-note-ask-empty-desc", text: "回答优先使用本篇的原始转写，纪要正文只作为辅助；觉得有价值时可以写回到 Markdown 正文里。" });
+      // 批量写入条
+      if (state.multiSelect) {
+        const selCount = state.entries.filter((e) => e.selected).length;
+        const batch = body.createDiv({ cls: "lexvoice-note-ask-batch" });
+        const writeSel = batch.createEl("button", { cls: "lexvoice-note-ask-batch-btn", attr: { type: "button" } });
+        try { obsidian.setIcon(writeSel.createSpan({ cls: "lexvoice-note-ask-button-icon" }), "file-plus-2"); } catch { /* intentionally empty */ }
+        writeSel.createSpan({ text: selCount ? `写入选中 ${selCount} 条` : "写入选中" });
+        writeSel.disabled = !selCount;
+        writeSel.onclick = () => void this.writeSelectedAskAnswers(file);
+      }
+    }
+
+    // —— 建议提问：始终在最下方（有历史时在折叠记录下面）。上一轮回答后 AI 会生成 3 个深度追问回填这里；
+    //    还没有 AI 追问时用静态默认。点击直接发起提问。多选模式下隐藏。——
+    if (!state.multiSelect) {
+      const followups = Array.isArray(state.followups) ? state.followups.filter(Boolean) : [];
+      const suggestions = followups.length ? followups : NOTE_ASK_SUGGESTIONS;
+      const sug = body.createDiv({ cls: "lexvoice-note-ask-suggest" });
+      sug.createDiv({ cls: "lexvoice-note-ask-suggest-label", text: followups.length ? "接着可以问" : "试试这样问" });
+      const chips = sug.createDiv({ cls: "lexvoice-note-ask-suggest-chips" });
+      for (const q of suggestions) {
+        const chip = chips.createEl("button", { cls: "lexvoice-note-ask-suggest-chip", attr: { type: "button" } });
+        chip.setText(q);
+        chip.disabled = !!state.running;
+        chip.onclick = () => { state.question = q; void this.askCurrentNote(file); };
+      }
     }
   }
 
@@ -7042,9 +7109,6 @@ class OutlineView extends obsidian.ItemView {
     }
     state.running = true;
     state.error = "";
-    state.answer = "";
-    state.answerQuestion = question;
-    state.written = false;
     this.render();
     try {
       const markdown = await this.app.vault.cachedRead(file);
@@ -7072,7 +7136,20 @@ class OutlineView extends obsidian.ItemView {
         priority: "user",
         noRetry: true,
       });
-      state.answer = String(raw || "").trim() || "纪要中没有足够依据。";
+      const answer = String(raw || "").trim() || "纪要中没有足够依据。";
+      for (const en of state.entries) en.expanded = false; // 新回答展开，历史折叠（对齐设计：最新在前且展开）
+      const newEntry = {
+        id: `ask-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+        question,
+        answer,
+        ts: Date.now(),
+        written: false,
+        expanded: true,
+      };
+      state.entries.unshift(newEntry);
+      state.question = ""; // 清空输入，方便"继续问这段会议"
+      // 顺便让 AI 基于本轮问答生成 3 个深度追问，回填到底部"接着可以问"（异步，不阻塞回答显示）。
+      void this.generateAskFollowups(file, newEntry);
     } catch (e) {
       console.error("[LexVoice] note ask failed", e);
       state.error = (e && e.message) || String(e);
@@ -7090,17 +7167,91 @@ class OutlineView extends obsidian.ItemView {
     }
   }
 
-  async writeAskAnswerToNote(file) {
+  // 多选模式：把勾选的历史回答按时间正序批量写入当前纪要。
+  async writeSelectedAskAnswers(file) {
     if (!(file instanceof obsidian.TFile)) return;
     const state = this.getAskState(file);
-    const question = String(state.answerQuestion || state.question || "").trim();
-    const answer = String(state.answer || "").trim();
+    const selected = state.entries.filter((e) => e.selected && !e.written);
+    if (!selected.length) { new obsidian.Notice("选中的条目都已写入过了。", 4000); return; }
+    try {
+      let current = await this.app.vault.read(file);
+      for (const entry of selected.slice().reverse()) { // 最新在前 → 反转成时间正序写入
+        const q = String(entry.question || "").trim();
+        const a = String(entry.answer || "").trim();
+        if (!q || !a) continue;
+        current = appendLexVoiceAskEntry(current, q, a);
+        entry.written = true;
+      }
+      await this.app.vault.modify(file, current);
+      this.notePanelCacheKey = "";
+      state.multiSelect = false;
+      for (const e of state.entries) e.selected = false;
+      new obsidian.Notice(`已写入 ${selected.length} 条回答到当前纪要。`, 4000);
+      this.render();
+    } catch (e) {
+      console.error("[LexVoice] write selected note ask answers failed", e);
+      new obsidian.Notice(`批量写入纪要失败：${(e && e.message) || e}`, 8000);
+    }
+  }
+
+  // 基于本轮问答 + 纪要，让 AI 生成 3 个"有深度、可被本纪要回答"的追问，回填 state.followups。
+  // 异步、失败静默（沿用静态默认 chip）；只在结果仍对应最新一轮时才应用，避免旧轮覆盖新轮。
+  async generateAskFollowups(file, entry) {
+    if (!(file instanceof obsidian.TFile) || !entry) return;
+    if (getLlmConfigIssue(this.plugin.settings)) return;
+    const state = this.getAskState(file);
+    try {
+      const markdown = await this.app.vault.cachedRead(file);
+      const context = buildLexVoiceAskContext(markdown);
+      if (!context || context.length < 40) return;
+      const system = "你是资深会议分析助手。只依据给定纪要与原始转写提出追问，不编造材料里没有的信息。";
+      const user = [
+        "下面是一篇纪要，以及用户刚问的问题和你给出的回答。请基于纪要内容，提出 3 个有深度、值得继续追问的问题——优先指向：根因/机制、隐含分歧或矛盾、风险与代价、下一步该定的决策、反例或边界条件。",
+        "要求：",
+        "- 每个问题独立一行，共 3 行",
+        "- 每行 ≤ 22 字，具体、能被本纪要回答，不空泛（不要“能不能再说说”这种）",
+        "- 只输出 3 行问题本身，不要编号/序号/解释/任何多余文字",
+        "",
+        `【用户刚问】${entry.question}`,
+        `【你的回答】${entry.answer}`,
+        "",
+        "【纪要材料：原始转写优先，纪要正文辅助】",
+        context,
+      ].join("\n");
+      const raw = await callLlm(this.plugin, system, user, {
+        timeoutMs: 45 * 1000,
+        payload: { max_tokens: 240 },
+        priority: "user",
+        noRetry: true,
+      });
+      const qs = String(raw || "")
+        .split(/\r?\n/)
+        .map((l) => String(l || "").replace(/^[\s\-*•·—–>0-9.、）)]+/, "").trim())
+        .filter((l) => l.length >= 2)
+        .slice(0, 3);
+      // 仅当这轮仍是最新一轮时应用（防止用户连问时旧结果覆盖新结果）。
+      if (qs.length && state.entries[0] && state.entries[0].id === entry.id) {
+        state.followups = qs;
+        this.render();
+      }
+    } catch (e) {
+      console.warn("[LexVoice] generate ask followups failed", e);
+    }
+  }
+
+  async writeAskAnswerToNote(file, entryId) {
+    if (!(file instanceof obsidian.TFile)) return;
+    const state = this.getAskState(file);
+    const entry = state.entries.find((e) => e.id === entryId) || state.entries[0];
+    if (!entry) return;
+    const question = String(entry.question || "").trim();
+    const answer = String(entry.answer || "").trim();
     if (!question || !answer) return;
     try {
       const current = await this.app.vault.read(file);
       const next = appendLexVoiceAskEntry(current, question, answer);
       if (next !== current) await this.app.vault.modify(file, next);
-      state.written = true;
+      entry.written = true;
       this.notePanelCacheKey = "";
       new obsidian.Notice("已写入当前纪要。", 4000);
       this.render();
@@ -7108,6 +7259,18 @@ class OutlineView extends obsidian.ItemView {
       console.error("[LexVoice] write note ask answer failed", e);
       new obsidian.Notice(`写入纪要失败：${(e && e.message) || e}`, 8000);
     }
+  }
+
+  // 问一问历史条目的相对时间（刚刚 / N 分钟前 / N 小时前 / 昨天 / M-D）。
+  formatAskEntryTime(ts) {
+    const t = Number(ts) || 0;
+    if (!t) return "";
+    const diff = Date.now() - t;
+    if (diff < 60_000) return "刚刚";
+    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
+    if (diff < 172_800_000) return "昨天";
+    try { const d = new Date(t); return `${d.getMonth() + 1}-${d.getDate()}`; } catch { return ""; }
   }
 
   renderExtractionPanel(root, file) {
@@ -10287,7 +10450,7 @@ class OutlineView extends obsidian.ItemView {
     const startBtn = actions.createEl("button", { cls: "mod-cta lexvoice-outline-action-button is-record", attr: { type: "button" } });
     try { obsidian.setIcon(startBtn.createSpan({ cls: "lexvoice-outline-action-icon" }), "mic"); } catch { /* intentionally empty */ }
     startBtn.createSpan({ text: isMobile ? "新建录音" : "新建录音" });
-    startBtn.onclick = () => this.plugin.startRecording();
+    startBtn.onclick = () => { void this.plugin.startRecording(); };
     const importBtn = actions.createEl("button", { cls: "lexvoice-outline-action-button", attr: { type: "button" } });
     try { obsidian.setIcon(importBtn.createSpan({ cls: "lexvoice-outline-action-icon" }), "file-audio"); } catch { /* intentionally empty */ }
     importBtn.createSpan({ text: "音频" });
@@ -10709,7 +10872,7 @@ class OutlineView extends obsidian.ItemView {
     refreshBtn.disabled = !session || session.segments.length === 0;
     refreshBtn.onclick = () => {
       if (this.outlineRunning) this.cancelOutlineGeneration();
-      else void this.refreshAIOutline();
+      else void this.refreshAIOutline({ force: true });
     };
 
     const body = aiWrap.createDiv({ cls: "lexvoice-outline-ai-body" });
@@ -10727,7 +10890,7 @@ class OutlineView extends obsidian.ItemView {
       // 招聘面试模式：给含语义标记的列表项打 class（由 CSS 上色区分），并把行首 emoji 剥掉——不显示 emoji。
       // 确定性渲染路径（applyOutlineMarkerIcon）会换成 lucide 图标；这条 MarkdownRenderer 回退路径至少做到「无 emoji + 颜色区分」。
       const stripLeadingMarker = (li, emoji) => {
-        const walker = document.createTreeWalker(li, NodeFilter.SHOW_TEXT);
+        const walker = activeDocument.createTreeWalker(li, NodeFilter.SHOW_TEXT);
         let node = walker.nextNode();
         while (node && !node.textContent.replace(/\s+/g, "")) node = walker.nextNode();
         if (!node) return;
@@ -11596,7 +11759,7 @@ class OutlineView extends obsidian.ItemView {
         new obsidian.Notice("找不到母本（source_path 失效，可能母本被改名/移动）。", 6000);
       }
     }));
-    menu.addItem((item) => item.setTitle("重新生成清稿").setIcon("refresh-cw").onClick(() => this.plugin.generateCleanScript(file)));
+    menu.addItem((item) => item.setTitle("重新生成清稿").setIcon("refresh-cw").onClick(() => { void this.plugin.generateCleanScript(file); }));
     menu.addSeparator();
     menu.addItem((item) => item.setTitle("删除此版本").setIcon("trash").onClick(async () => {
       const ok = await lexvoiceConfirm(this.plugin.app, "删除派生版本", `删除「${file.basename}」？母本和逐字稿不受影响。`, "删除");
@@ -11628,18 +11791,18 @@ class OutlineView extends obsidian.ItemView {
     menu.addItem((item) => {
       item.setTitle("继续录音到这篇")
         .setIcon("mic")
-        .onClick(() => this.plugin.startRecording({ appendToFile: file }));
+        .onClick(() => { void this.plugin.startRecording({ appendToFile: file }); });
     });
     menu.addItem((item) => {
       item.setTitle("与上一段录音合并")
         .setIcon("git-merge")
-        .onClick(() => this.plugin.mergeMarkdownFileWithPrevious(file));
+        .onClick(() => { void this.plugin.mergeMarkdownFileWithPrevious(file); });
     });
     menu.addSeparator();
     menu.addItem((item) => {
       item.setTitle("生成清稿")
         .setIcon("file-text")
-        .onClick(() => this.plugin.generateCleanScript(file));
+        .onClick(() => { void this.plugin.generateCleanScript(file); });
     });
     menu.addItem((item) => {
       item.setTitle(detectedMode ? "重新整理为" : "整理为")
@@ -12197,7 +12360,7 @@ class OutlineView extends obsidian.ItemView {
 
     // —— §4 候选人 ——
     const gCand = mkGroup("候选人");
-    bindText(gCand, "姓名", "candidateName", "如：王亚运");
+    bindText(gCand, "姓名", "candidateName", "如：张伟");
     const resumeField = mkField(gCand, "候选人简历", { text: "从 PDF 导入", icon: "upload", onClick: () => {
       const pdfs = (this.app.vault.getFiles() || []).filter((f) => (f.extension || "").toLowerCase() === "pdf");
       pick(pdfs.map((f) => ({ label: f.path, value: f })), async (file) => {
@@ -12347,12 +12510,15 @@ class OutlineView extends obsidian.ItemView {
 
   async refreshAIOutline(opts) {
     const silent = !!(opts && opts.silent);
+    // 手动点「刷新」= 用户明确要求"现在重算一遍"，force 跳过 isRealtimeOutlineCurrent/间隔/新增段等节流门，
+    // 否则大纲刚生成过（或软失败把游标推满导致 isRealtimeOutlineCurrent 恒真）时点刷新会静默无反应（"按不了"）。
+    const force = !!(opts && opts.force);
     const session = this.plugin.session;
     if (!session || session.segments.length === 0) return;
     this.syncSessionOutline(session);
     if (this.outlineRunning) { this.outlineQueued = true; return; }
     const local = isLocalLlmEndpoint(this.plugin.settings && this.plugin.settings.llmEndpoint);
-    if (!shouldRunRealtimeOutline(session, { silent, local })) return;
+    if (!shouldRunRealtimeOutline(session, { silent, local, force })) return;
     const runId = (this.outlineRunSeq || 0) + 1;
     this.outlineRunSeq = runId;
     this.outlineRunning = true;
@@ -12465,11 +12631,11 @@ class LexVoicePlugin extends obsidian.Plugin {
     this.addCommand({ id: "open-queue", name: "打开待处理队列", callback: () => new QueueModal(this.app, this).open() });
     this.addCommand({ id: "retry-queue-all", name: "重试所有失败任务", callback: () => this.retryQueue() });
     this.addCommand({ id: "copy-diagnostic-report", name: "复制诊断报告", callback: () => this.copyDiagnosticReport() });
-    this.addCommand({ id: "suggest-people-directory-updates", name: "AI 扫描纪要库提取人员建议", callback: () => this.suggestPeopleDirectoryFromLibrary() });
-    this.addCommand({ id: "open-learning-card-wall", name: "打开学习卡片瀑布墙", callback: () => this.openLearningWall("learning") });
-    this.addCommand({ id: "open-concept-wall", name: "打开概念墙", callback: () => this.openLearningWall("concept") });
-    this.addCommand({ id: "open-todo-wall", name: "打开待办墙", callback: () => this.openTodoWall() });
-    this.addCommand({ id: "open-object-wall", name: "打开对象总览", callback: () => this.openObjectWall() });
+    this.addCommand({ id: "suggest-people-directory-updates", name: "AI 扫描纪要库提取人员建议", callback: () => { void this.suggestPeopleDirectoryFromLibrary(); } });
+    this.addCommand({ id: "open-learning-card-wall", name: "打开学习卡片瀑布墙", callback: () => { void this.openLearningWall("learning"); } });
+    this.addCommand({ id: "open-concept-wall", name: "打开概念墙", callback: () => { void this.openLearningWall("concept"); } });
+    this.addCommand({ id: "open-todo-wall", name: "打开待办墙", callback: () => { void this.openTodoWall(); } });
+    this.addCommand({ id: "open-object-wall", name: "打开对象总览", callback: () => { void this.openObjectWall(); } });
     this.addCommand({ id: "import-audio", name: "导入已有音频文件转写+润色", callback: () => new ImportAudioModal(this.app, this).open() });
     this.addCommand({
       id: "generate-html-report",
@@ -15444,7 +15610,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       } else { recCell.setText("—"); }
       tr.createEl("td", { text: n.一句话评价 || "—" });
       tr.addClass("lexvoice-hr-row");
-      tr.onclick = () => this.app.workspace.openLinkText(n.path, "", false);
+      tr.onclick = () => { void this.app.workspace.openLinkText(n.path, "", false); };
     }
   }
 
@@ -15472,7 +15638,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         td.createSpan({ cls: "lexvoice-hr-rec", text: n.录用建议 }).setAttribute("data-tone", recommendationTone(n.录用建议));
       } else { td.setText("—"); }
       tr.addClass("lexvoice-hr-row");
-      tr.onclick = () => this.app.workspace.openLinkText(n.path, "", false);
+      tr.onclick = () => { void this.app.workspace.openLinkText(n.path, "", false); };
     }
   }
 

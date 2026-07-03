@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- LexVoice's settings/data layer is intentionally dynamically typed (files use @ts-nocheck and read untyped JSON from loadData); these type-only rules yield no actionable findings here and are tracked for incremental typing */
+﻿/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- LexVoice's settings/data layer is intentionally dynamically typed (files use @ts-nocheck and read untyped JSON from loadData); these type-only rules yield no actionable findings here and are tracked for incremental typing */
 // 由 main.ts 抽出（模块化拆解，提升工程稳定性；纯搬迁、零行为改动）。
 import * as obsidian from "obsidian";
 import { normalizeLlmEndpoint, isLocalLlmEndpoint, isPoeLlmEndpoint, isMoonshotKimiModel, buildLlmHeaders } from '../shared/util-llm-endpoint';
@@ -97,6 +97,26 @@ export function decorateLlmHttpDetail(status, detail, endpoint) {
   }
   if (!hint) return base;
   return base ? `${base}。${hint}` : hint;
+}
+
+export function isTokenPlanLlmEndpoint(endpoint) {
+  return /token-plan/i.test(String(endpoint || ""));
+}
+
+export function shouldRetryTokenPlanParamError(status, detail, endpoint) {
+  return Number(status) === 400
+    && isTokenPlanLlmEndpoint(endpoint)
+    && /param\s*incorrect|invalid\s*param|invalid\s*parameter|unsupported/i.test(String(detail || ""));
+}
+
+export function makeTokenPlanCompatPayload(payload) {
+  const next = Object.assign({}, payload || {});
+  delete next.temperature;
+  delete next.enable_thinking;
+  delete next.thinking;
+  delete next.reasoning_effort;
+  next.stream = false;
+  return next;
 }
 
 export async function readLlmError(res) {
@@ -371,6 +391,28 @@ export async function requestLlmChatCompletion(plugin, messages, options) {
     try {
       if (!res.ok) {
         const msg = await readLlmError(res);
+        if (shouldRetryTokenPlanParamError(res.status, msg, endpoint)) {
+          const retryPayload = makeTokenPlanCompatPayload(payload);
+          const retryPayloadText = JSON.stringify(retryPayload);
+          await logLlmRequestDiagnostic(plugin, "warn", "llm.token_plan_param_retry", "Token-plan returned a parameter error; retrying with a minimal compatible payload", {
+            endpoint,
+            model: llmModel ? "<set>" : "",
+            status: res.status,
+            messageChars,
+            payloadChars,
+            retryPayloadChars: retryPayloadText.length,
+            statusDetail: msg,
+          });
+          const retryData = await requestLlmChatCompletionViaObsidian(endpoint, headers, retryPayloadText, timeoutMs);
+          await logLlmRequestDiagnostic(plugin, "info", "llm.token_plan_param_retry_succeeded", "Token-plan compatible payload retry succeeded", {
+            endpoint,
+            model: llmModel ? "<set>" : "",
+            messageChars,
+            payloadChars,
+            retryPayloadChars: retryPayloadText.length,
+          });
+          return retryData;
+        }
         await logLlmRequestDiagnostic(plugin, "error", "llm.http_failed", "LLM 返回非成功状态", {
           endpoint,
           model: llmModel ? "<set>" : "",

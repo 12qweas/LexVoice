@@ -553,6 +553,157 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   word-break: break-word;
 }
 
+/* —— 处理进度 Modal（照「处理进度 动画」定稿）：白卡 + 进度条 + 状态图标行。全走 Obsidian 变量，主色 --interactive-accent —— */
+.modal.lexvoice-progress-modal {
+  width: 466px;
+  max-width: 92vw;
+  padding: 0;
+}
+.modal.lexvoice-progress-modal .modal-content {
+  padding: 0;
+  margin: 0;
+}
+.lexvoice-progress { color: var(--text-normal); }
+.lexvoice-progress-head { padding: 20px 22px 15px; }
+.lexvoice-progress-title-row { display: flex; align-items: baseline; gap: 10px; }
+.lexvoice-progress-title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-normal);
+}
+.lexvoice-progress-state { font-size: 12.5px; color: var(--text-muted); }
+.lexvoice-progress-state.is-active { color: var(--interactive-accent); }
+.lexvoice-progress-bar {
+  margin-top: 13px;
+  height: 6px;
+  border-radius: 99px;
+  background: var(--background-secondary);
+  overflow: hidden;
+}
+.lexvoice-progress-bar-fill {
+  height: 100%;
+  border-radius: 99px;
+  background: var(--interactive-accent);
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.lexvoice-progress-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 7px;
+}
+.lexvoice-progress-summary-left { font-size: 11.5px; color: var(--text-muted); }
+.lexvoice-progress-summary-right {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.lexvoice-progress-empty {
+  padding: 4px 22px 22px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.6;
+}
+.lexvoice-progress-list { padding: 0 22px 10px; }
+.lexvoice-progress-row {
+  display: flex;
+  gap: 12px;
+  padding: 13px 0;
+  border-top: 1px solid var(--background-modifier-border);
+}
+.lexvoice-progress-ico {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.lexvoice-progress-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-green, #3d9970) 15%, transparent);
+  color: var(--color-green, #3d9970);
+  animation: lexvoice-progress-pop 0.3s ease-out;
+}
+.lexvoice-progress-check svg { width: 12px; height: 12px; stroke-width: 3; }
+.lexvoice-progress-spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+  border-top-color: var(--interactive-accent);
+  animation: lexvoice-progress-spin 0.7s linear infinite;
+}
+.lexvoice-progress-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  animation: lexvoice-progress-dotpulse 1.2s ease-in-out infinite;
+}
+.lexvoice-progress-body { flex: 1 1 0; min-width: 0; }
+.lexvoice-progress-line { display: flex; align-items: baseline; gap: 10px; }
+.lexvoice-progress-name {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lexvoice-progress-name.is-faint { color: var(--text-faint); }
+.lexvoice-progress-right {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.lexvoice-progress-right.is-faint { color: var(--text-faint); }
+.lexvoice-progress-sub {
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lexvoice-progress-rowacts { display: flex; gap: 14px; margin-top: 6px; }
+.lexvoice-progress-link {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+}
+.lexvoice-progress-link:hover { color: var(--interactive-accent); text-decoration: underline; }
+.lexvoice-progress-foot {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 22px 18px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+.lexvoice-progress-btn {
+  min-height: 30px;
+  padding: 5px 14px;
+  border-radius: 8px;
+  font-size: var(--font-ui-smaller);
+}
+@keyframes lexvoice-progress-spin { to { transform: rotate(360deg); } }
+@keyframes lexvoice-progress-pop { 0% { transform: scale(0); } 60% { transform: scale(1.15); } 100% { transform: scale(1); } }
+@keyframes lexvoice-progress-dotpulse { 0%, 100% { opacity: 0.35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1); } }
+
 /* ============================================================
    4. 导入 Modal
    ============================================================ */
@@ -2996,136 +3147,148 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
   height: 14px;
 }
 
+/* 问一问 · 侧边栏面板：与「沉淀」一体化——扁平容器、软主色底面、细分割线，复用同款
+   token/按钮/勾选样式。全部走 Obsidian 变量，跟随主题 & Style Settings；主色一律 --interactive-accent。 */
 .lexvoice-note-ask {
+  /* 与 .lexvoice-sediment 同源的 token（同样的 color-mix 公式，保证两面板视觉一致） */
+  --lvk-active: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
+  --lvk-line: color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+  --lvk-item-line: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+  --lvk-accent-hover: color-mix(in srgb, var(--interactive-accent) 86%, var(--text-normal));
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding-top: 2px;
+  gap: 12px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
 }
 
-.lexvoice-note-ask-head,
-.lexvoice-note-ask-title,
-.lexvoice-note-ask-actions,
-.lexvoice-note-ask-answer-head,
-.lexvoice-note-ask-error {
+/* 标题行（扁平，无卡片/无分割线，靠 gap 与下方拉开） */
+.lexvoice-note-ask-head {
   display: flex;
   align-items: center;
+  gap: 10px;
 }
 
-.lexvoice-note-ask-head {
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 24px;
+.lexvoice-note-ask-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .lexvoice-note-ask-title {
+  display: flex;
+  align-items: center;
   gap: 6px;
-  min-width: 0;
-  font-size: var(--font-ui-smaller);
+  flex: 0 0 auto;
+  font-size: var(--font-ui-small);
   font-weight: 650;
   color: var(--text-normal);
 }
 
 .lexvoice-note-ask-title-icon,
 .lexvoice-note-ask-title-icon svg {
-  width: 14px;
-  height: 14px;
-  color: var(--text-accent);
+  width: 15px;
+  height: 15px;
   flex: 0 0 auto;
+  color: var(--interactive-accent);
 }
 
 .lexvoice-note-ask-note {
+  margin-left: auto;
   min-width: 0;
-  max-width: 52%;
+  max-width: 60%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--font-ui-smaller);
-  color: var(--text-faint);
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--background-secondary) 72%, transparent);
+  color: var(--text-muted);
 }
 
+/* 输入条：复用「会中纪要」输入框（.lexvoice-meeting-composer）——一行式圆角胶囊，
+   透明输入 + 右侧裸主色发送图标。样式与之保持一致。 */
 .lexvoice-note-ask-input-wrap {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--background-secondary) 58%, transparent);
+  align-items: flex-end;
+  gap: 4px;
+  padding: 6px 6px 6px 4px;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--background-primary) 92%, var(--background-secondary));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .lexvoice-note-ask-input {
-  width: 100%;
-  min-height: 74px;
-  resize: vertical;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 34px;
+  max-height: 140px;
+  resize: none;
+  overflow-y: auto;
   border: 0;
-  border-radius: 8px;
   background: transparent;
+  box-shadow: none;
   color: var(--text-normal);
   font-family: inherit;
   font-size: var(--font-ui-small);
-  line-height: 1.55;
-  padding: 2px 4px;
-  box-shadow: none;
+  line-height: 1.45;
+  padding: 7px 10px;
 }
 
-.lexvoice-note-ask-input:focus {
-  border-color: transparent;
+.lexvoice-note-ask-input:hover,
+.lexvoice-note-ask-input:focus,
+.lexvoice-note-ask-input:focus-visible {
+  border: 0;
+  background: transparent;
   box-shadow: none;
   outline: none;
 }
 
-.lexvoice-note-ask-actions {
-  justify-content: flex-end;
-}
-
-.lexvoice-note-ask-submit,
-.lexvoice-note-ask-write {
+/* 发送/提问：裸主色图标按钮（同会中纪要 .lexvoice-meeting-send） */
+.lexvoice-note-ask-submit {
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 30px;
-  border-radius: 8px;
-  font-size: var(--font-ui-smaller);
-  font-weight: 560;
-}
-
-.lexvoice-note-ask-submit {
-  min-width: 74px;
-  padding: 5px 12px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
   border: 0;
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
+  border-radius: 17px;
+  background: transparent;
   box-shadow: none;
+  color: var(--text-accent);
+  cursor: pointer;
 }
 
 .lexvoice-note-ask-submit:not(:disabled):hover {
-  background: var(--interactive-accent-hover);
-  color: var(--text-on-accent);
+  color: var(--text-accent);
+  background: color-mix(in srgb, var(--text-accent) 10%, transparent);
 }
 
-.lexvoice-note-ask-button-icon,
-.lexvoice-note-ask-button-icon svg {
-  width: 14px;
-  height: 14px;
-  flex: 0 0 auto;
-}
-
-.lexvoice-note-ask-submit .lexvoice-note-ask-button-icon svg {
-  color: currentColor;
-}
-
-.lexvoice-note-ask-submit:disabled,
-.lexvoice-note-ask-write:disabled {
-  opacity: 0.55;
+.lexvoice-note-ask-submit:disabled {
+  opacity: 0.4;
   cursor: default;
 }
 
+.lexvoice-note-ask-submit svg {
+  width: 16px;
+  height: 16px;
+}
+
+.lexvoice-note-ask-submit.is-running svg {
+  animation: lexvoice-note-ask-spin 0.9s linear infinite;
+}
+
+@keyframes lexvoice-note-ask-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 错误 */
 .lexvoice-note-ask-error {
+  display: flex;
+  align-items: center;
   gap: 6px;
   padding: 8px 10px;
   border-radius: 8px;
@@ -3142,50 +3305,188 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
   flex: 0 0 auto;
 }
 
-.lexvoice-note-ask-answer {
-  border: 1px solid color-mix(in srgb, var(--interactive-accent) 22%, var(--background-modifier-border));
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--background-primary) 94%, var(--interactive-accent) 5%);
-  padding: 12px;
-  box-shadow: inset 2px 0 0 var(--interactive-accent);
+/* 多选开关：裸 span（无底图 / 无按钮外壳），只有图标 + 文字，靠颜色区分状态 */
+.lexvoice-note-ask-multibar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-height: 22px;
 }
 
-.lexvoice-note-ask-answer-head {
-  justify-content: space-between;
+.lexvoice-note-ask-multi-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+}
+
+.lexvoice-note-ask-multi-toggle:hover {
+  color: var(--text-accent);
+}
+
+.lexvoice-note-ask-multi-toggle.is-active {
+  color: var(--interactive-accent);
+}
+
+.lexvoice-note-ask-multi-icon,
+.lexvoice-note-ask-multi-icon svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+}
+
+/* 多选勾选框 */
+.lexvoice-note-ask-check {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.lexvoice-note-ask-check,
+.lexvoice-note-ask-check svg {
+  width: 15px;
+  height: 15px;
+}
+
+.lexvoice-note-ask-item.is-selected .lexvoice-note-ask-check {
+  color: var(--interactive-accent);
+}
+
+/* 批量写入条 + 主按钮（同沉淀 footer / .is-primary） */
+.lexvoice-note-ask-batch {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 0.5px solid var(--lvk-line);
+}
+
+.lexvoice-note-ask-batch-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 1px solid var(--interactive-accent);
+  border-radius: var(--radius-s);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: var(--font-ui-smaller);
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.lexvoice-note-ask-batch-btn:not(:disabled):hover {
+  background: var(--lvk-accent-hover);
+  border-color: color-mix(in srgb, var(--interactive-accent) 48%, var(--background-modifier-border));
+  color: var(--text-on-accent);
+}
+
+.lexvoice-note-ask-batch-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.lexvoice-note-ask-button-icon,
+.lexvoice-note-ask-button-icon svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+/* 历史问答：软主色底面的列表（同沉淀 .lexvoice-sediment-list），条目用细主色分割线 */
+.lexvoice-note-ask-history {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 14px;
+  border-radius: 10px;
+  background: var(--lvk-active);
+}
+
+.lexvoice-note-ask-item {
+  border-top: 0.5px solid var(--lvk-item-line);
+}
+
+.lexvoice-note-ask-item:first-child {
+  border-top: 0;
+}
+
+.lexvoice-note-ask-item-head {
+  display: flex;
+  align-items: flex-start;
   gap: 8px;
-  margin-bottom: 8px;
+  padding: 11px 0;
+  cursor: pointer;
 }
 
-.lexvoice-note-ask-answer-label {
-  font-size: var(--font-ui-smaller);
+.lexvoice-note-ask-chevron,
+.lexvoice-note-ask-chevron svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: var(--text-accent);
+  margin-top: 2px;
+}
+
+.lexvoice-note-ask-item-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.lexvoice-note-ask-item-q {
+  font-size: var(--font-ui-small);
   font-weight: 650;
-  color: var(--text-accent);
-}
-
-.lexvoice-note-ask-write {
-  border: 1px solid var(--background-modifier-border);
-  background: color-mix(in srgb, var(--background-primary) 88%, transparent);
-  color: var(--text-muted);
-  padding: 4px 10px;
-}
-
-.lexvoice-note-ask-write:not(:disabled):hover {
-  color: var(--text-accent);
-  border-color: var(--interactive-accent);
-  background: var(--background-modifier-hover);
-}
-
-.lexvoice-note-ask-question {
-  margin-bottom: 10px;
-  padding: 7px 9px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--background-secondary) 72%, transparent);
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
+  color: var(--text-normal);
   line-height: 1.5;
 }
 
+.lexvoice-note-ask-item:not(.is-expanded) .lexvoice-note-ask-item-q {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lexvoice-note-ask-item-meta {
+  margin-top: 3px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.lexvoice-note-ask-write {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.lexvoice-note-ask-write:hover {
+  color: var(--interactive-accent);
+}
+
+.lexvoice-note-ask-write.is-written {
+  color: var(--interactive-accent);
+}
+
+.lexvoice-note-ask-write svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* 回答正文（Markdown）：项目符号用主色圆角小方块，克制点缀 */
 .lexvoice-note-ask-answer-body {
+  padding: 0 2px 12px 22px;
   color: var(--text-normal);
   font-size: var(--font-ui-small);
   line-height: 1.65;
@@ -3199,25 +3500,77 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
   margin-bottom: 0;
 }
 
-.lexvoice-note-ask-empty {
-  padding: 16px 14px;
-  border: 1px dashed color-mix(in srgb, var(--interactive-accent) 22%, var(--background-modifier-border));
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--background-secondary) 45%, transparent);
-  text-align: center;
+.lexvoice-note-ask-answer-body ul {
+  list-style: none;
+  padding-left: 0;
+  margin: 6px 0;
 }
 
-.lexvoice-note-ask-empty-title {
-  color: var(--text-muted);
-  font-size: var(--font-ui-small);
+.lexvoice-note-ask-answer-body li {
+  position: relative;
+  padding-left: 16px;
+  margin: 4px 0;
+}
+
+.lexvoice-note-ask-answer-body li::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 0.6em;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--interactive-accent);
+  opacity: 0.85;
+}
+
+.lexvoice-note-ask-answer-body strong {
+  color: var(--text-normal);
   font-weight: 650;
-  margin-bottom: 5px;
 }
 
-.lexvoice-note-ask-empty-desc {
-  color: var(--text-muted);
+/* 「试试这样问」：无历史时输入框下方的快捷提问 chip，点击直接发起提问 */
+.lexvoice-note-ask-suggest {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lexvoice-note-ask-suggest-label {
   font-size: var(--font-ui-smaller);
-  line-height: 1.55;
+  color: var(--text-faint);
+}
+
+.lexvoice-note-ask-suggest-chips {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.lexvoice-note-ask-suggest-chip {
+  max-width: 100%;
+  text-align: left;
+  padding: 7px 13px;
+  border: 1px solid var(--lvk-line);
+  border-radius: 12px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.lexvoice-note-ask-suggest-chip:hover:not(:disabled) {
+  border-color: var(--interactive-accent);
+  color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 6%, var(--background-primary));
+}
+
+.lexvoice-note-ask-suggest-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .lexvoice-outline-extract {

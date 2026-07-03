@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- Obsidian Bases view API exposes dynamic entries/groups; this adapter guards at runtime and avoids requiring newer API typings. */
 // @ts-nocheck
 // LexVoice 自定义 Bases 视图：招聘看板（kanban）。
 // 用官方 Bases 插件 API（registerBasesView，@since 1.10.0）自绘候选人卡片，彻底解决静态 .base 的两个痛点：
@@ -61,7 +62,7 @@ export function registerRecruitBoardView(plugin) {
           if (!path) return;
           evt.preventDefault();
           const newLeaf = !!(evt.ctrlKey || evt.metaKey);
-          this.app.workspace.openLinkText(path, path, newLeaf);
+          void this.app.workspace.openLinkText(path, path, newLeaf);
         });
       }
 
