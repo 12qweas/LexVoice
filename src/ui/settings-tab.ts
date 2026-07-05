@@ -84,6 +84,74 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       case "advanced": this.renderAdvanced(content); break;
       case "updates":  this.renderUpdates(content); break;
     }
+    this.applySettingsSections(content);
+  }
+
+  applySettingsSections(content) {
+    if (!content || this.activeTab === "home") return;
+    const children = Array.from(content.children || []);
+    const headings = children.filter((el) => el && el.classList && el.classList.contains("setting-item-heading"));
+    if (!headings.length) return;
+    if (!this._settingsSectionOpen) this._settingsSectionOpen = Object.create(null);
+
+    let sectionIndex = 0;
+    for (const heading of headings) {
+      if (!heading.parentElement || heading.parentElement !== content) continue;
+      const titleEl = heading.querySelector(".setting-item-name");
+      const descEl = heading.querySelector(".setting-item-description");
+      const title = ((titleEl && titleEl.textContent) || heading.textContent || "").trim();
+      if (!title) continue;
+
+      const sectionKey = `${this.activeTab}:${sectionIndex}:${title}`;
+      const details = content.createEl("details", { cls: "lexvoice-settings-section" });
+      if (Object.prototype.hasOwnProperty.call(this._settingsSectionOpen, sectionKey)) {
+        details.open = !!this._settingsSectionOpen[sectionKey];
+      } else {
+        details.open = sectionIndex === 0;
+        this._settingsSectionOpen[sectionKey] = details.open;
+      }
+      details.addEventListener("toggle", () => {
+        this._settingsSectionOpen[sectionKey] = !!details.open;
+      });
+
+      const summary = details.createEl("summary", { cls: "lexvoice-settings-section-summary" });
+      summary.createSpan({ cls: "lexvoice-settings-section-title", text: title });
+
+      const descText = descEl ? String(descEl.textContent || "").trim() : "";
+      const next = heading.nextElementSibling;
+      const isHint = next && next.classList && (
+        next.classList.contains("lexvoice-settings-hint") ||
+        next.classList.contains("lexvoice-section-hint")
+      );
+      const hintText = isHint ? String(next.textContent || "").trim() : "";
+      const summaryDesc = descText || hintText;
+      if (summaryDesc) summary.createDiv({ cls: "lexvoice-settings-section-desc", text: summaryDesc });
+
+      const body = details.createDiv({ cls: "lexvoice-settings-section-body" });
+      content.insertBefore(details, heading);
+      heading.remove();
+      if (isHint) next.remove();
+
+      let node = details.nextElementSibling;
+      while (node && !(node.classList && node.classList.contains("setting-item-heading") && !this.shouldMergeSettingsHeading(node))) {
+        const current = node;
+        node = node.nextElementSibling;
+        if (current.classList && current.classList.contains("setting-item-heading")) {
+          current.remove();
+          continue;
+        }
+        body.appendChild(current);
+      }
+      sectionIndex++;
+    }
+  }
+
+  shouldMergeSettingsHeading(heading) {
+    if (!heading) return false;
+    const titleEl = heading.querySelector && heading.querySelector(".setting-item-name");
+    const title = ((titleEl && titleEl.textContent) || heading.textContent || "").trim();
+    if (this.activeTab === "api" && title === "当前转写服务") return true;
+    return false;
   }
 
   handleSettingsTabClick(tabId) {
@@ -882,7 +950,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     // ===== 顶部 · API 方案：把「转写 + AI 整理」存成一套，一键切换/检测 =====
     this.renderApiSchemeSelector(c);
 
-    new obsidian.Setting(c).setName("语音转写").setHeading();
+    new obsidian.Setting(c).setName("纪要转写").setHeading();
 
     this.renderDataRiskNotice(c, "is-api");
 
@@ -1004,12 +1072,22 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     }
     const qa = this.plugin.settings.quickDictationAsr;
 
-    new obsidian.Setting(c).setName("听写").setHeading();
+    new obsidian.Setting(c).setName("即时听写").setHeading();
     const quickHint = c.createDiv({ cls: "setting-item-description lexvoice-section-hint" });
     quickHint.setText("听写：录一小段语音，转写后由 AI 整理成结构化文本，落到光标或剪贴板。可为它单独指定转写服务和整理提示词。");
 
+    const fillBailianStream = async (model) => {
+      qa.endpoint = "wss://dashscope.aliyuncs.com/api-ws/v1/inference";
+      qa.model = model;
+      // 密钥留给用户自己填（dashscope API Key）
+      await this.plugin.saveSettings();
+      this.display();
+    };
     new obsidian.Setting(c).setName("听写转写服务（API）")
-      .setDesc("留空则用上面的会议转写服务。填了就让听写单独走这个（建议填一个对短音频快的服务）。四项需齐全（地址、密钥、模型）才生效。");
+      .setDesc("填 wss:// 流式地址（阿里云百炼 Fun-ASR / Paraformer）→ 听写边说边出实时字幕；填普通 https 批量地址（或留空用会议服务）→ 说完再转写整理。注意：流式地址是 wss://…/api-ws/v1/inference（点下方预设最省事），别填控制台首页那个 https://…/compatible-mode/v1（那是 OpenAI 兼容的批量接口，不走实时字幕）。地址、密钥、模型三项齐全才生效。")
+      .addButton(b => b.setButtonText("Fun-ASR").setTooltip("阿里云百炼 Fun-ASR 流式（推荐·新一代、高精度、支持热词）").onClick(() => fillBailianStream("fun-asr-realtime")))
+      .addButton(b => b.setButtonText("Paraformer-v2").setTooltip("阿里云百炼 Paraformer 流式（成熟通用、多语言、通常最便宜）").onClick(() => fillBailianStream("paraformer-realtime-v2")))
+      .addButton(b => b.setButtonText("Paraformer-8k").setTooltip("阿里云百炼 Paraformer 8k 流式（电话 / 8kHz 音频）").onClick(() => fillBailianStream("paraformer-realtime-8k-v2")));
 
     new obsidian.Setting(c).setName("转写地址")
       .addText(t => t
@@ -1027,7 +1105,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
 
     new obsidian.Setting(c).setName("模型")
       .addText(t => t
-        .setPlaceholder("如 FunAudioLLM/SenseVoiceSmall")
+        .setPlaceholder("流式如 fun-asr-realtime / paraformer-realtime-v2；批量填对应模型名")
         .setValue(qa.model || "")
         .onChange(async v => { qa.model = v.trim(); await this.plugin.saveSettings(); }));
 

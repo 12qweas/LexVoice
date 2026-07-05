@@ -3494,6 +3494,11 @@ class QuickDictationController {
     this._stopResolve = null;
     this._starting = false;
     this._doneTimer = null; // "已写入" 闪现回落 idle 的计时器
+    // 流式听写（WebSocket ASR）：边说边出实时字幕；批量（如 MiMo）走原路径。
+    this.streamingClient = null;
+    this.pcmEncoder = null;
+    this.liveText = "";
+    this._streaming = false;
   }
   isActive() { return this.state !== "idle"; }
   _setState(s) {
@@ -3525,52 +3530,124 @@ class QuickDictationController {
         this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       } catch (e) {
         console.error("[LexVoice] quick dictation mic failed", e);
-        try { void this.plugin.logDiagnostic("error", "quickdict.mic_failed", "快速口述麦克风打不开", { error: (e && e.message) || String(e) }); } catch { /* intentionally empty */ }
+        try { void this.plugin.logDiagnostic("error", "quickdict.mic_failed", "听写麦克风打不开", { error: (e && e.message) || String(e) }); } catch { /* intentionally empty */ }
+        new obsidian.Notice(`听写：麦克风打不开：${(e && e.message) || e}`, 8000);
         this._cleanupStream();
         return;
       }
-      // 快速口述转写服务：配了「快速转写 API」就单独走它，否则回退到活跃的会议转写服务。
-      const qa = this.plugin.settings.quickDictationAsr;
-      if (qa && qa.endpoint && qa.apiKey && qa.model) {
-        this.asrOverride = { id: "quick-asr", name: "快速转写", endpoint: qa.endpoint, apiKey: qa.apiKey, model: qa.model, language: qa.language || "" };
+      // 流式检测：听写转写地址是 ws(s):// 且三项齐全 → 走流式实时字幕；否则批量。
+      const s = this._resolveQuickStreaming();
+      if (s) {
+        // ── 流式听写：连 WebSocket ASR，PCM 推流，onPartial 更新实时字幕 ──
+        this.streamingClient = createStreamingTranscriptionClient(s.profile, s.provider, {
+          onPartial: (fullText, isFinal, sentenceText) => {
+            // 字幕只显示"当前这句"（左对齐自然生长、不狂滚）；全文在结束时由 getFullText() 整段交给 LLM。
+            this.liveText = (sentenceText != null ? sentenceText : (fullText || ""));
+            try { if (this.plugin.bubble) this.plugin.bubble.scheduleUpdate(); } catch { /* intentionally empty */ }
+          },
+          onError: (e) => { console.error("[LexVoice] 听写 streaming error", e); },
+          onClosed: () => {},
+        });
+        // 点击即反馈：先进"聆听"态、显示"连接中…"，避免连接期间看着像"点了没反应"。
+        this._streaming = true;
+        this.startedAt = Date.now();
+        this.liveText = "连接中…";
+        this._setState("listening");
+        try {
+          await this.streamingClient.connect();
+        } catch (e) {
+          console.error("[LexVoice] 听写流式连接失败", e);
+          try { void this.plugin.logDiagnostic("error", "quickdict.stream_connect_failed", "听写流式连接失败", { error: (e && e.message) || String(e) }); } catch { /* intentionally empty */ }
+          new obsidian.Notice(`听写连接失败：${(e && e.message) || e}`, 9000);
+          this._cleanupStreaming();
+          this._cleanupStream();
+          this.anchor = null;
+          this.liveText = "";
+          this._streaming = false;
+          this._setState("idle");
+          return;
+        }
+        // 连上了：清掉"连接中"，等首个 partial；开始推流。
+        this.liveText = "";
+        try { if (this.plugin.bubble) this.plugin.bubble.scheduleUpdate(); } catch { /* intentionally empty */ }
+        const sampleRate = s.profile.streamProtocol.startsWith("openai-realtime") ? 24000 : 16000;
+        this.pcmEncoder = new PcmStreamEncoder(this.stream, {
+          sampleRate,
+          onFrame: (ab) => { try { if (this.streamingClient) this.streamingClient.sendAudioFrame(ab); } catch { /* intentionally empty */ } },
+        });
+        this.pcmEncoder.start();
       } else {
-        this.asrOverride = null;
+        // ── 批量听写（如 MiMo）：MediaRecorder 录整段，停止后统一转写 ──
+        this._streaming = false;
+        // 快速口述转写服务：配了「快速转写 API」就单独走它，否则回退到活跃的会议转写服务。
+        const qa = this.plugin.settings.quickDictationAsr;
+        if (qa && qa.endpoint && qa.apiKey && qa.model) {
+          this.asrOverride = { id: "quick-asr", name: "快速转写", endpoint: qa.endpoint, apiKey: qa.apiKey, model: qa.model, language: qa.language || "" };
+        } else {
+          this.asrOverride = null;
+        }
+        const asrProvider = this.asrOverride || resolveTranscribeProvider(this.plugin);
+        this.asrLabel = (asrProvider && asrProvider.name) || (asrProvider && asrProvider.id) || "";
+        // 格式选择跟着服务走：APIMiMo 录 Opus（它只收 wav/mp3，本机解码转 WAV，Electron 解得了 Opus）。
+        let preferOpus = false;
+        try { preferOpus = isApimimoAsrProvider(asrProvider); } catch { /* intentionally empty */ }
+        this.mime = pickMimeType(preferOpus);
+        this.chunks = [];
+        try {
+          this.recorder = this.mime ? new MediaRecorder(this.stream, { mimeType: this.mime }) : new MediaRecorder(this.stream);
+        } catch { this.recorder = new MediaRecorder(this.stream); }
+        this.recorder.ondataavailable = (e) => { if (e.data && e.data.size) this.chunks.push(e.data); };
+        this.recorder.onstop = () => { const r = this._stopResolve; this._stopResolve = null; if (r) r(); };
+        this.startedAt = Date.now();
+        try { this.recorder.start(); }
+        catch (e) {
+          console.error("[LexVoice] quick dictation recorder start failed", e);
+          try { void this.plugin.logDiagnostic("error", "quickdict.recorder_failed", "快速口述无法开始录音", { error: (e && e.message) || String(e) }); } catch { /* intentionally empty */ }
+          this._cleanupStream();
+          return;
+        }
+        this._setState("listening"); // 胶囊 HUD 显示"聆听中"，不弹条幅
       }
-      const asrProvider = this.asrOverride || resolveTranscribeProvider(this.plugin);
-      this.asrLabel = (asrProvider && asrProvider.name) || (asrProvider && asrProvider.id) || "";
-      // 格式选择跟着服务走：APIMiMo 录 Opus（它只收 wav/mp3，本机解码转 WAV，Electron 解得了 Opus）。
-      let preferOpus = false;
-      try { preferOpus = isApimimoAsrProvider(asrProvider); } catch { /* intentionally empty */ }
-      this.mime = pickMimeType(preferOpus);
-      this.chunks = [];
-      try {
-        this.recorder = this.mime ? new MediaRecorder(this.stream, { mimeType: this.mime }) : new MediaRecorder(this.stream);
-      } catch { this.recorder = new MediaRecorder(this.stream); }
-      this.recorder.ondataavailable = (e) => { if (e.data && e.data.size) this.chunks.push(e.data); };
-      this.recorder.onstop = () => { const r = this._stopResolve; this._stopResolve = null; if (r) r(); };
-      this.startedAt = Date.now();
-      try { this.recorder.start(); }
-      catch (e) {
-        console.error("[LexVoice] quick dictation recorder start failed", e);
-        try { void this.plugin.logDiagnostic("error", "quickdict.recorder_failed", "快速口述无法开始录音", { error: (e && e.message) || String(e) }); } catch { /* intentionally empty */ }
-        this._cleanupStream();
-        return;
-      }
-      this._setState("listening"); // 胶囊 HUD 显示"聆听中"，不弹条幅
     } finally { this._starting = false; }
   }
   cancel() {
     if (this._doneTimer) { window.clearTimeout(this._doneTimer); this._doneTimer = null; }
     if (this.state === "idle") return;
     try { if (this.recorder && this.recorder.state !== "inactive") this.recorder.stop(); } catch { /* intentionally empty */ }
+    this._cleanupStreaming();
     this._cleanupStream();
     this.chunks = [];
     this.anchor = null;
     this._stopResolve = null;
-    this._setState("idle");
+    this.liveText = "";
+    this._setState("idle"); // _setState 内部 scheduleUpdate 重绘胶囊
   }
   async stop() {
     if (this.state !== "listening") return;
+    // ── 流式听写：停 PCM 编码器 → finish() 拿终稿 → 关客户端 → 走共享收尾 ──
+    if (this._streaming) {
+      try { if (this.pcmEncoder) this.pcmEncoder.stop(); } catch { /* intentionally empty */ }
+      this.pcmEncoder = null;
+      this._setState("transcribing");
+      let raw = "";
+      const t0 = this.startedAt;
+      try {
+        if (this.streamingClient) {
+          await this.streamingClient.finish();
+          raw = this.streamingClient.getFullText() || this.liveText || "";
+        }
+      } catch (e) {
+        raw = this.liveText || "";
+      }
+      try { if (this.streamingClient && this.streamingClient._safeClose) this.streamingClient._safeClose(); } catch { /* intentionally empty */ }
+      this.streamingClient = null;
+      this._streaming = false;
+      this.liveText = "";
+      this._cleanupStream();
+      await this._finalize(raw, Date.now() - t0);
+      return;
+    }
+    // ── 批量听写：MediaRecorder 停 → blob → 转写 → 共享收尾 ──
     const stopped = new Promise((res) => { this._stopResolve = res; });
     try { this.recorder.stop(); } catch { if (this._stopResolve) { this._stopResolve(); this._stopResolve = null; } }
     await stopped;
@@ -3596,6 +3673,11 @@ class QuickDictationController {
       return;
     }
     const transcribeMs = Date.now() - _tTranscribe;
+    await this._finalize(raw, transcribeMs);
+  }
+  // 转写原文就绪后的共享收尾：清洗 → 落编辑器/剪贴板 → done 闪现 → 计时日志 + 失败兜底。
+  // 批量与流式两条 stop 路径都调用此方法；行为与旧内联逻辑逐字一致。
+  async _finalize(raw, transcribeMs) {
     raw = stripQuickDictationRaw(raw);
     if (!raw) {
       this.anchor = null;
@@ -3658,6 +3740,29 @@ class QuickDictationController {
     try { if (this.stream) this.stream.getTracks().forEach((t) => { try { t.stop(); } catch { /* intentionally empty */ } }); } catch { /* intentionally empty */ }
     this.stream = null;
     this.recorder = null;
+  }
+  // 听写转写配置是否为流式（WebSocket ASR）：地址、密钥、模型齐全且地址是 ws(s)://。
+  // 返回 { profile:{streamProtocol}, provider:{endpoint,apiKey,model,language} } 或 null（走批量）。
+  _resolveQuickStreaming() {
+    const qa = this.plugin.settings.quickDictationAsr;
+    if (!qa || !qa.endpoint || !qa.apiKey || !qa.model) return null;
+    if (!/^wss?:\/\//i.test(qa.endpoint)) return null;
+    const host = String(qa.endpoint).toLowerCase();
+    let streamProtocol = "dashscope-ws";
+    if (host.includes("dashscope")) streamProtocol = "dashscope-ws";
+    else if (host.includes("openai")) streamProtocol = "openai-realtime-transcription";
+    return {
+      profile: { streamProtocol },
+      provider: { endpoint: qa.endpoint, apiKey: qa.apiKey, model: qa.model, language: qa.language || "" },
+    };
+  }
+  // 收尾流式：停 pcm 编码器、关流式客户端、清标志。
+  _cleanupStreaming() {
+    try { if (this.pcmEncoder) this.pcmEncoder.stop(); } catch { /* intentionally empty */ }
+    this.pcmEncoder = null;
+    try { if (this.streamingClient && this.streamingClient._safeClose) this.streamingClient._safeClose(); } catch { /* intentionally empty */ }
+    this.streamingClient = null;
+    this._streaming = false;
   }
 }
 

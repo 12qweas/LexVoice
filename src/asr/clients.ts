@@ -32,7 +32,8 @@ export class DashScopeStreamingClient {
       let resolved = false;
       try {
         this.ws = new WSCtor(this.endpoint, {
-          headers: { Authorization: "bearer " + this.apiKey, "X-DashScope-DataInspection": "enable" },
+          // 文档要求：Authorization: Bearer <key>（大写 Bearer），握手阶段校验；X-DashScope-DataInspection 文档说"如非必要勿开"，不发。
+          headers: { Authorization: "Bearer " + this.apiKey },
           handshakeTimeout: 8000,
         });
       } catch (e) { reject(e instanceof Error ? e : new Error(typeof e === "string" ? e : JSON.stringify(e))); return; }
@@ -83,6 +84,9 @@ export class DashScopeStreamingClient {
       };
       const onClose = () => {
         this.closed = true;
+        // 连接在 task-started 之前就被关闭（密钥无效 / 模型未开通 / 地址错误等）→ 让 connect() 拒绝，
+        // 否则 Promise 既不 resolve 也不 reject，start() 会永久挂起、按钮彻底失灵。
+        if (!resolved) { resolved = true; reject(new Error("连接被服务端关闭：请检查密钥是否有效、Fun-ASR/Paraformer 是否已开通、地址是否为 wss://…/api-ws/v1/inference")); }
         this.onClosed({ finalText: this.getFullText() });
       };
       if (typeof this.ws.on === "function") {
@@ -102,15 +106,17 @@ export class DashScopeStreamingClient {
     if (!payload) return;
     const sentence = (payload.output || {}).sentence;
     if (!sentence) return;
+    if (sentence.heartbeat === true) return; // 心跳包（sentence_id=0），按文档跳过
     const text = String(sentence.text || "");
-    const isEnd = sentence.sentence_end === true || sentence.end_time != null;
+    // 只认 sentence_end 判终句：中间结果也可能带 end_time，拿它当结束信号会把半句提前 finalize、造成整句重复。
+    const isEnd = sentence.sentence_end === true;
     if (isEnd) {
       this._finalizedText += text;
       this._currentPartial = "";
-      this.onPartial(this.getFullText(), true);
+      this.onPartial(this.getFullText(), true, text); // 第三参=当前句（供听写字幕只显示这一句）
     } else {
       this._currentPartial = text;
-      this.onPartial(this.getFullText(), false);
+      this.onPartial(this.getFullText(), false, text);
     }
   }
   getFullText() {
@@ -238,6 +244,9 @@ export class OpenAIRealtimeTranscriptionClient {
       };
       const onClose = () => {
         this.closed = true;
+        // 连接在 task-started 之前就被关闭（密钥无效 / 模型未开通 / 地址错误等）→ 让 connect() 拒绝，
+        // 否则 Promise 既不 resolve 也不 reject，start() 会永久挂起、按钮彻底失灵。
+        if (!resolved) { resolved = true; reject(new Error("连接被服务端关闭：请检查密钥是否有效、Fun-ASR/Paraformer 是否已开通、地址是否为 wss://…/api-ws/v1/inference")); }
         this.onClosed({ finalText: this.getFullText() });
       };
       if (typeof this.ws.on === "function") {

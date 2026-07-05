@@ -293,6 +293,7 @@
 }
 .lexvoice-bubble.is-qd.is-qd-idle { width: 152px; }
 .lexvoice-bubble.is-qd.is-qd-listening { width: 160px; }
+.lexvoice-bubble.is-qd.is-qd-listening-live { width: 344px; }
 .lexvoice-bubble.is-qd.is-qd-processing { width: 176px; }
 .lexvoice-bubble.is-qd.is-qd-done { width: 150px; }
 
@@ -421,6 +422,17 @@
 .lexvoice-bubble.is-qd .lexvoice-qd-listen-label {
   font-size: 14px;
   font-weight: 500;
+  color: var(--rp-text);
+}
+/* listening（流式）：实时滚动字幕，新字靠右、旧字滚出左侧（textzone 已 overflow hidden）*/
+.lexvoice-bubble.is-qd .lexvoice-qd-live {
+  flex: 1;
+  min-width: 0;
+  overflow-x: hidden;
+  white-space: nowrap;
+  text-align: center;
+  font-weight: 500;
+  font-size: 14px;
   color: var(--rp-text);
 }
 .lexvoice-bubble.is-qd .lexvoice-qd-caret {
@@ -11610,4 +11622,87 @@ select.lexvoice-rcx-in.dropdown {
 .lexvoice-outline.is-mobile .lexvoice-outline-more-body .lexvoice-outline-scheme-row {
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 6px 8px;
+}
+
+/* Settings tab internal sections. Top-level tabs stay unchanged; each tab body is grouped into collapsible native sections. */
+.lexvoice-settings-section {
+  margin: 0 0 var(--size-2-3);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+.lexvoice-settings-section-summary {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--size-2-3) 0 var(--size-2-2) var(--size-4-4);
+  cursor: pointer;
+  color: var(--text-normal);
+  list-style: none;
+  user-select: none;
+}
+
+.lexvoice-settings-section-summary::-webkit-details-marker {
+  display: none;
+}
+
+.lexvoice-settings-section-summary::before {
+  content: "›";
+  position: absolute;
+  left: 0;
+  top: var(--size-2-3);
+  color: var(--text-faint);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+  line-height: var(--line-height-tight);
+  transform: rotate(0deg);
+  transition: transform 0.12s ease;
+}
+
+.lexvoice-settings-section[open] > .lexvoice-settings-section-summary::before {
+  transform: rotate(90deg);
+}
+
+.lexvoice-settings-section-title {
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+  line-height: var(--line-height-tight);
+}
+
+.lexvoice-settings-section-desc {
+  max-width: 72ch;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-normal);
+  line-height: 1.45;
+}
+
+.lexvoice-settings-section-body {
+  padding: 0 0 var(--size-4-2) var(--size-4-4);
+}
+
+.lexvoice-settings-section-body > .setting-item:first-child {
+  border-top: 0;
+}
+
+.lexvoice-settings-section-body > .setting-item:last-child {
+  border-bottom: 0;
+}
+
+.lexvoice-settings-tabs {
+  background: color-mix(in srgb, var(--background-secondary) 72%, var(--background-primary) 28%);
+}
+
+.lexvoice-settings-tabs::before {
+  content: "";
+  display: block;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 48px;
+  background: color-mix(in srgb, var(--background-secondary) 72%, var(--background-primary) 28%);
 }

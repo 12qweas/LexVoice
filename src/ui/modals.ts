@@ -2004,7 +2004,9 @@ export class BubbleWidget {
       const queue = this.plugin.queue;
       const hasPromptJob = !!(queue && queue.hasPendingGeneratePrompt && queue.hasPendingGeneratePrompt());
       const qd = this.plugin.quickDictation;
-      const qdSig = qd && qd.isActive() ? `Q${qd.state}${qd.target}` : "";
+      // 听写实时字幕：listening 时把 liveText 长度纳入签名，partial 更新才会重绘滚动字幕。
+      const qdLive = qd && qd.state === "listening" && typeof qd.liveText === "string" ? `#${qd.liveText.length}` : "";
+      const qdSig = qd && qd.isActive() ? `Q${qd.state}${qd.target}${qdLive}` : "";
       const sig = `${info.state}|${hasPromptJob ? "P" : ""}|${qdSig}`;
       if (sig === this._lastSig) {
         const t = this.el && this.el.querySelector(".lexvoice-bubble-timer");
@@ -2067,7 +2069,7 @@ export class BubbleWidget {
     this.el.empty();
     this.el.removeClass("is-idle"); this.el.removeClass("is-recording"); this.el.removeClass("is-paused"); this.el.removeClass("is-dictating");
     // 重置口述胶囊态类，再按当前态精确加回。
-    this.el.removeClass("is-qd"); this.el.removeClass("is-qd-idle"); this.el.removeClass("is-qd-listening"); this.el.removeClass("is-qd-processing"); this.el.removeClass("is-qd-done");
+    this.el.removeClass("is-qd"); this.el.removeClass("is-qd-idle"); this.el.removeClass("is-qd-listening"); this.el.removeClass("is-qd-listening-live"); this.el.removeClass("is-qd-processing"); this.el.removeClass("is-qd-done");
     // 悬浮窗大小（大/中/小）：每次渲染都重置三档尺寸类，再加回当前档，与状态无关。
     ["large", "medium", "small"].forEach(sz => this.el.removeClass("lexvoice-bubble-size-" + sz));
     this.el.addClass("lexvoice-bubble-size-" + (this.plugin.settings.bubbleSize || "large"));
@@ -2086,10 +2088,19 @@ export class BubbleWidget {
         // 声波涟漪（4 环，藏在波形按钮后面）
         const rip = this.el.createDiv({ cls: "lexvoice-qd-ripples" });
         for (let i = 0; i < 4; i++) rip.createDiv({ cls: "lexvoice-qd-ripple" });
-        // 文本区：标签「聆听中…」+ 闪烁光标（无实时流式转写可显示）
         const zone = this.el.createDiv({ cls: "lexvoice-qd-textzone", attr: { "aria-live": "polite" } });
-        zone.createSpan({ cls: "lexvoice-qd-listen-label", text: "聆听中…" });
-        zone.createSpan({ cls: "lexvoice-qd-caret" });
+        if (qd._streaming) {
+          // 流式：只显示实时字幕（当前这句，左对齐自然生长）+ 光标；不显示"聆听中"（那是批量占位）。
+          this.el.addClass("is-qd-listening-live");
+          const live = typeof qd.liveText === "string" ? qd.liveText : "";
+          const span = zone.createSpan({ cls: "lexvoice-qd-live", text: live });
+          span.createSpan({ cls: "lexvoice-qd-caret" }); // 光标塞进字幕内，跟着文字一起居中
+          try { span.scrollLeft = span.scrollWidth; } catch { /* intentionally empty */ } // 长句超宽时滚到句尾，始终露最新
+        } else {
+          // 批量：说完才出字，用「聆听中…」占位 + 光标。
+          zone.createSpan({ cls: "lexvoice-qd-listen-label", text: "聆听中…" });
+          zone.createSpan({ cls: "lexvoice-qd-caret" });
+        }
       } else if (qd.state === "done") {
         this.el.addClass("is-qd-done");
         const zone = this.el.createDiv({ cls: "lexvoice-qd-textzone" });
