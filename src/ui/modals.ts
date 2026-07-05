@@ -2003,7 +2003,9 @@ export class BubbleWidget {
       const info = this.plugin.recorder.getInfo();
       const queue = this.plugin.queue;
       const hasPromptJob = !!(queue && queue.hasPendingGeneratePrompt && queue.hasPendingGeneratePrompt());
-      const sig = `${info.state}|${hasPromptJob ? "P" : ""}`;
+      const qd = this.plugin.quickDictation;
+      const qdSig = qd && qd.isActive() ? `Q${qd.state}${qd.target}` : "";
+      const sig = `${info.state}|${hasPromptJob ? "P" : ""}|${qdSig}`;
       if (sig === this._lastSig) {
         const t = this.el && this.el.querySelector(".lexvoice-bubble-timer");
         if (t) t.setText(formatElapsed(info.elapsed));
@@ -2046,40 +2048,91 @@ export class BubbleWidget {
     this.wrapEl.addEventListener("mouseenter", () => this.show());
     this.wrapEl.addEventListener("mouseleave", () => this.scheduleHide());
   }
+  // 用候选名逐个尝试画 Lucide 图标；setIcon 对坏名静默不插 svg，故显式校验。
+  _paintIcon(el, candidates) {
+    let painted = false;
+    for (const name of candidates) {
+      try {
+        el.empty();
+        obsidian.setIcon(el, name);
+        if (el.querySelector("svg")) { painted = true; break; }
+      } catch { /* intentionally empty */ }
+    }
+    if (!painted) el.empty();
+    return painted;
+  }
   render() {
     if (!this.el) return;
     const info = this.plugin.recorder.getInfo();
     this.el.empty();
-    this.el.removeClass("is-idle"); this.el.removeClass("is-recording"); this.el.removeClass("is-paused");
+    this.el.removeClass("is-idle"); this.el.removeClass("is-recording"); this.el.removeClass("is-paused"); this.el.removeClass("is-dictating");
+    // 重置口述胶囊态类，再按当前态精确加回。
+    this.el.removeClass("is-qd"); this.el.removeClass("is-qd-idle"); this.el.removeClass("is-qd-listening"); this.el.removeClass("is-qd-processing"); this.el.removeClass("is-qd-done");
+    // 悬浮窗大小（大/中/小）：每次渲染都重置三档尺寸类，再加回当前档，与状态无关。
+    ["large", "medium", "small"].forEach(sz => this.el.removeClass("lexvoice-bubble-size-" + sz));
+    this.el.addClass("lexvoice-bubble-size-" + (this.plugin.settings.bubbleSize || "large"));
     if (this.wrapEl) this.wrapEl.removeClass("is-recording-wrap");
+    const qd = this.plugin.quickDictation;
+    // ── (1) 快速口述进行中：即时转写胶囊（聆听 / 整理 / 已写入）───────────────
+    if (qd && qd.isActive()) {
+      this.el.addClass("is-qd");
+      // 填色波形按钮常驻 left:8（在这些态里就是结束触发器）
+      const waveBtn = this.el.createEl("button", { cls: "lexvoice-qd-wave" });
+      obsidian.setTooltip(waveBtn, "听写", { placement: "top" });
+      this._paintIcon(waveBtn, ["audio-lines", "lucide-audio-lines"]);
+      waveBtn.onclick = (e) => { e.stopPropagation(); void this.plugin.quickDictation.toggle(this.plugin.settings.quickDictationTarget || "editor"); };
+      if (qd.state === "listening") {
+        this.el.addClass("is-qd-listening");
+        // 声波涟漪（4 环，藏在波形按钮后面）
+        const rip = this.el.createDiv({ cls: "lexvoice-qd-ripples" });
+        for (let i = 0; i < 4; i++) rip.createDiv({ cls: "lexvoice-qd-ripple" });
+        // 文本区：标签「聆听中…」+ 闪烁光标（无实时流式转写可显示）
+        const zone = this.el.createDiv({ cls: "lexvoice-qd-textzone", attr: { "aria-live": "polite" } });
+        zone.createSpan({ cls: "lexvoice-qd-listen-label", text: "聆听中…" });
+        zone.createSpan({ cls: "lexvoice-qd-caret" });
+      } else if (qd.state === "done") {
+        this.el.addClass("is-qd-done");
+        const zone = this.el.createDiv({ cls: "lexvoice-qd-textzone" });
+        const chk = zone.createDiv({ cls: "lexvoice-qd-check" });
+        this._paintIcon(chk, ["check", "lucide-check"]);
+        zone.createSpan({ cls: "lexvoice-qd-done-label", text: "已写入" });
+      } else {
+        // transcribing | cleaning → 统一「AI 整理中…」
+        this.el.addClass("is-qd-processing");
+        const zone = this.el.createDiv({ cls: "lexvoice-qd-textzone" });
+        zone.createDiv({ cls: "lexvoice-qd-spinner" });
+        zone.createSpan({ cls: "lexvoice-qd-proc-label", text: "AI 整理中…" });
+      }
+      return;
+    }
     const makeDocButton = (title, handler) => {
       const jumpBtn = this.el.createEl("button", { cls: "lexvoice-bubble-jump", attr: { title, "aria-label": title } });
       // 用 Lucide 图标替代之前 CSS 画的文档形状。
       // 关键：setIcon 对无效图标名通常静默不加 svg（不抛异常），会得到空按钮 → 图标"看不见"。
       // 所以逐个尝试候选图标名，并显式验证 svg 真的被插入；都失败再走 CSS fallback 形状。
-      const iconCandidates = ["file-text", "lucide-file-text", "file"];
-      let painted = false;
-      for (const name of iconCandidates) {
-        try {
-          jumpBtn.empty();
-          obsidian.setIcon(jumpBtn, name);
-          if (jumpBtn.querySelector("svg")) { painted = true; break; }
-        } catch { /* intentionally empty */ }
-      }
-      if (!painted) {
-        jumpBtn.empty();
-        jumpBtn.addClass("is-fallback-icon");  // CSS 画的文档轮廓兜底
-      }
+      const painted = this._paintIcon(jumpBtn, ["file-text", "lucide-file-text", "file"]);
+      if (!painted) jumpBtn.addClass("is-fallback-icon");  // CSS 画的文档轮廓兜底
       jumpBtn.onclick = (e) => { e.stopPropagation(); handler(); };
       return jumpBtn;
     };
     if (info.state === "idle") {
-      this.el.addClass("is-idle");
-      makeDocButton("打开最近一篇录音笔记", () => this.plugin.openRecentNote());
-      const btn = this.el.createEl("button", { cls: "lexvoice-bubble-main", attr: { title: "开始录音" } });
-      btn.createSpan({ cls: "lexvoice-bubble-record-dot" });
-      btn.onclick = (e) => { e.stopPropagation(); this.plugin.startRecording(); };
-      this.el.createEl("span", { cls: "lexvoice-bubble-label", text: "开始录音" });
+      // ── (3) 空闲：三枚 40×40 圆形图标按钮胶囊 ─────────────────────────────
+      this.el.addClass("is-qd"); this.el.addClass("is-qd-idle");
+      // file-text 幽灵按钮 · 定位跳转
+      const locateBtn = this.el.createEl("button", { cls: "lexvoice-qd-ghost lexvoice-qd-locate" });
+      obsidian.setTooltip(locateBtn, "定位跳转", { placement: "top" });
+      if (!this._paintIcon(locateBtn, ["file-text", "lucide-file-text", "file"])) locateBtn.addClass("is-fallback-icon");
+      locateBtn.onclick = (e) => { e.stopPropagation(); this.plugin.openRecentNote(); };
+      // audio-lines 填色按钮 · 即时转写（主触发）
+      const waveBtn = this.el.createEl("button", { cls: "lexvoice-qd-wave" });
+      obsidian.setTooltip(waveBtn, "听写", { placement: "top" });
+      this._paintIcon(waveBtn, ["audio-lines", "lucide-audio-lines"]);
+      waveBtn.onclick = (e) => { e.stopPropagation(); void this.plugin.quickDictation.toggle(this.plugin.settings.quickDictationTarget || "editor"); };
+      // mic 幽灵按钮 · 会议纪要录音
+      const micBtn = this.el.createEl("button", { cls: "lexvoice-qd-ghost lexvoice-qd-mic" });
+      obsidian.setTooltip(micBtn, "会议纪要录音", { placement: "top" });
+      this._paintIcon(micBtn, ["mic", "lucide-mic"]);
+      micBtn.onclick = (e) => { e.stopPropagation(); this.plugin.startRecording(); };
       if (this.plugin.queue && this.plugin.queue.hasPendingGeneratePrompt && this.plugin.queue.hasPendingGeneratePrompt()) {
         const chip = this.el.createDiv({ cls: "lexvoice-bubble-chip" });
         chip.setText("优化提示词中");

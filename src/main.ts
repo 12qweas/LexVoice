@@ -39,7 +39,7 @@ import { MODE_BODIES } from "./prompts/mode-bodies";
 import { SHARED_DISCIPLINE, STRUCTURE_LEVEL_INSTRUCTIONS } from "./prompts/discipline";
 import { INDUSTRY_META_PROMPT } from "./prompts/industry-meta";
 import { JOBPORTRAIT_SYSTEM_PROMPT, JOBPORTRAIT_FOLLOWUP_RULES } from "./prompts/recruit-hrbp";
-import { CLEAN_TRANSCRIPT_SYSTEM, buildCleanTranscriptChunkPrompt } from "./prompts/clean-transcript";
+import { CLEAN_TRANSCRIPT_SYSTEM, buildCleanTranscriptChunkPrompt, QUICK_DICTATION_SYSTEM, buildQuickDictationCleanupPrompt } from "./prompts/clean-transcript";
 
 
 
@@ -253,6 +253,8 @@ function normalizeLexVoiceSettings(savedData) {
 
   const ui = raw.ui || {};
   s.showFloatingBall = pickDefined(ui.floatingControlEnabled, raw.showFloatingBall, defaults.showFloatingBall);
+  const bubbleSizeRaw = pickDefined(ui.bubbleSize, raw.bubbleSize, defaults.bubbleSize);
+  s.bubbleSize = (bubbleSizeRaw === "medium" || bubbleSizeRaw === "small") ? bubbleSizeRaw : "large";
   s.floatingBallPos = Object.assign({}, defaults.floatingBallPos, ui.floatingControlPosition || raw.floatingBallPos || {});
 
   const recruiting = raw.recruiting || {};
@@ -336,6 +338,19 @@ function normalizeLexVoiceSettings(savedData) {
     t.customMode = true;
     s.activeTemplateByMode[t.id] = t.id;
   }
+
+  // 快速口述：专用转写服务 + 自定义整理提示词。字段强制成字符串，缺省空串。
+  const quickDictation = raw.quickDictation || {};
+  const qaRaw = quickDictation.asr || raw.quickDictationAsr || {};
+  s.quickDictationAsr = {
+    endpoint: String(qaRaw.endpoint || "").trim(),
+    apiKey: String(qaRaw.apiKey || "").trim(),
+    model: String(qaRaw.model || "").trim(),
+    language: String(qaRaw.language || "").trim(),
+  };
+  s.quickDictationPrompt = String(pickDefined(quickDictation.prompt, raw.quickDictationPrompt, defaults.quickDictationPrompt) || "");
+  const qdTargetRaw = pickDefined(quickDictation.target, raw.quickDictationTarget, defaults.quickDictationTarget);
+  s.quickDictationTarget = qdTargetRaw === "clipboard" ? "clipboard" : "editor";
 
   return s;
 }
@@ -447,6 +462,7 @@ function serializeLexVoiceSettings(s) {
     },
     ui: {
       floatingControlEnabled: s.showFloatingBall,
+      bubbleSize: s.bubbleSize || "large",
       floatingControlPosition: s.floatingBallPos || {},
     },
     recruiting: {
@@ -465,6 +481,11 @@ function serializeLexVoiceSettings(s) {
       available: s.availableUpdate || null,
       lastError: s.lastUpdateError || "",
       installedVersion: s.installedUpdateVersion || "",
+    },
+    quickDictation: {
+      asr: s.quickDictationAsr || { endpoint: "", apiKey: "", model: "", language: "" },
+      prompt: s.quickDictationPrompt || "",
+      target: s.quickDictationTarget === "clipboard" ? "clipboard" : "editor",
     },
     promptTemplates: s.promptTemplates || {},
     activeTemplateByMode: s.activeTemplateByMode || {},
@@ -3443,6 +3464,202 @@ function createStreamingTranscriptionClient(profile, provider, callbacks) {
 // PCM 实时编码器：MediaStream → PCM 16-bit mono 帧（默认 16kHz，可设 24kHz）
 // 用 ScriptProcessorNode（已废弃但 Electron 下兼容性最好）
 // ============================================================
+
+// 转写/清洗出来的文字，去掉说话人标签、代码围栏和首尾空白，才好直接落进输入框。
+function stripQuickDictationRaw(t) {
+  let s = String(t == null ? "" : t).trim();
+  s = s.replace(/\[说话人\s*\d+\]\s*[:：]?\s*/g, "");
+  s = s.replace(/^```[a-zA-Z]*\s*/, "").replace(/\s*```$/, "");
+  return s.trim();
+}
+
+// 快速口述（Typeless 式短语音输入）：按快捷键/点悬浮窗麦克风 → 录一小段 → 再按结束 →
+// 先把转写原文乐观落到光标或剪贴板，再用 fast 关思维链的短清洗替换。
+// 与主录音链路完全解耦：自带轻量 MediaRecorder，不建纪要、不建 session，只搬"音频→干净文字"这段大脑。
+class QuickDictationController {
+  declare plugin: LexVoicePlugin;
+  constructor(plugin) {
+    this.plugin = plugin;
+    this.state = "idle"; // idle | listening | transcribing | cleaning
+    this.stream = null;
+    this.recorder = null;
+    this.chunks = [];
+    this.mime = "";
+    this.target = "editor"; // editor | clipboard
+    this.asrProviderId = null; // 快速口述专用转写服务（null=回退到活跃服务）
+    this.asrOverride = null; // 快速口述专用转写 provider 对象（配了 quickDictationAsr 时用；null=回退到活跃服务）
+    this.asrLabel = "";
+    this.anchor = null; // { editor, from } —— 开录时锚定光标
+    this.startedAt = 0;
+    this._stopResolve = null;
+    this._starting = false;
+    this._doneTimer = null; // "已写入" 闪现回落 idle 的计时器
+  }
+  isActive() { return this.state !== "idle"; }
+  _setState(s) {
+    this.state = s;
+    try { if (this.plugin.bubble) this.plugin.bubble.scheduleUpdate(); } catch { /* intentionally empty */ }
+  }
+  async toggle(target) {
+    if (this.state === "idle") { await this.start(target); return; }
+    if (this.state === "listening") { await this.stop(); return; }
+    // 处理中（转写/整理）时再次触发：忽略，不弹条幅。
+  }
+  async start(target) {
+    if (this.state !== "idle" || this._starting) return;
+    if (this.plugin.recorder && this.plugin.recorder.state !== "idle") {
+      return; // 会议录音中：静默不启，不弹条幅
+    }
+    this._starting = true; // 同步占位，防麦克风获取期间二次触发起两条流
+    try {
+      // 自动落点：设置为「剪贴板」则强制走剪贴板；否则自动判断——
+      // Obsidian 窗口在前台且有活动的 Markdown 编辑器 → 插入光标；否则（切到别的 app / 无可写编辑器）→ 剪贴板，等你自己粘贴。
+      this.anchor = null;
+      const forceClip = this.plugin.settings.quickDictationTarget === "clipboard";
+      const view = forceClip ? null : this.plugin.app.workspace.getActiveViewOfType(obsidian.MarkdownView);
+      const editor = (view && view.editor && (typeof document === "undefined" || document.hasFocus())) ? view.editor : null;
+      if (editor) { this.target = "editor"; this.anchor = { editor, from: editor.getCursor() }; }
+      else { this.target = "clipboard"; }
+      try {
+        assertAudioCaptureSupported();
+        this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (e) {
+        console.error("[LexVoice] quick dictation mic failed", e);
+        try { void this.plugin.logDiagnostic("error", "quickdict.mic_failed", "快速口述麦克风打不开", { error: (e && e.message) || String(e) }); } catch { /* intentionally empty */ }
+        this._cleanupStream();
+        return;
+      }
+      // 快速口述转写服务：配了「快速转写 API」就单独走它，否则回退到活跃的会议转写服务。
+      const qa = this.plugin.settings.quickDictationAsr;
+      if (qa && qa.endpoint && qa.apiKey && qa.model) {
+        this.asrOverride = { id: "quick-asr", name: "快速转写", endpoint: qa.endpoint, apiKey: qa.apiKey, model: qa.model, language: qa.language || "" };
+      } else {
+        this.asrOverride = null;
+      }
+      const asrProvider = this.asrOverride || resolveTranscribeProvider(this.plugin);
+      this.asrLabel = (asrProvider && asrProvider.name) || (asrProvider && asrProvider.id) || "";
+      // 格式选择跟着服务走：APIMiMo 录 Opus（它只收 wav/mp3，本机解码转 WAV，Electron 解得了 Opus）。
+      let preferOpus = false;
+      try { preferOpus = isApimimoAsrProvider(asrProvider); } catch { /* intentionally empty */ }
+      this.mime = pickMimeType(preferOpus);
+      this.chunks = [];
+      try {
+        this.recorder = this.mime ? new MediaRecorder(this.stream, { mimeType: this.mime }) : new MediaRecorder(this.stream);
+      } catch { this.recorder = new MediaRecorder(this.stream); }
+      this.recorder.ondataavailable = (e) => { if (e.data && e.data.size) this.chunks.push(e.data); };
+      this.recorder.onstop = () => { const r = this._stopResolve; this._stopResolve = null; if (r) r(); };
+      this.startedAt = Date.now();
+      try { this.recorder.start(); }
+      catch (e) {
+        console.error("[LexVoice] quick dictation recorder start failed", e);
+        try { void this.plugin.logDiagnostic("error", "quickdict.recorder_failed", "快速口述无法开始录音", { error: (e && e.message) || String(e) }); } catch { /* intentionally empty */ }
+        this._cleanupStream();
+        return;
+      }
+      this._setState("listening"); // 胶囊 HUD 显示"聆听中"，不弹条幅
+    } finally { this._starting = false; }
+  }
+  cancel() {
+    if (this._doneTimer) { window.clearTimeout(this._doneTimer); this._doneTimer = null; }
+    if (this.state === "idle") return;
+    try { if (this.recorder && this.recorder.state !== "inactive") this.recorder.stop(); } catch { /* intentionally empty */ }
+    this._cleanupStream();
+    this.chunks = [];
+    this.anchor = null;
+    this._stopResolve = null;
+    this._setState("idle");
+  }
+  async stop() {
+    if (this.state !== "listening") return;
+    const stopped = new Promise((res) => { this._stopResolve = res; });
+    try { this.recorder.stop(); } catch { if (this._stopResolve) { this._stopResolve(); this._stopResolve = null; } }
+    await stopped;
+    this._cleanupStream();
+    const blob = new Blob(this.chunks, { type: this.mime || "audio/webm" });
+    const durationMs = Date.now() - this.startedAt;
+    this.chunks = [];
+    if (!blob.size || durationMs < 400) {
+      this.anchor = null;
+      this._setState("idle"); // 太短：静默回落
+      return;
+    }
+    this._setState("transcribing");
+    let raw = "";
+    const _tTranscribe = Date.now();
+    try {
+      raw = await transcribeAudio(this.plugin, blob, blob.type || this.mime || "audio/webm", this.asrOverride || undefined);
+    } catch (e) {
+      console.error("[LexVoice] quick dictation transcribe failed", e);
+      try { void this.plugin.logDiagnostic("error", "quickdict.transcribe_failed", "快速口述转写失败", { error: (e && e.message) || String(e) }); } catch { /* intentionally empty */ }
+      this.anchor = null;
+      this._setState("idle");
+      return;
+    }
+    const transcribeMs = Date.now() - _tTranscribe;
+    raw = stripQuickDictationRaw(raw);
+    if (!raw) {
+      this.anchor = null;
+      this._setState("idle"); // 没转出内容：静默回落
+      return;
+    }
+    // 不先写原文（用户要求）：等结构化整理出来，一次性落整理版；整理失败才兜底落原文，并把失败原因显示出来。
+    const toEditor = this.target === "editor" && !!(this.anchor && this.anchor.editor);
+    this._setState("cleaning");
+    let clean = "";
+    let cleanErr = null;
+    const _tClean = Date.now();
+    const cleanupPrompt = buildQuickDictationCleanupPrompt(raw, this.plugin.settings.quickDictationPrompt);
+    const cleanupOpts = { timeoutMs: 25000, noRetry: true, thinkingMode: "fast", payload: { max_tokens: 1500 } };
+    try {
+      clean = await callLlm(this.plugin, QUICK_DICTATION_SYSTEM, cleanupPrompt, cleanupOpts);
+    } catch (e) {
+      cleanErr = e;
+      const msg = String((e && e.message) || e);
+      // 失败若不像超时——很可能是该模型不认 enable_thinking 参数（如 mimo ultraspeed → 4xx）。
+      // 去掉思考档参数自愈重试一次；超时则不重试（免得再等一轮）。
+      if (!/超时|timeout|abort/i.test(msg)) {
+        console.warn("[LexVoice] quick dictation cleanup failed, retrying without thinking param", e);
+        try {
+          clean = await callLlm(this.plugin, QUICK_DICTATION_SYSTEM, cleanupPrompt, Object.assign({}, cleanupOpts, { thinkingMode: "default" }));
+          cleanErr = null;
+        } catch (e2) { cleanErr = e2; console.warn("[LexVoice] quick dictation cleanup retry failed", e2); }
+      } else {
+        console.warn("[LexVoice] quick dictation cleanup timed out", e);
+      }
+    }
+    const cleanMs = Date.now() - _tClean;
+    clean = stripQuickDictationRaw(clean);
+    const cleanedOk = !!clean;
+    const finalText = clean || raw; // 整理失败兜底用原文
+    if (toEditor) {
+      try {
+        this.anchor.editor.replaceRange(finalText, this.anchor.from);
+        this.anchor.editor.setCursor(this.anchor.editor.offsetToPos(this.anchor.editor.posToOffset(this.anchor.from) + finalText.length));
+      } catch (e) { console.error("[LexVoice] quick dictation insert failed", e); }
+    } else {
+      try { await navigator.clipboard.writeText(finalText); } catch { /* intentionally empty */ }
+    }
+    this.anchor = null;
+    // 落字成功后闪现「已写入」态（done），1200ms 后回落 idle。
+    this._setState("done");
+    if (this._doneTimer) { window.clearTimeout(this._doneTimer); this._doneTimer = null; }
+    this._doneTimer = window.setTimeout(() => {
+      this._doneTimer = null;
+      if (this.state === "done") this._setState("idle");
+    }, 1200);
+    console.log(`[LexVoice] 快速口述耗时：转写 ${transcribeMs}ms / 整理 ${cleanMs}ms`, cleanErr || "");
+    // 成功：不弹条幅，由胶囊「已写入」态表达；整理失败：弹一条通知 + 写诊断日志（已兜底落原文）。
+    if (!cleanedOk) {
+      new obsidian.Notice("大模型转写失败，已置入原文");
+      try { void this.plugin.logDiagnostic("warn", "quickdict.cleanup_failed", "快速口述整理没生效，已落原文", { reason: cleanErr ? String((cleanErr && cleanErr.message) || cleanErr).slice(0, 200) : "模型返回空", transcribeMs, cleanMs }); } catch { /* intentionally empty */ }
+    }
+  }
+  _cleanupStream() {
+    try { if (this.stream) this.stream.getTracks().forEach((t) => { try { t.stop(); } catch { /* intentionally empty */ } }); } catch { /* intentionally empty */ }
+    this.stream = null;
+    this.recorder = null;
+  }
+}
 
 class RecorderService {
   declare plugin: LexVoicePlugin;
@@ -12597,6 +12814,7 @@ class LexVoicePlugin extends obsidian.Plugin {
   async onload() {
     await this.loadAll();
     this.recorder = new RecorderService(this);
+    this.quickDictation = new QuickDictationController(this);
     this.queue = new TaskQueue(this);
     this.queue.load(this.persistedQueue);
     this.session = null;
@@ -12629,6 +12847,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     this.app.workspace.onLayoutReady(() => this.syncBubbleVisibility());
 
     this.addCommand({ id: "toggle-recording", name: "开始/停止录音", callback: () => this.toggleRecording() });
+    this.addCommand({ id: "quick-dictation-toggle", name: "听写 · 开始/结束", callback: () => { void this.quickDictation.toggle(this.settings.quickDictationTarget || "editor"); } });
     this.addCommand({ id: "pause-resume-recording", name: "暂停/继续录音", callback: () => {
       const s = this.recorder.state;
       if (s === "recording") this.recorder.pause(); else if (s === "paused") this.recorder.resume();
@@ -12891,6 +13110,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     void (async () => {
       try { if (this.recorder && this.recorder.state !== "idle") await this.recorder.stop(); } catch { /* intentionally empty */ }
     })();
+    try { if (this.quickDictation) this.quickDictation.cancel(); } catch { /* intentionally empty */ }
     if (this.bubble) this.bubble.unmount();
     // 清理招聘项目重算 Debouncer，避免卸载后 pending timer 触发已 detach 的实例
     try { if (this._recruitRecalcDebouncers) { this._recruitRecalcDebouncers.forEach(d => { try { if (d.cancel) d.cancel(); } catch { /* intentionally empty */ } }); this._recruitRecalcDebouncers.clear(); } } catch { /* intentionally empty */ }
@@ -14406,6 +14626,10 @@ class LexVoicePlugin extends obsidian.Plugin {
   async startRecording(options = {}) {
     if (this.recorder.state !== "idle") {
       new obsidian.Notice("当前已有录音进行中，请先停止后再继续录音。", 5000);
+      return;
+    }
+    if (this.quickDictation && this.quickDictation.isActive()) {
+      new obsidian.Notice("正在听写，请先结束后再录制纪要。", 5000);
       return;
     }
     const appendTargetFile = options && options.appendToFile instanceof obsidian.TFile ? options.appendToFile : null;

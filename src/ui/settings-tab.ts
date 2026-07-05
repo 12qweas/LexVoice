@@ -12,6 +12,7 @@ import { LLM_SERVICE_PRESETS, ONE_CARD_PROVIDERS, applyLlmProfileToWorkingConfig
 import { fetchLlmModelList, testLlmConnection } from '../llm/core';
 import { snapshotActiveAsr, syncWorkingAsrToActiveScheme } from '../llm/asr-scheme';
 import { normalizeAsrConcurrency, resolveTranscribeProvider, transcribeAudio } from '../asr/transcribe';
+import { QUICK_DICTATION_DEFAULT_TEMPLATE } from '../prompts/clean-transcript';
 import { countVocabularyGroups, formatVocabularyMarkdown, isStructuredVocabularyMarkdown, parseVocabularyGroups, summarizeVocabularyGroups } from '../vocabulary';
 import { hasPeopleHotwordsConsent, loadPeopleDirectory, normalizePeopleContextMode, normalizePeopleSuggestionCache, normalizePeopleSuggestionIgnores } from '../people';
 import { isRecruitFeatureUnlocked } from '../recruit';
@@ -708,6 +709,18 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         this.plugin.settings.showFloatingBall = v; await this.plugin.saveSettings();
         this.plugin.syncBubbleVisibility();
       }));
+
+    new obsidian.Setting(c).setName("悬浮窗大小")
+      .setDesc("整体缩放悬浮气泡。大=默认原尺寸，中/小依次等比缩小。")
+      .addDropdown(d => d
+        .addOption("large", "大")
+        .addOption("medium", "中")
+        .addOption("small", "小")
+        .setValue(this.plugin.settings.bubbleSize || "large")
+        .onChange(async v => {
+          this.plugin.settings.bubbleSize = v; await this.plugin.saveSettings();
+          this.plugin.syncBubbleVisibility();
+        }));
   }
 
 
@@ -985,6 +998,63 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
           b.setDisabled(false); b.setButtonText("测试");
         }
       }));
+
+    if (!this.plugin.settings.quickDictationAsr) {
+      this.plugin.settings.quickDictationAsr = { endpoint: "", apiKey: "", model: "", language: "" };
+    }
+    const qa = this.plugin.settings.quickDictationAsr;
+
+    new obsidian.Setting(c).setName("听写").setHeading();
+    const quickHint = c.createDiv({ cls: "setting-item-description lexvoice-section-hint" });
+    quickHint.setText("听写：录一小段语音，转写后由 AI 整理成结构化文本，落到光标或剪贴板。可为它单独指定转写服务和整理提示词。");
+
+    new obsidian.Setting(c).setName("听写转写服务（API）")
+      .setDesc("留空则用上面的会议转写服务。填了就让听写单独走这个（建议填一个对短音频快的服务）。四项需齐全（地址、密钥、模型）才生效。");
+
+    new obsidian.Setting(c).setName("转写地址")
+      .addText(t => t
+        .setPlaceholder("https://api.example.com/v1/audio/transcriptions")
+        .setValue(qa.endpoint || "")
+        .onChange(async v => { qa.endpoint = v.trim(); await this.plugin.saveSettings(); }));
+
+    new obsidian.Setting(c).setName("密钥")
+      .addText(t => {
+        t.inputEl.type = "password";
+        t.setPlaceholder("该转写服务的 API Key");
+        t.setValue(qa.apiKey || "");
+        t.onChange(async v => { qa.apiKey = v.trim(); await this.plugin.saveSettings(); });
+      });
+
+    new obsidian.Setting(c).setName("模型")
+      .addText(t => t
+        .setPlaceholder("如 FunAudioLLM/SenseVoiceSmall")
+        .setValue(qa.model || "")
+        .onChange(async v => { qa.model = v.trim(); await this.plugin.saveSettings(); }));
+
+    new obsidian.Setting(c).setName("语言")
+      .setDesc("可留空自动识别；部分服务支持 zh / en / auto。")
+      .addText(t => t
+        .setPlaceholder("留空 = 自动")
+        .setValue(qa.language || "")
+        .onChange(async v => { qa.language = v.trim(); await this.plugin.saveSettings(); }));
+
+    const quickPromptSetting = new obsidian.Setting(c)
+      .setName("自定义整理提示词")
+      .setDesc("自定义听写的 AI 整理提示词。留空用默认。用 {{转写}} 表示转写原文的位置（不写则自动拼在末尾）。");
+    const quickPromptTa = c.createEl("textarea", { cls: "lexvoice-textarea lexvoice-textarea-mono" });
+    quickPromptTa.rows = 10;
+    quickPromptTa.value = this.plugin.settings.quickDictationPrompt || "";
+    quickPromptTa.placeholder = QUICK_DICTATION_DEFAULT_TEMPLATE;
+    quickPromptTa.addEventListener("change", async () => {
+      this.plugin.settings.quickDictationPrompt = quickPromptTa.value.trim();
+      await this.plugin.saveSettings();
+    });
+    quickPromptSetting.addButton(b => b.setButtonText("恢复默认").onClick(async () => {
+      this.plugin.settings.quickDictationPrompt = QUICK_DICTATION_DEFAULT_TEMPLATE;
+      quickPromptTa.value = QUICK_DICTATION_DEFAULT_TEMPLATE;
+      await this.plugin.saveSettings();
+      new obsidian.Notice("已恢复默认听写整理提示词");
+    }));
 
     new obsidian.Setting(c).setName("AI 整理服务").setHeading();
     // 「已保存配置」已升级为顶部「API 方案」（同时含转写 + AI 整理），不再在此处单列 LLM-only 版本。

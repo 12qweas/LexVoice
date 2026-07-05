@@ -106,9 +106,9 @@ export async function transcribeImportAudioChunk(plugin, blob, mime, concurrency
   }
 }
 
-export function resolveTranscribeProvider(plugin) {
+export function resolveTranscribeProvider(plugin, forceId?: string) {
   const s = plugin.settings;
-  const id = s.activeTranscribeProvider || "siliconflow";
+  const id = forceId || s.activeTranscribeProvider || "siliconflow";
   const provider = (s.transcribeProviders && s.transcribeProviders[id]) || null;
   // 优先用 provider 子对象；否则回退到顶层旧字段
   const endpoint = (provider && provider.endpoint) || s.transcribeEndpoint || "";
@@ -375,8 +375,11 @@ export async function transcribeAudioWithApimimo(plugin, provider, blob, mime, v
   return applyVocabularyCorrections(rawText, vocabularyGroups).trim();
 }
 
-export async function transcribeAudio(plugin, blob, mime) {
-  const p = resolveTranscribeProvider(plugin);
+export async function transcribeAudio(plugin, blob, mime, providerOverride?) {
+  // providerOverride 可为：provider id 字符串（走注册表解析）或完整 provider 对象（快速口述专用服务直传）。
+  const p = (providerOverride && typeof providerOverride === "object")
+    ? providerOverride
+    : resolveTranscribeProvider(plugin, providerOverride);
   if (!p.endpoint) throw new Error(`转写服务地址未配置（当前服务：${p.name || p.id}）`);
   if (!p.apiKey && !isLocalServiceEndpoint(p.endpoint)) throw new Error(`转写访问密钥未配置（当前服务：${p.name || p.id}）`);
   if (!p.model)    throw new Error(`转写模型名称未配置（当前服务：${p.name || p.id}）`);

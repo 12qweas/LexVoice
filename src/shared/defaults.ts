@@ -26,6 +26,14 @@ export const DEFAULT_SETTINGS = {
   transcribeModel: "FunAudioLLM/SenseVoiceSmall",
   transcribeLanguage: "auto",
 
+  // 快速口述专用转写服务（可选）：留空则回退到活跃的会议转写服务；
+  // 填了就让快速口述单独走这个（建议填一个对短音频快的服务）。
+  quickDictationAsr: { endpoint: "", apiKey: "", model: "", language: "" },
+  // 快速口述自定义整理提示词（空 = 用内置默认 QUICK_DICTATION_DEFAULT_TEMPLATE）。
+  quickDictationPrompt: "",
+  // 即时转写落点：editor=插入光标处 / clipboard=复制到剪贴板。
+  quickDictationTarget: "editor",
+
   activeTranscribeProvider: "siliconflow",
   transcribeProviders: {
     siliconflow: {
@@ -192,6 +200,7 @@ export const DEFAULT_SETTINGS = {
   diagnosticsLogFolder: "LexVoice/诊断日志",
 
   showFloatingBall: true,
+  bubbleSize: "large",  // 悬浮气泡大小：large / medium / small
   floatingBallPos: { left: 60, top: 120 },
   autoOpenNoteAfterFinish: true,
   autoOpenHtmlReportAfterGenerate: true,
