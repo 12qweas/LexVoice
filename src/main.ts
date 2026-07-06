@@ -13,7 +13,7 @@ import { normalizeKnowledgeExtractionHistory } from "./shared/util-knowledge";
 import { listJDProjects } from "./recruit/jd-projects";
 import { sanitizeReportFileStem, generateHtmlReportFromMarkdown, generateStyledReportFromMarkdown } from "./report/render";
 import { parseElapsedMsToken, parseLexVoiceDurationLabel, TEXT_IMPORT_PRE_SUMMARY_CHUNK_CHARS, buildBriefingLanguageInstruction, applyBriefingLanguageInstruction, getSessionMetaDurationMs, getSegmentsDurationMs, truncateForLlmPrompt, splitLongTextForLlm } from "./shared/util-text";
-import { JOBPORTRAIT_DIMENSIONS, DEFAULT_RECRUIT_QUALITIES, isRecruitFeatureUnlocked, buildRecruitContextPrefix, getRecruitInterviewOutline, getRecruitJdLibrary, upsertRecruitJdLibrary, applyRecruitJdLibraryItem, getRecruitJdPreview, extractPdfTextBestEffort, extractCandidateNameFromResumeText, parseRecruitQualitiesFromOutput, buildCompactRecruitContextPrefix, buildRecruitTextImportMergePrompt, generateJobPortrait, normalizeRecruitContext, hasRecruitContextContent, parseJdProject, renderRecruitCandidateBase, renderRecruitAggregateBase, ensureRecruitAggregateBase, createRecruitProject, renderRecruitHomepageTemplate, listRecruitCandidateNotes, recruitRecommendationColor } from "./recruit";
+import { JOBPORTRAIT_DIMENSIONS, DEFAULT_RECRUIT_QUALITIES, isRecruitFeatureUnlocked, buildRecruitContextPrefix, getRecruitInterviewOutline, getRecruitJdLibrary, upsertRecruitJdLibrary, applyRecruitJdLibraryItem, getRecruitJdPreview, extractPdfTextBestEffort, extractCandidateNameFromResumeText, parseRecruitQualitiesFromOutput, buildCompactRecruitContextPrefix, buildRecruitTextImportMergePrompt, generateJobPortrait, normalizeRecruitContext, hasRecruitContextContent, parseJdProject, renderRecruitCandidateBase, renderRecruitAggregateBase, ensureRecruitAggregateBase, createRecruitProject, renderRecruitHomepageTemplate, listRecruitCandidateNotes } from "./recruit";
 import { registerRecruitBoardView, recommendationTone } from "./recruit/bases-view";
 import { normalizeAsrConcurrency, decodeAudioBlob, renderAudioBufferSliceToWav, mapLimit, transcribeImportAudioChunk, resolveTranscribeProvider, makeRecordingIssue, APIMIMO_ASR_CHUNK_MS, isApimimoAsrProvider, transcribeAudio } from "./asr/transcribe";
 import { getFrontmatterTags, readFileFrontmatter, upsertFrontmatterInMarkdown, LEARNING_CARD_TAG, CONCEPT_CARD_TAG, TODO_CARD_TAG, ensureTodayDailyNoteFile } from "./shared/util-note";
@@ -3522,7 +3522,7 @@ class QuickDictationController {
       this.anchor = null;
       const forceClip = this.plugin.settings.quickDictationTarget === "clipboard";
       const view = forceClip ? null : this.plugin.app.workspace.getActiveViewOfType(obsidian.MarkdownView);
-      const editor = (view && view.editor && (typeof document === "undefined" || document.hasFocus())) ? view.editor : null;
+      const editor = (view && view.editor && (typeof activeDocument === "undefined" || activeDocument.hasFocus())) ? view.editor : null;
       if (editor) { this.target = "editor"; this.anchor = { editor, from: editor.getCursor() }; }
       else { this.target = "clipboard"; }
       try {
@@ -3636,7 +3636,7 @@ class QuickDictationController {
           await this.streamingClient.finish();
           raw = this.streamingClient.getFullText() || this.liveText || "";
         }
-      } catch (e) {
+      } catch {
         raw = this.liveText || "";
       }
       try { if (this.streamingClient && this.streamingClient._safeClose) this.streamingClient._safeClose(); } catch { /* intentionally empty */ }
@@ -5361,7 +5361,7 @@ function isEmptyTodoFieldValue(value) {
 
 function cleanTodoOwnerValue(value) {
   const parts = String(value || "")
-    .split(/[\/／、,，;；]|(?:\s+和\s+)/)
+    .split(/[/／、,，;；]|(?:\s+和\s+)/)
     .map(cleanTodoFieldValue)
     .filter(Boolean)
     .filter(part => !/^(主讲人|发言人\d*|说话人\d*|相关方|业务需求方|负责人|某负责人|某同学|参会人|参与者|人员|未提及|未明确|未指定|未知|待定)$/i.test(part));
@@ -10926,7 +10926,7 @@ class OutlineView extends obsidian.ItemView {
     label.setAttr("title", item.path || item.name || "");
     chip.onclick = () => {
       const file = this.plugin.app.vault.getAbstractFileByPath(item.path);
-      if (file instanceof obsidian.TFile) this.plugin.app.workspace.getLeaf(false).openFile(file);
+      if (file instanceof obsidian.TFile) void this.plugin.app.workspace.getLeaf(false).openFile(file);
       else new obsidian.Notice("找不到这个材料文件");
     };
   }
@@ -12063,7 +12063,7 @@ class OutlineView extends obsidian.ItemView {
           .setIcon("refresh-cw")
           .onClick(() => {
             const pref = this.plugin.settings.repolishPreference || "";
-            this.plugin.repolishMarkdownFile(file, mode, pref ? getRepolishPreferencePreset(pref) : null);
+            void this.plugin.repolishMarkdownFile(file, mode, pref ? getRepolishPreferencePreset(pref) : null);
           });
       });
     }
@@ -12149,7 +12149,7 @@ class OutlineView extends obsidian.ItemView {
               e.preventDefault(); e.stopPropagation();
               if (e.stopImmediatePropagation) e.stopImmediatePropagation();
               this.plugin.settings.repolishPreference = ((this.plugin.settings.repolishPreference || "") === key) ? "" : key;
-              this.plugin.saveSettings();
+              void this.plugin.saveSettings();
               syncPrefChecks();
             }, true);
           }
@@ -12164,7 +12164,7 @@ class OutlineView extends obsidian.ItemView {
             .onClick(() => {
               const pref = this.plugin.settings.repolishPreference || "";
               const preset = pref ? getRepolishPreferencePreset(pref) : null;
-              this.plugin.repolishMarkdownFile(file, mode, preset);
+              void this.plugin.repolishMarkdownFile(file, mode, preset);
             });
         });
       }
@@ -12825,7 +12825,7 @@ class OutlineView extends obsidian.ItemView {
     this.outlineQueued = false;
     // 一并清掉会话级生成死锁与退避，让"停止等待"真正解卡——否则锁没释放，后续刷新还会堵在同一把锁上，越点越死。
     try { const s = this.plugin.session; if (s) { s._outlineGenLock = Promise.resolve(); markRealtimeOutlineSuccess(s); } } catch { /* intentionally empty */ }
-    this.plugin.logDiagnostic("warn", "outline.cancel_waiting", "用户停止等待实时大纲生成", {
+    void this.plugin.logDiagnostic("warn", "outline.cancel_waiting", "用户停止等待实时大纲生成", {
       segmentCount: this.plugin.session && this.plugin.session.segments ? this.plugin.session.segments.length : 0,
       lastOutlineSegmentCount: this.lastOutlineSegmentCount,
     });
@@ -18294,9 +18294,6 @@ ${source}`;
       this.beginTaskMeter();
       const { text: cleaned, truncated } = await cleanTranscript(this, segments, getLlmOutputCeiling(this.settings));
       if (!cleaned) { new obsidian.Notice("清稿生成失败：模型无输出", 8000); return; }
-      const sidMatch = content.match(/<!--\s*lexvoice-session:\s*([^\s>]+)\s*-->/);
-      const sourceId = sidMatch ? sidMatch[1] : "";
-      const stamp = window.moment ? window.moment().format("YYYY-MM-DD HH:mm:ss") : new Date().toISOString();
       const warn = truncated
         ? "> [!warning] 清稿可能被截断：部分内容或因模型输出上限未完整。建议换更大输出上限的模型后重新生成。\n\n"
         : "";
@@ -19053,7 +19050,7 @@ ${source}`;
     }
     if (migrated > 0) {
       console.log(`[LexVoice] queue rename migrate: ${migrated} task(s) ${oldNorm} -> ${newNorm}`);
-      try { (this.saveAll || this.saveSettings).call(this); } catch (e) {
+      try { void (this.saveAll || this.saveSettings).call(this); } catch (e) {
         console.warn("[LexVoice] queue migrate save failed", e);
       }
     }
@@ -19071,7 +19068,7 @@ ${source}`;
     const removed = before - this.queue.tasks.length;
     if (removed > 0) {
       console.log(`[LexVoice] queue delete cleanup: removed ${removed} orphan task(s) for ${norm}`);
-      try { (this.saveAll || this.saveSettings).call(this); } catch (e) {
+      try { void (this.saveAll || this.saveSettings).call(this); } catch (e) {
         console.warn("[LexVoice] queue delete cleanup save failed", e);
       }
       try { this.refreshOutlineView(); } catch { /* intentionally empty */ }

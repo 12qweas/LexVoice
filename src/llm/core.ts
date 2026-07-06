@@ -611,7 +611,7 @@ export async function callLlmWithContinuation(plugin, system, user, options, opt
     let data;
     try {
       data = await requestLlmChatCompletion(plugin, messages, options);
-    } catch (e) {
+    } catch {
       break; // 续写失败就用已有内容，不让整体失败
     }
     const piece = stripModeSuggestionBlocks(extractLlmContent(data).trim());

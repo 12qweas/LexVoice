@@ -71,7 +71,7 @@ export const QUICK_DICTATION_DEFAULT_TEMPLATE = `把下面这段语音转写整�
 【待整理的转写】
 {{转写}}`;
 
-export function buildQuickDictationCleanupPrompt(raw, template?): string {
+export function buildQuickDictationCleanupPrompt(raw: string, template?: string): string {
   const body = (template && String(template).trim()) ? String(template) : QUICK_DICTATION_DEFAULT_TEMPLATE;
   return body.includes("{{转写}}")
     ? body.replace(/\{\{\s*转写\s*\}\}/g, raw)

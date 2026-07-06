@@ -52,3 +52,4 @@ export function applyThinkingParam(payload, mode, endpoint, model) {
   }
   return payload;
 }
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return -- end of dynamic-typing region */

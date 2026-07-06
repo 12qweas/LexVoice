@@ -5,7 +5,7 @@ import { VOCABULARY_SECTIONS } from '../shared/catalog-sediment';
 import { sanitizeFilename, escapeRegExp } from '../shared/util-common';
 import { makeFileWikiLink } from '../shared/util-markdown';
 import { getPeopleSuggestionCacheKey, normalizePeopleSuggestionsModel, loadPeopleDirectory, isPeopleSuggestionIgnored, findMatchingPersonEntry } from '../people';
-import { callLlm, callLlmWithContinuation } from '../llm/core';
+import { callLlmWithContinuation } from '../llm/core';
 import { extractJsonObject } from '../shared/util-json';
 import { isLocalLlmEndpoint } from '../shared/util-llm-endpoint';
 import { DEFAULT_SETTINGS } from '../shared/defaults';

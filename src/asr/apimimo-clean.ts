@@ -6,7 +6,7 @@ export type ApimimoRepeatCleanResult = {
 
 const SENTENCE_END_RE = /[。！？!?；;]/;
 const HARD_BOUNDARY_RE = /[\n\r]/;
-const IGNORE_PUNCT_RE = /[\s，,。.!！？?、；;：:"“”‘’'`（）()\[\]【】《》<>]/g;
+const IGNORE_PUNCT_RE = /[\s，,。.!！？?、；;：:"“”‘’'`（）()[\]【】《》<>]/g;
 const MAX_PATTERN_UNITS = 24;
 const MIN_SHORT_PATTERN_CHARS = 24;
 const MIN_LONG_PATTERN_CHARS = 60;
