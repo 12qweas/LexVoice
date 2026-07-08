@@ -73,7 +73,9 @@ export const QUICK_DICTATION_DEFAULT_TEMPLATE = `把下面这段语音转写整�
 
 export function buildQuickDictationCleanupPrompt(raw: string, template?: string): string {
   const body = (template && String(template).trim()) ? String(template) : QUICK_DICTATION_DEFAULT_TEMPLATE;
-  return body.includes("{{转写}}")
-    ? body.replace(/\{\{\s*转写\s*\}\}/g, raw)
+  // replacement 必须用函数形式：raw 是用户口述内容，直接作字符串替换时 $&/$$/$' 等美元序列会被展开、正文被篡改。
+  // 判断占位符用与替换同款的宽松空白正则（{{ 转写 }} 也算），避免"含占位符却又拼接一份"的错位。
+  return /\{\{\s*转写\s*\}\}/.test(body)
+    ? body.replace(/\{\{\s*转写\s*\}\}/g, () => raw)
     : (body + "\n\n【待整理的转写】\n" + raw);
 }

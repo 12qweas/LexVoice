@@ -33,7 +33,9 @@ export function delayMs(ms) {
 export function isTransientAsrError(error) {
   if (isAsrNonRetryableError(error)) return false;
   const msg = String((error && error.message) || error || "");
-  return /\b(429|500|502|503|504)\b|too many|rate\s*limit|timeout|timed?\s*out|network|temporarily|service unavailable/i.test(msg);
+  // 中文关键字：限流（429 提示语）、超时（转写请求超时：…）、流中断（SSE 半路断线）都必须归为瞬时错误，
+  // 否则这些典型的网络性故障不会进重试。
+  return /\b(429|500|502|503|504)\b|too many|rate\s*limit|timeout|timed?\s*out|network|temporarily|service unavailable|限流|超时|流中断/i.test(msg);
 }
 
 export function isAsrNonRetryableError(error) {

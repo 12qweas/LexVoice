@@ -56,6 +56,29 @@ export function resolveUpdateRawBases(settings) {
   return out;
 }
 
+// 版本锁定的下载源（手机端/国内网络关键）：安装更新时按目标版本号取文件，杜绝"版本错位"。
+// 顺序设计：jsDelivr 按 git tag 精确镜像仓库文件（main.js 自 1.12.3 起随发版提交入库）——国内手机可达、
+// 免代理；GitHub Release 直连其次（有代理/海外时权威）；ghproxy 系镜像代理 Release 资产兜底。
+export function resolveUpdateVersionedBases(version) {
+  const v = String(version || "").trim();
+  const out = [];
+  const add = (url) => {
+    const clean = String(url || "").trim().replace(/\/+$/g, "");
+    if (clean && !out.includes(clean)) out.push(clean);
+  };
+  const repo = parseGithubRepoUrl(LEXVOICE_UPDATE_REPO_URL);
+  if (!repo || !v) return out;
+  const subdir = trimSlashes(LEXVOICE_UPDATE_PLUGIN_DIR || "");
+  const tagSuffix = repo.owner + "/" + repo.repo + "@" + v + (subdir ? "/" + subdir : "");
+  add("https://fastly.jsdelivr.net/gh/" + tagSuffix);
+  add("https://cdn.jsdelivr.net/gh/" + tagSuffix);
+  const releaseBase = LEXVOICE_UPDATE_REPO_URL.replace(/\/+$/g, "") + "/releases/download/" + v;
+  add(releaseBase);
+  add("https://mirror.ghproxy.com/" + releaseBase);
+  add("https://ghproxy.net/" + releaseBase);
+  return out;
+}
+
 export function stripLexVoiceFrontmatterSimple(text) {
   return String(text || "").replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
 }

@@ -6,7 +6,7 @@ import * as obsidian from "obsidian";
 import { REALTIME_OUTLINE_STATE_MAX_NODES, normalizeRealtimeOutlineList, hashRealtimeOutlineText, getRealtimeOutlineAnchorTime, cleanRealtimeOutlineItemText, makeRealtimeOutlineNode, parseRealtimeOutlineStateFromMarkdown, mergeStableRealtimeOutlineNodes, normalizeOutlineMarkdownForDisplay, validateRealtimeOutlineMarkdown, mergeCoverageNoRegress, deriveFollowupCards, findLowEvidenceEntities, sanitizeProjectFolderName, recolorReportHtml, desensitizeResumeText } from "./outline-text";
 import { LexVoiceSettingTab } from "./ui/settings-tab";
 import { pickReportAccentColor, AudioTimeModal, PeopleDirectorySuggestionModal, QueueModal, VirtualCableSetupModal, RecruitContextModal, ImportTextModal, ImportAudioModal, BubbleWidget } from "./ui/modals";
-import { LEXVOICE_UPDATE_REPO_URL, resolveUpdateRawBase, resolveUpdateRawBases, stripLexVoiceFrontmatterSimple, getRecentNoteProcessingState, lexvoiceConfirm, enumerateAudioDevices, trashLexVoiceFile, pluginBasePath, normalizeAudioInputMode, audioInputModeLabel } from "./ui/helpers";
+import { resolveUpdateRawBase, resolveUpdateRawBases, resolveUpdateVersionedBases, stripLexVoiceFrontmatterSimple, getRecentNoteProcessingState, lexvoiceConfirm, enumerateAudioDevices, trashLexVoiceFile, pluginBasePath, normalizeAudioInputMode, audioInputModeLabel } from "./ui/helpers";
 import { isKnownPolishMode, isCustomPromptModeTemplate, makeCustomPromptModeId, getCustomPromptModeTemplate, getCustomPromptModeTemplates, getBuiltInVisiblePolishModeKeys, getVisiblePolishModeKeys, getModeMeta, getEffectivePolishMode, getVisibleModeEntries, sanitizePromptTemplate } from "./shared/mode-meta";
 import { compareVersions, isLexVoiceMobileRuntime } from "./shared/util-platform";
 import { normalizeKnowledgeExtractionHistory } from "./shared/util-knowledge";
@@ -19,9 +19,12 @@ import { normalizeAsrConcurrency, decodeAudioBlob, renderAudioBufferSliceToWav, 
 import { getFrontmatterTags, readFileFrontmatter, upsertFrontmatterInMarkdown, LEARNING_CARD_TAG, CONCEPT_CARD_TAG, TODO_CARD_TAG, ensureTodayDailyNoteFile } from "./shared/util-note";
 import { PEOPLE_SUGGESTION_CACHE_LIMIT, normalizePeopleContextMode, splitPersonFieldValue, normalizePersonLookupText, loadPeopleDirectory, buildPeopleContextForLlm, ensurePeopleNoteRelatedBaseSection, formatPeopleBaseYaml, formatPeopleNoteMarkdown, mergeUniqueStrings, normalizePeopleSuggestion, normalizePeopleSuggestionIgnores, isPeopleSuggestionIgnored, addPeopleSuggestionIgnore, removePeopleSuggestionIgnores, getPeopleSuggestionCacheKey, normalizePeopleSuggestionCache, makePeopleSuggestionCacheRecord, isPeopleSuggestionCacheRecordCurrent, peopleSuggestionRecordToSuggestion, peopleSuggestionIgnoreRecordToSuggestion, findMatchingPersonEntry, arePeopleSuggestionsRelated, mergePeopleSuggestions, mergeSourceNoteRelatedPeopleFrontmatter, mergePersonFrontmatter, generatePeopleDirectorySuggestions, normalizePersonNameForEmail, parsePeopleFromOutput, personEntryFromFrontmatter } from "./people";
 import { getSedimentTodoId, getSedimentCardId, getSedimentHotwordId, getSedimentPersonId, withSedimentCandidateIds, removeSedimentGroupDone, sanitizeSedimentText, normalizeSedimentTodoSubtasks, normalizeSedimentExtractionModel, appendSedimentPreExtractionInstruction, stripSedimentPreExtractionBlocks, extractSedimentPreExtractionBlock, splitOutSedimentBlock, appendSedimentPreExtractionBlock, upsertSedimentPreExtractionBlockInFile, generateSedimentObjects, writeSedimentObjectCards } from "./sediment";
-import { createVocabularyGroups, parseVocabularyGroups, flattenVocabularyGroups, countVocabularyGroups, normalizeVocabularyInput, mergeVocabularyGroups, isStructuredVocabularyMarkdown, loadVocabularyGroups, formatVocabularyMarkdown } from "./vocabulary";
+import { createVocabularyGroups, parseVocabularyGroups, flattenVocabularyGroups, countVocabularyGroups, normalizeVocabularyInput, mergeVocabularyGroups, isStructuredVocabularyMarkdown, loadVocabularyGroups, formatVocabularyMarkdown, applyVocabularyCorrections } from "./vocabulary";
 import { logLlmRequestDiagnostic, getLlmConfigIssue, isLlmConfigError, isLlmServiceBlockedError, isLlmNonRetryableError, formatLlmConfigIssue, formatLlmFailureIssue, callLlm, callBriefingMergeLlm, stripModeSuggestionBlocks } from "./llm/core";
 import { DEFAULT_DAILY_MEETING_OVERVIEW_HEADING, DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE, DEFAULT_SETTINGS } from "./shared/defaults";
+// 设置序列化层已抽到独立模块（src/shared/settings-io.ts）并由 round-trip 测试覆盖（tests/settings-io.test.ts）。
+// 这里 import 回来，保持原有调用点用裸名引用不变。
+import { SETTINGS_SCHEMA_VERSION, LEGACY_VOCABULARY_FILE, normalizeLexVoiceSettings, serializeLexVoiceSettings, extractLexVoiceJobItems } from "./shared/settings-io";
 import type { LexVoiceSettings } from "./shared/defaults";
 import { normalizeLlmProfiles, applyLlmProfileToWorkingConfig, getLlmOutputCeiling, getBriefingMergeDesiredTokens, getBriefingMergeMaxTokens, LLM_OUTPUT_CEILING_FALLBACK, classifyBriefingLength } from "./llm/config";
 import { getThinkingControl } from "./llm/thinking";
@@ -48,8 +51,6 @@ const QUICK_INTERIM_CUTS_MS = [10 * 1000, 60 * 1000, 3 * 60 * 1000];
 
 
 
-const SETTINGS_SCHEMA_VERSION = 3;
-const LEGACY_VOCABULARY_FILE = "lexvoice 词汇表.md";
 const SHORT_RECORDING_FILTER_MS = 3000;
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const UPDATE_PLUGIN_FILES = ["manifest.json", "main.js", "styles.css", "README.md"];
@@ -116,390 +117,6 @@ function resolveRuntimeAudioInputMode(mode) {
   const normalized = normalizeAudioInputMode(mode || "mic");
   return isLexVoiceMobileRuntime() ? "mic" : normalized;
 }
-
-function normalizeLexVoiceSettings(savedData) {
-  const saved = isRecord(savedData) ? savedData : {};
-  const raw = isRecord(saved.settings) ? saved.settings : saved;
-  const defaults = cloneJson(DEFAULT_SETTINGS);
-  const s = Object.assign({}, defaults, raw);
-
-  const storage = raw.storage || {};
-  s.audioFolder = pickDefined(storage.recordingLibraryPath, raw.audioFolder, defaults.audioFolder);
-  s.mdFolder = pickDefined(storage.briefingNotePath, raw.mdFolder, defaults.mdFolder);
-  s.meetingMaterialsFolder = obsidian.normalizePath(pickDefined(storage.meetingMaterialPath, raw.meetingMaterialsFolder, defaults.meetingMaterialsFolder));
-  s.htmlReportFolder = pickDefined(storage.htmlReportPath, raw.htmlReportFolder, defaults.htmlReportFolder);
-  s.inboxFolder = pickDefined(storage.inboxPath, raw.inboxFolder, defaults.inboxFolder);
-  s.inboxAutoImport = pickDefined(storage.autoImportInbox, raw.inboxAutoImport, defaults.inboxAutoImport);
-  s.inboxArchiveSubfolder = pickDefined(storage.archiveSubfolder, raw.inboxArchiveSubfolder, defaults.inboxArchiveSubfolder);
-  s.inboxStabilizeDelayMs = pickDefined(storage.syncQuietMs, raw.inboxStabilizeDelayMs, defaults.inboxStabilizeDelayMs);
-
-  const noteNaming = raw.noteNaming || {};
-  s.noteFileNameFormatNew = pickDefined(noteNaming.sessionPattern, raw.noteFileNameFormatNew, defaults.noteFileNameFormatNew);
-  s.autoOpenNoteAfterFinish = pickDefined(noteNaming.openAfterFinish, raw.autoOpenNoteAfterFinish, defaults.autoOpenNoteAfterFinish);
-  s.autoRenameWithTitle = pickDefined(noteNaming.renameWithTitle, raw.autoRenameWithTitle, defaults.autoRenameWithTitle);
-  s.consolidatedLayout = pickDefined(noteNaming.consolidatedLayout, raw.consolidatedLayout, defaults.consolidatedLayout);
-  s.sedimentAutoExtract = pickDefined(raw.sedimentAutoExtract, defaults.sedimentAutoExtract);
-
-  const capture = raw.capture || {};
-  s.captureMode = normalizeAudioInputMode(pickDefined(capture.sourceMode, raw.captureMode, defaults.captureMode));
-  s.selectedVirtualDevice = pickDefined(capture.virtualDeviceId, raw.selectedVirtualDevice, defaults.selectedVirtualDevice);
-  s.selectedMicrophoneDevice = pickDefined(capture.microphoneDeviceId, raw.selectedMicrophoneDevice, defaults.selectedMicrophoneDevice);
-  s.enableInterimOutput = pickDefined(capture.liveSegmentsEnabled, raw.enableInterimOutput, defaults.enableInterimOutput);
-  s.segmentIntervalMinutes = pickDefined(capture.segmentMinutes, raw.segmentIntervalMinutes, defaults.segmentIntervalMinutes);
-  s.segmentCacheFolder = pickDefined(storage.segmentCachePath, raw.segmentCacheFolder, defaults.segmentCacheFolder);
-  s.keepSegmentAudioFiles = pickDefined(capture.keepSegmentAudioFiles, raw.keepSegmentAudioFiles, defaults.keepSegmentAudioFiles);
-  s.filterShortRecordings = pickDefined(capture.discardVeryShortRecordings, raw.filterShortRecordings, defaults.filterShortRecordings);
-
-  const speech = raw.speech || {};
-  const savedProviders = speech.providers || raw.transcribeProviders || {};
-  const defaultProviders = DEFAULT_SETTINGS.transcribeProviders;
-  const providerIds = new Set(Object.keys(defaultProviders).concat(Object.keys(savedProviders)));
-  s.transcribeProviders = {};
-  for (const id of providerIds) {
-    s.transcribeProviders[id] = Object.assign({}, defaultProviders[id] || {}, savedProviders[id] || {});
-    // 预设服务的展示性文案（name/hint）与协议字段始终以当前版本默认值为准：
-    // 它们不是用户配置，旧版本落盘的过期文案/协议在升级后会误导用户与路由（如 1.2.3 残留的 MiMo 限额描述）。
-    const dft = defaultProviders[id];
-    if (dft) {
-      if (dft.name) s.transcribeProviders[id].name = dft.name;
-      if (dft.hint) s.transcribeProviders[id].hint = dft.hint;
-      if (dft.protocol) s.transcribeProviders[id].protocol = dft.protocol;
-    }
-  }
-  s.activeTranscribeProvider = pickDefined(speech.activeProviderId, raw.activeTranscribeProvider, defaults.activeTranscribeProvider);
-  s.transcribeEndpoint = pickDefined(speech.compatEndpoint, raw.transcribeEndpoint, defaults.transcribeEndpoint);
-  s.transcribeApiKey = pickDefined(speech.compatApiKey, raw.transcribeApiKey, defaults.transcribeApiKey);
-  s.transcribeModel = pickDefined(speech.compatModel, raw.transcribeModel, defaults.transcribeModel);
-  s.transcribeLanguage = pickDefined(speech.compatLanguage, raw.transcribeLanguage, defaults.transcribeLanguage);
-  s.asrConcurrency = normalizeAsrConcurrency(pickDefined(speech.asrConcurrency, raw.asrConcurrency, defaults.asrConcurrency));
-  if (!savedProviders.siliconflow && (s.transcribeApiKey || s.transcribeModel || s.transcribeEndpoint)) {
-    const sf = s.transcribeProviders.siliconflow;
-    if (sf) {
-      if (s.transcribeApiKey) sf.apiKey = s.transcribeApiKey;
-      if (s.transcribeModel) sf.model = s.transcribeModel;
-      if (s.transcribeEndpoint) sf.endpoint = s.transcribeEndpoint;
-      if (s.transcribeLanguage) sf.language = s.transcribeLanguage;
-    }
-  }
-
-  const composer = raw.composer || {};
-  const promptOverrides = composer.modePromptOverrides || raw.modePromptOverrides || {};
-  s.llmEndpoint = pickNonBlankString(composer.endpoint, raw.llmEndpoint, defaults.llmEndpoint);
-  s.llmApiKey = pickNonBlankString(composer.apiKey, raw.llmApiKey, defaults.llmApiKey);
-  s.llmModel = pickNonBlankString(composer.model, raw.llmModel, defaults.llmModel);
-  s.llmServicePreset = pickDefined(composer.servicePreset, raw.llmServicePreset, defaults.llmServicePreset);
-  s.llmProfiles = normalizeLlmProfiles(composer.profiles || raw.llmProfiles);
-  s.activeLlmProfile = pickDefined(composer.activeProfile, raw.activeLlmProfile, defaults.activeLlmProfile);
-  if (s.activeLlmProfile && !s.llmProfiles.some(p => p.id === s.activeLlmProfile)) s.activeLlmProfile = "";
-  s.polishMode = pickDefined(composer.defaultMode, raw.polishMode, defaults.polishMode);
-  s.polishPromptInterview = pickDefined(promptOverrides.interview, raw.polishPromptInterview, defaults.polishPromptInterview);
-  s.polishPromptMeeting = pickDefined(promptOverrides.meeting, raw.polishPromptMeeting, defaults.polishPromptMeeting);
-  s.polishPromptHuddle = pickDefined(promptOverrides.huddle, raw.polishPromptHuddle, defaults.polishPromptHuddle);
-  s.polishPromptSeminar = pickDefined(promptOverrides.seminar, raw.polishPromptSeminar, defaults.polishPromptSeminar);
-  s.polishPromptMonologue = pickDefined(promptOverrides.monologue, raw.polishPromptMonologue, defaults.polishPromptMonologue);
-  s.polishPromptLearning = pickDefined(promptOverrides.learning, raw.polishPromptLearning, defaults.polishPromptLearning);
-  s.polishPromptRecruit = pickDefined(promptOverrides.recruit, raw.polishPromptRecruit, defaults.polishPromptRecruit);
-  s.briefingStructureLevel = pickDefined(composer.structureLevel, raw.briefingStructureLevel, defaults.briefingStructureLevel);
-  s.repolishPreferencePromptAddendum = pickDefined(composer.repolishPreferencePromptAddendum, raw.repolishPreferencePromptAddendum, defaults.repolishPreferencePromptAddendum);
-  s.repolishPreference = pickDefined(composer.repolishPreference, raw.repolishPreference, defaults.repolishPreference);
-  s.thinkingMode = pickDefined(composer.thinkingMode, raw.thinkingMode, defaults.thinkingMode);
-  const languagePolicy = composer.languagePolicy || raw.languagePolicy || {};
-  s.briefingTranslationMode = pickDefined(languagePolicy.mode, raw.briefingTranslationMode, defaults.briefingTranslationMode);
-  s.briefingTargetLanguage = pickDefined(languagePolicy.targetLanguage, raw.briefingTargetLanguage, defaults.briefingTargetLanguage);
-  s.briefingCustomLanguage = pickDefined(languagePolicy.customLanguage, raw.briefingCustomLanguage, defaults.briefingCustomLanguage);
-  s.briefingKeepOriginalTerms = pickDefined(languagePolicy.keepOriginalTerms, raw.briefingKeepOriginalTerms, defaults.briefingKeepOriginalTerms);
-  s.briefingLanguageInstruction = pickDefined(languagePolicy.extraInstruction, raw.briefingLanguageInstruction, defaults.briefingLanguageInstruction);
-  s.industryProfile = Object.assign({}, defaults.industryProfile, composer.industryProfile || raw.industryProfile || {});
-
-  const presentation = raw.presentation || {};
-  s.autoOpenHtmlReportAfterGenerate = pickDefined(presentation.openHtmlReportAfterGenerate, raw.autoOpenHtmlReportAfterGenerate, defaults.autoOpenHtmlReportAfterGenerate);
-  s.reportBrandName = String(pickDefined(presentation.reportBrandName, raw.reportBrandName, defaults.reportBrandName) || "").trim();
-
-  const vocabulary = raw.vocabulary || {};
-  s.customVocabulary = pickDefined(vocabulary.inlineTerms, raw.customVocabulary, defaults.customVocabulary);
-  s.vocabularyFile = pickDefined(vocabulary.notePath, raw.vocabularyFile, defaults.vocabularyFile);
-  if (obsidian.normalizePath(s.vocabularyFile || "").toLowerCase() === LEGACY_VOCABULARY_FILE.toLowerCase()) {
-    s.vocabularyFile = defaults.vocabularyFile;
-  }
-  s.peopleDirectoryFolder = obsidian.normalizePath(pickDefined(vocabulary.peopleFolder, raw.peopleDirectoryFolder, defaults.peopleDirectoryFolder) || defaults.peopleDirectoryFolder);
-  s.peopleBaseFile = obsidian.normalizePath(pickDefined(vocabulary.peopleBasePath, raw.peopleBaseFile, defaults.peopleBaseFile) || defaults.peopleBaseFile);
-  s.learningCardsFolder = obsidian.normalizePath(pickDefined(vocabulary.learningCardsFolder, raw.learningCardsFolder, defaults.learningCardsFolder) || defaults.learningCardsFolder);
-  s.todoCardsFolder = obsidian.normalizePath(pickDefined(vocabulary.todoCardsFolder, raw.todoCardsFolder, defaults.todoCardsFolder) || defaults.todoCardsFolder);
-  s.peopleContextMode = normalizePeopleContextMode(pickDefined(vocabulary.peopleContextMode, raw.peopleContextMode, defaults.peopleContextMode));
-  s.peopleHotwordsConsentAt = String(pickDefined(vocabulary.peopleHotwordsConsentAt, raw.peopleHotwordsConsentAt, defaults.peopleHotwordsConsentAt) || "");
-  s.peopleSuggestionIgnores = normalizePeopleSuggestionIgnores(pickDefined(vocabulary.peopleSuggestionIgnores, raw.peopleSuggestionIgnores, defaults.peopleSuggestionIgnores));
-  s.peopleSuggestionCache = normalizePeopleSuggestionCache(pickDefined(vocabulary.peopleSuggestionCache, raw.peopleSuggestionCache, defaults.peopleSuggestionCache));
-  s.knowledgeExtractionHistory = normalizeKnowledgeExtractionHistory(pickDefined(vocabulary.extractionHistory, raw.knowledgeExtractionHistory, defaults.knowledgeExtractionHistory));
-
-  const views = raw.views || {};
-  s.lexVoiceBasesFolder = obsidian.normalizePath(pickDefined(views.baseFolder, raw.lexVoiceBasesFolder, defaults.lexVoiceBasesFolder) || defaults.lexVoiceBasesFolder);
-
-  const liveOutline = raw.liveOutline || {};
-  s.enableRealtimeOutline = pickDefined(liveOutline.enabled, raw.enableRealtimeOutline, defaults.enableRealtimeOutline);
-  s.realtimeOutlineDebounceMs = pickDefined(liveOutline.debounceMs, raw.realtimeOutlineDebounceMs, defaults.realtimeOutlineDebounceMs);
-  s.autoOpenOutlineOnRecord = pickDefined(liveOutline.openOnCapture, raw.autoOpenOutlineOnRecord, defaults.autoOpenOutlineOnRecord);
-
-  const dailyNote = raw.dailyNote || {};
-  s.writeDailyMeetingOverview = pickDefined(dailyNote.meetingOverviewEnabled, raw.writeDailyMeetingOverview, defaults.writeDailyMeetingOverview);
-  s.dailyMeetingOverviewHeading = String(pickDefined(dailyNote.meetingOverviewHeading, raw.dailyMeetingOverviewHeading, defaults.dailyMeetingOverviewHeading) || defaults.dailyMeetingOverviewHeading).replace(/^#+\s*/, "").trim() || defaults.dailyMeetingOverviewHeading;
-  s.dailyMeetingOverviewTemplate = String(pickDefined(dailyNote.meetingOverviewTemplate, raw.dailyMeetingOverviewTemplate, defaults.dailyMeetingOverviewTemplate) || "").trim() || defaults.dailyMeetingOverviewTemplate;
-
-  const retryPolicy = raw.retryPolicy || {};
-  s.maxRetries = pickDefined(retryPolicy.maxAttempts, raw.maxRetries, defaults.maxRetries);
-
-  const diagnostics = raw.diagnostics || {};
-  s.diagnosticsLogEnabled = pickDefined(diagnostics.enabled, raw.diagnosticsLogEnabled, defaults.diagnosticsLogEnabled) !== false;
-  s.diagnosticsLogFolder = obsidian.normalizePath(pickDefined(diagnostics.folder, raw.diagnosticsLogFolder, defaults.diagnosticsLogFolder) || defaults.diagnosticsLogFolder);
-
-  const ui = raw.ui || {};
-  s.showFloatingBall = pickDefined(ui.floatingControlEnabled, raw.showFloatingBall, defaults.showFloatingBall);
-  const bubbleSizeRaw = pickDefined(ui.bubbleSize, raw.bubbleSize, defaults.bubbleSize);
-  s.bubbleSize = (bubbleSizeRaw === "medium" || bubbleSizeRaw === "small") ? bubbleSizeRaw : "large";
-  s.floatingBallPos = Object.assign({}, defaults.floatingBallPos, ui.floatingControlPosition || raw.floatingBallPos || {});
-
-  const recruiting = raw.recruiting || {};
-  s.recruitContext = Object.assign({}, defaults.recruitContext, recruiting.context || raw.recruitContext || {});
-  s.recruitAlwaysAskOnStart = pickDefined(recruiting.askBeforeCapture, raw.recruitAlwaysAskOnStart, defaults.recruitAlwaysAskOnStart);
-  s.recruitContextLibrary = Array.isArray(recruiting.contextLibrary)
-    ? recruiting.contextLibrary
-    : (Array.isArray(raw.recruitContextLibrary) ? raw.recruitContextLibrary : []);
-  s.recruitFeatureUnlocked = !!pickDefined(recruiting.unlocked, raw.recruitFeatureUnlocked, defaults.recruitFeatureUnlocked);
-  if (!s.recruitFeatureUnlocked && s.polishMode === "recruit") s.polishMode = defaults.polishMode;
-  // HR 模块路径：空串也算"已定义"，pickDefined 会选中它，故文件夹路径做非空兜底回默认
-  s.recruitJdFolderPath = String(pickDefined(recruiting.jdFolder, raw.recruitJdFolderPath, defaults.recruitJdFolderPath) || "").trim() || "JD";
-  s.recruitResumeFolderPath = String(pickDefined(recruiting.resumeFolder, raw.recruitResumeFolderPath, defaults.recruitResumeFolderPath) || "").trim() || "简历";
-  s.recruitResumeDesensitize = pickDefined(recruiting.desensitize, raw.recruitResumeDesensitize, defaults.recruitResumeDesensitize) !== false;
-  s.recruitHomepagePath = String(pickDefined(recruiting.homepage, raw.recruitHomepagePath, defaults.recruitHomepagePath) || "").trim();
-
-  const updates = raw.updates || {};
-  // updateRepoUrl/Branch/PluginDir/RawBaseUrl 已收编为模块常量 LEXVOICE_UPDATE_*：
-  // 此前 normalize 始终重置为默认值，用户落盘值从未生效过，作为设置项是假象。
-  s.autoCheckUpdates = pickDefined(updates.autoCheck, raw.autoCheckUpdates, defaults.autoCheckUpdates);
-  s.lastUpdateCheckAt = pickDefined(updates.lastCheckedAt, raw.lastUpdateCheckAt, defaults.lastUpdateCheckAt);
-  s.availableUpdate = pickDefined(updates.available, raw.availableUpdate, defaults.availableUpdate);
-  s.lastUpdateError = pickDefined(updates.lastError, raw.lastUpdateError, defaults.lastUpdateError);
-  s.installedUpdateVersion = pickDefined(updates.installedVersion, raw.installedUpdateVersion, defaults.installedUpdateVersion);
-
-  // Prompt 模板管理：每种内置模式各有一个 builtin 模板（prompt 留空表示用内置 MERGE_PROMPTS），
-  // 用户可在此基础上新建变体。从旧的 polishPromptX 字段迁移：
-  // 若旧字段非空且尚无对应 builtin，则保留为 builtin 的覆盖文本
-  const tplBag = isRecord(raw.promptTemplates) ? raw.promptTemplates : {};
-  const activeBag = isRecord(raw.activeTemplateByMode) ? raw.activeTemplateByMode : {};
-  const PROMPT_MODES = ["learning", "interview", "meeting", "seminar", "huddle", "monologue", "recruit"];
-  s.promptTemplates = {};
-  s.activeTemplateByMode = {};
-  for (const m of PROMPT_MODES) {
-    const builtinId = "builtin-" + m;
-    const legacyKey = "polishPrompt" + m.charAt(0).toUpperCase() + m.slice(1);
-    const legacyText = pickDefined(raw[legacyKey], "");
-    // 收集该 mode 下已存在的所有模板
-    const existingForMode = Object.values(tplBag).filter(t => t && t.mode === m);
-    let builtin = existingForMode.find(t => t.id === builtinId);
-    if (!builtin) {
-      builtin = {
-        id: builtinId,
-        mode: m,
-        name: "默认（内置）",
-        prompt: legacyText || "",
-        isBuiltin: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-    } else {
-      // 已有 builtin：尊重保存的字段，但若 prompt 为空且 legacy 有值，迁回
-      if (!builtin.prompt && legacyText) builtin.prompt = legacyText;
-    }
-    s.promptTemplates[builtin.id] = builtin;
-    // 把同 mode 的非 builtin 也合并进来
-    for (const t of existingForMode) {
-      if (!t.id || t.id === builtinId) continue;
-      s.promptTemplates[t.id] = Object.assign(
-        { id: t.id, mode: m, name: t.name || "未命名", prompt: t.prompt || "", isBuiltin: false, createdAt: t.createdAt || new Date().toISOString(), updatedAt: t.updatedAt || new Date().toISOString() },
-        t
-      );
-    }
-    // active id：优先用持久化的，其次 builtin
-    const savedActive = activeBag[m];
-    if (savedActive && s.promptTemplates[savedActive]) s.activeTemplateByMode[m] = savedActive;
-    else s.activeTemplateByMode[m] = builtin.id;
-  }
-  // 把不属于内置模式的模板也保留下来（不丢用户数据）。带 customMode 的模板会成为可直接调用的自定义模式。
-  for (const id of Object.keys(tplBag)) {
-    const t = tplBag[id];
-    if (!t || !t.id) continue;
-    if (!s.promptTemplates[id]) s.promptTemplates[id] = t;
-  }
-  for (const id of Object.keys(s.promptTemplates)) {
-    const t = s.promptTemplates[id];
-    if (!isCustomPromptModeTemplate(t)) continue;
-    if (!t.name) t.name = "自定义提示词";
-    if (!t.baseMode || !MODE_META[t.baseMode] || t.baseMode === "off") t.baseMode = "learning";
-    t.mode = t.id;
-    t.customMode = true;
-    s.activeTemplateByMode[t.id] = t.id;
-  }
-
-  // 快速口述：专用转写服务 + 自定义整理提示词。字段强制成字符串，缺省空串。
-  const quickDictation = raw.quickDictation || {};
-  const qaRaw = quickDictation.asr || raw.quickDictationAsr || {};
-  s.quickDictationAsr = {
-    endpoint: String(qaRaw.endpoint || "").trim(),
-    apiKey: String(qaRaw.apiKey || "").trim(),
-    model: String(qaRaw.model || "").trim(),
-    language: String(qaRaw.language || "").trim(),
-  };
-  s.quickDictationPrompt = String(pickDefined(quickDictation.prompt, raw.quickDictationPrompt, defaults.quickDictationPrompt) || "");
-  const qdTargetRaw = pickDefined(quickDictation.target, raw.quickDictationTarget, defaults.quickDictationTarget);
-  s.quickDictationTarget = qdTargetRaw === "clipboard" ? "clipboard" : "editor";
-
-  return s;
-}
-
-function serializeLexVoiceSettings(s) {
-  return {
-    schemaVersion: SETTINGS_SCHEMA_VERSION,
-    storage: {
-      recordingLibraryPath: s.audioFolder,
-      briefingNotePath: s.mdFolder,
-      meetingMaterialPath: s.meetingMaterialsFolder || DEFAULT_SETTINGS.meetingMaterialsFolder,
-      htmlReportPath: s.htmlReportFolder,
-      inboxPath: s.inboxFolder,
-      autoImportInbox: s.inboxAutoImport,
-      archiveSubfolder: s.inboxArchiveSubfolder,
-      syncQuietMs: s.inboxStabilizeDelayMs,
-      segmentCachePath: s.segmentCacheFolder,
-    },
-    noteNaming: {
-      sessionPattern: s.noteFileNameFormatNew,
-      openAfterFinish: s.autoOpenNoteAfterFinish,
-      renameWithTitle: s.autoRenameWithTitle,
-      consolidatedLayout: s.consolidatedLayout,
-    },
-    capture: {
-      sourceMode: s.captureMode,
-      virtualDeviceId: s.selectedVirtualDevice,
-      microphoneDeviceId: s.selectedMicrophoneDevice,
-      liveSegmentsEnabled: s.enableInterimOutput,
-      segmentMinutes: s.segmentIntervalMinutes,
-      keepSegmentAudioFiles: s.keepSegmentAudioFiles === true,
-      discardVeryShortRecordings: s.filterShortRecordings !== false,
-    },
-    speech: {
-      activeProviderId: s.activeTranscribeProvider,
-      compatEndpoint: s.transcribeEndpoint,
-      compatApiKey: s.transcribeApiKey,
-      compatModel: s.transcribeModel,
-      compatLanguage: s.transcribeLanguage,
-      asrConcurrency: normalizeAsrConcurrency(s.asrConcurrency),
-      providers: s.transcribeProviders || {},
-    },
-    composer: {
-      endpoint: s.llmEndpoint,
-      apiKey: s.llmApiKey,
-      model: s.llmModel,
-      servicePreset: s.llmServicePreset,
-      profiles: normalizeLlmProfiles(s.llmProfiles),
-      activeProfile: s.activeLlmProfile || "",
-      defaultMode: s.polishMode,
-      modePromptOverrides: {
-        interview: s.polishPromptInterview || "",
-        meeting: s.polishPromptMeeting || "",
-        huddle: s.polishPromptHuddle || "",
-        seminar: s.polishPromptSeminar || "",
-        monologue: s.polishPromptMonologue || "",
-        learning: s.polishPromptLearning || "",
-        recruit: s.polishPromptRecruit || "",
-      },
-      structureLevel: s.briefingStructureLevel || "balanced",
-      repolishPreferencePromptAddendum: s.repolishPreferencePromptAddendum || "",
-      repolishPreference: s.repolishPreference || "",
-      thinkingMode: s.thinkingMode || "auto",
-      languagePolicy: {
-        mode: s.briefingTranslationMode || "off",
-        targetLanguage: s.briefingTargetLanguage || "zh-CN",
-        customLanguage: s.briefingCustomLanguage || "",
-        keepOriginalTerms: s.briefingKeepOriginalTerms !== false,
-        extraInstruction: s.briefingLanguageInstruction || "",
-      },
-      industryProfile: s.industryProfile || {},
-    },
-    presentation: {
-      openHtmlReportAfterGenerate: s.autoOpenHtmlReportAfterGenerate !== false,
-      reportBrandName: s.reportBrandName || "",
-    },
-    vocabulary: {
-      inlineTerms: s.customVocabulary || "",
-      notePath: s.vocabularyFile || "",
-      peopleFolder: s.peopleDirectoryFolder || DEFAULT_SETTINGS.peopleDirectoryFolder,
-      peopleBasePath: s.peopleBaseFile || DEFAULT_SETTINGS.peopleBaseFile,
-      learningCardsFolder: s.learningCardsFolder || DEFAULT_SETTINGS.learningCardsFolder,
-      todoCardsFolder: s.todoCardsFolder || DEFAULT_SETTINGS.todoCardsFolder,
-      peopleContextMode: normalizePeopleContextMode(s.peopleContextMode),
-      peopleHotwordsConsentAt: s.peopleHotwordsConsentAt || "",
-      peopleSuggestionIgnores: normalizePeopleSuggestionIgnores(s.peopleSuggestionIgnores),
-      peopleSuggestionCache: normalizePeopleSuggestionCache(s.peopleSuggestionCache),
-      extractionHistory: normalizeKnowledgeExtractionHistory(s.knowledgeExtractionHistory),
-    },
-    views: {
-      baseFolder: s.lexVoiceBasesFolder || DEFAULT_SETTINGS.lexVoiceBasesFolder,
-    },
-    liveOutline: {
-      enabled: s.enableRealtimeOutline,
-      debounceMs: s.realtimeOutlineDebounceMs,
-      openOnCapture: s.autoOpenOutlineOnRecord,
-    },
-    dailyNote: {
-      meetingOverviewEnabled: s.writeDailyMeetingOverview !== false,
-      meetingOverviewHeading: s.dailyMeetingOverviewHeading || DEFAULT_SETTINGS.dailyMeetingOverviewHeading,
-      meetingOverviewTemplate: s.dailyMeetingOverviewTemplate || DEFAULT_SETTINGS.dailyMeetingOverviewTemplate,
-    },
-    retryPolicy: {
-      maxAttempts: s.maxRetries,
-    },
-    diagnostics: {
-      enabled: s.diagnosticsLogEnabled !== false,
-      folder: s.diagnosticsLogFolder || DEFAULT_SETTINGS.diagnosticsLogFolder,
-    },
-    ui: {
-      floatingControlEnabled: s.showFloatingBall,
-      bubbleSize: s.bubbleSize || "large",
-      floatingControlPosition: s.floatingBallPos || {},
-    },
-    recruiting: {
-      context: s.recruitContext || {},
-      askBeforeCapture: s.recruitAlwaysAskOnStart,
-      contextLibrary: Array.isArray(s.recruitContextLibrary) ? s.recruitContextLibrary : [],
-      unlocked: !!s.recruitFeatureUnlocked,
-      jdFolder: s.recruitJdFolderPath || "JD",
-      resumeFolder: s.recruitResumeFolderPath || "简历",
-      desensitize: s.recruitResumeDesensitize !== false,
-      homepage: s.recruitHomepagePath || "",
-    },
-    updates: {
-      autoCheck: s.autoCheckUpdates !== false,
-      lastCheckedAt: s.lastUpdateCheckAt || null,
-      available: s.availableUpdate || null,
-      lastError: s.lastUpdateError || "",
-      installedVersion: s.installedUpdateVersion || "",
-    },
-    quickDictation: {
-      asr: s.quickDictationAsr || { endpoint: "", apiKey: "", model: "", language: "" },
-      prompt: s.quickDictationPrompt || "",
-      target: s.quickDictationTarget === "clipboard" ? "clipboard" : "editor",
-    },
-    promptTemplates: s.promptTemplates || {},
-    activeTemplateByMode: s.activeTemplateByMode || {},
-  };
-}
-
-function extractLexVoiceJobItems(savedData) {
-  const saved = isRecord(savedData) ? savedData : {};
-  if (saved.backgroundJobs && Array.isArray(saved.backgroundJobs.items)) return saved.backgroundJobs.items;
-  if (saved.jobs && Array.isArray(saved.jobs.items)) return saved.jobs.items;
-  if (Array.isArray(saved.queue)) return saved.queue;
-  return [];
-}
-
 
 
 // 更新源固定指向官方仓库。曾是设置项，但 normalize 始终把它们重置为默认值（用户值从未生效），
@@ -3493,6 +3110,9 @@ class QuickDictationController {
     this.startedAt = 0;
     this._stopResolve = null;
     this._starting = false;
+    this._lastRawText = ""; // 上次听写的转写原文（供召回命令）
+    this._mobileStreamNoticeShown = false;
+    this._streamErrorNotified = false;
     this._doneTimer = null; // "已写入" 闪现回落 idle 的计时器
     // 流式听写（WebSocket ASR）：边说边出实时字幕；批量（如 MiMo）走原路径。
     this.streamingClient = null;
@@ -3513,7 +3133,8 @@ class QuickDictationController {
   async start(target) {
     if (this.state !== "idle" || this._starting) return;
     if (this.plugin.recorder && this.plugin.recorder.state !== "idle") {
-      return; // 会议录音中：静默不启，不弹条幅
+      new obsidian.Notice("会议录音中，听写不可用；请先停止录音。", 5000);
+      return;
     }
     this._starting = true; // 同步占位，防麦克风获取期间二次触发起两条流
     try {
@@ -3539,13 +3160,22 @@ class QuickDictationController {
       const s = this._resolveQuickStreaming();
       if (s) {
         // ── 流式听写：连 WebSocket ASR，PCM 推流，onPartial 更新实时字幕 ──
+        this._streamErrorNotified = false; // 每场重置"中途错误只提示一次"
         this.streamingClient = createStreamingTranscriptionClient(s.profile, s.provider, {
           onPartial: (fullText, isFinal, sentenceText) => {
             // 字幕只显示"当前这句"（左对齐自然生长、不狂滚）；全文在结束时由 getFullText() 整段交给 LLM。
             this.liveText = (sentenceText != null ? sentenceText : (fullText || ""));
             try { if (this.plugin.bubble) this.plugin.bubble.scheduleUpdate(); } catch { /* intentionally empty */ }
           },
-          onError: (e) => { console.error("[LexVoice] 听写 streaming error", e); },
+          onError: (e) => {
+            console.error("[LexVoice] 听写 streaming error", e);
+            try { void this.plugin.logDiagnostic("error", "quickdict.stream_error", "听写流式中途错误", { error: (e && e.message) || String(e) }); } catch { /* intentionally empty */ }
+            // 中途错误只提示一次：字幕会停在已到达文本，结束时用 getFullText 兜底继续整理
+            if (!this._streamErrorNotified) {
+              this._streamErrorNotified = true;
+              new obsidian.Notice(`听写流式转写出错：${String((e && e.message) || e).slice(0, 100)}；结束后将用已到达文本继续。`, 8000);
+            }
+          },
           onClosed: () => {},
         });
         // 点击即反馈：先进"聆听"态、显示"连接中…"，避免连接期间看着像"点了没反应"。
@@ -3637,13 +3267,18 @@ class QuickDictationController {
           raw = this.streamingClient.getFullText() || this.liveText || "";
         }
       } catch {
-        raw = this.liveText || "";
+        // finish() 失败也要尽量拿全文：getFullText 含已定稿句子；liveText 只有当前一句，仅作最后兜底
+        try { raw = (this.streamingClient && this.streamingClient.getFullText()) || this.liveText || ""; }
+        catch { raw = this.liveText || ""; }
+        try { void this.plugin.logDiagnostic("warn", "quickdict.stream_finish_failed", "听写流式收尾失败，已用已到达文本兜底", { chars: raw.length }); } catch { /* intentionally empty */ }
       }
       try { if (this.streamingClient && this.streamingClient._safeClose) this.streamingClient._safeClose(); } catch { /* intentionally empty */ }
       this.streamingClient = null;
       this._streaming = false;
       this.liveText = "";
       this._cleanupStream();
+      // 提升转写质量：流式文本也过一遍热词修正（批量路径在 transcribeAudio 内部已做，流式此前漏了）
+      try { raw = applyVocabularyCorrections(raw, await loadVocabularyGroups(this.plugin)); } catch { /* intentionally empty */ }
       await this._finalize(raw, Date.now() - t0);
       return;
     }
@@ -3667,7 +3302,8 @@ class QuickDictationController {
       raw = await transcribeAudio(this.plugin, blob, blob.type || this.mime || "audio/webm", this.asrOverride || undefined);
     } catch (e) {
       console.error("[LexVoice] quick dictation transcribe failed", e);
-      try { void this.plugin.logDiagnostic("error", "quickdict.transcribe_failed", "快速口述转写失败", { error: (e && e.message) || String(e) }); } catch { /* intentionally empty */ }
+      try { void this.plugin.logDiagnostic("error", "quickdict.transcribe_failed", "听写转写失败", { error: (e && e.message) || String(e) }); } catch { /* intentionally empty */ }
+      new obsidian.Notice(`听写转写失败：${String((e && e.message) || e).slice(0, 120)}`, 9000);
       this.anchor = null;
       this._setState("idle");
       return;
@@ -3684,6 +3320,7 @@ class QuickDictationController {
       this._setState("idle"); // 没转出内容：静默回落
       return;
     }
+    this._lastRawText = raw; // 原文可召回：整理成败都留一份（命令「听写 · 复制上次转写原文」）
     // 不先写原文（用户要求）：等结构化整理出来，一次性落整理版；整理失败才兜底落原文，并把失败原因显示出来。
     const toEditor = this.target === "editor" && !!(this.anchor && this.anchor.editor);
     this._setState("cleaning");
@@ -3713,26 +3350,43 @@ class QuickDictationController {
     clean = stripQuickDictationRaw(clean);
     const cleanedOk = !!clean;
     const finalText = clean || raw; // 整理失败兜底用原文
+    let landedOk = false;
     if (toEditor) {
       try {
         this.anchor.editor.replaceRange(finalText, this.anchor.from);
         this.anchor.editor.setCursor(this.anchor.editor.offsetToPos(this.anchor.editor.posToOffset(this.anchor.from) + finalText.length));
-      } catch (e) { console.error("[LexVoice] quick dictation insert failed", e); }
+        landedOk = true;
+      } catch (e) {
+        // 编辑器在说话期间被关闭等：兜底转投剪贴板，绝不静默丢内容
+        console.error("[LexVoice] quick dictation insert failed", e);
+        try {
+          await navigator.clipboard.writeText(finalText);
+          landedOk = true;
+          new obsidian.Notice("编辑器已关闭，听写结果已复制到剪贴板", 6000);
+        } catch { /* intentionally empty */ }
+      }
     } else {
-      try { await navigator.clipboard.writeText(finalText); } catch { /* intentionally empty */ }
+      try { await navigator.clipboard.writeText(finalText); landedOk = true; }
+      catch (e) { console.error("[LexVoice] quick dictation clipboard failed", e); }
     }
     this.anchor = null;
-    // 落字成功后闪现「已写入」态（done），1200ms 后回落 idle。
-    this._setState("done");
-    if (this._doneTimer) { window.clearTimeout(this._doneTimer); this._doneTimer = null; }
-    this._doneTimer = window.setTimeout(() => {
-      this._doneTimer = null;
-      if (this.state === "done") this._setState("idle");
-    }, 1200);
+    if (landedOk) {
+      // 落字成功才闪现「已写入」态（done），1200ms 后回落 idle；失败绝不给假成功信号。
+      this._setState("done");
+      if (this._doneTimer) { window.clearTimeout(this._doneTimer); this._doneTimer = null; }
+      this._doneTimer = window.setTimeout(() => {
+        this._doneTimer = null;
+        if (this.state === "done") this._setState("idle");
+      }, 1200);
+    } else {
+      new obsidian.Notice("听写结果写入失败；可用命令「听写 · 复制上次转写原文」找回内容。", 9000);
+      try { void this.plugin.logDiagnostic("error", "quickdict.land_failed", "听写结果落字失败", { toEditor, chars: finalText.length }); } catch { /* intentionally empty */ }
+      this._setState("idle");
+    }
     console.log(`[LexVoice] 快速口述耗时：转写 ${transcribeMs}ms / 整理 ${cleanMs}ms`, cleanErr || "");
     // 成功：不弹条幅，由胶囊「已写入」态表达；整理失败：弹一条通知 + 写诊断日志（已兜底落原文）。
     if (!cleanedOk) {
-      new obsidian.Notice("大模型转写失败，已置入原文");
+      new obsidian.Notice("大模型整理失败，已置入转写原文");
       try { void this.plugin.logDiagnostic("warn", "quickdict.cleanup_failed", "快速口述整理没生效，已落原文", { reason: cleanErr ? String((cleanErr && cleanErr.message) || cleanErr).slice(0, 200) : "模型返回空", transcribeMs, cleanMs }); } catch { /* intentionally empty */ }
     }
   }
@@ -3747,6 +3401,15 @@ class QuickDictationController {
     const qa = this.plugin.settings.quickDictationAsr;
     if (!qa || !qa.endpoint || !qa.apiKey || !qa.model) return null;
     if (!/^wss?:\/\//i.test(qa.endpoint)) return null;
+    // 移动端无 Node require，打包的 ws 初始化必败、浏览器 WebSocket 又设不了鉴权头——流式必挂。
+    // 提前回退批量路径 + 一次性提示，免得用户看到浏览器级晦涩报错。
+    if (isLexVoiceMobileRuntime()) {
+      if (!this._mobileStreamNoticeShown) {
+        this._mobileStreamNoticeShown = true;
+        new obsidian.Notice("移动端暂不支持流式听写（需要桌面端），已改用整段转写。", 6000);
+      }
+      return null;
+    }
     const host = String(qa.endpoint).toLowerCase();
     let streamProtocol = "dashscope-ws";
     if (host.includes("dashscope")) streamProtocol = "dashscope-ws";
@@ -12953,6 +12616,11 @@ class LexVoicePlugin extends obsidian.Plugin {
 
     this.addCommand({ id: "toggle-recording", name: "开始/停止录音", callback: () => this.toggleRecording() });
     this.addCommand({ id: "quick-dictation-toggle", name: "听写 · 开始/结束", callback: () => { void this.quickDictation.toggle(this.settings.quickDictationTarget || "editor"); } });
+    this.addCommand({ id: "quick-dictation-copy-raw", name: "听写 · 复制上次转写原文", callback: () => {
+      const t = (this.quickDictation && this.quickDictation._lastRawText) || "";
+      if (!t) { new obsidian.Notice("还没有可复制的听写原文"); return; }
+      navigator.clipboard.writeText(t).then(() => new obsidian.Notice("已复制上次听写原文")).catch(() => new obsidian.Notice("复制失败", 5000));
+    }});
     this.addCommand({ id: "pause-resume-recording", name: "暂停/继续录音", callback: () => {
       const s = this.recorder.state;
       if (s === "recording") this.recorder.pause(); else if (s === "paused") this.recorder.resume();
@@ -13859,11 +13527,9 @@ class LexVoicePlugin extends obsidian.Plugin {
 
     const changed = [];
     const skipped = [];
-    // main.js 不在仓库分支（.gitignore，只随 CI 上传到对应版本的 GitHub Release 资产），
-    // 故 apply 时优先从 …/releases/download/<version>/ 取（Release 里 manifest/main.js/styles.css 都有）；
-    // README.md 不是 Release 资产，会自动回落到 raw 分支（它已提交）。这修复"更新 main.js 失败：所有更新源都不可用（404）"。
-    const releaseBase = info.version ? (LEXVOICE_UPDATE_REPO_URL.replace(/\/+$/, "") + "/releases/download/" + info.version) : "";
-    const rawBases = [releaseBase, info.rawBaseUrl].concat(this.getUpdateRawBases()).filter(Boolean);
+    // 版本锁定源优先（见 resolveUpdateVersionedBases）：jsDelivr@tag（国内手机可达；main.js 自 1.12.3 起随发版入库）
+    // → GitHub Release 直连 → ghproxy 镜像。最后才回落 branch raw 源（README 等非 Release 资产靠它）。
+    const rawBases = resolveUpdateVersionedBases(info.version).concat([info.rawBaseUrl]).concat(this.getUpdateRawBases()).filter(Boolean);
 
     // 两阶段，防「版本错位」：① 先把所有文件抓进内存——任一必需文件(manifest/main.js/styles)抓失败就整体放弃、一个字节都不写；
     // ② 写入时把 manifest.json 放最后，main.js/styles 成功落盘后才写 manifest。
@@ -14855,7 +14521,11 @@ class LexVoicePlugin extends obsidian.Plugin {
       }
 
       let onStreamReady = null;
-      if (isStreaming) {
+      if (isStreaming && isLexVoiceMobileRuntime()) {
+        // 移动端无 Node WebSocket（设不了鉴权头），流式必败：不建流式客户端，提前明示。
+        // 录音照常进行，停止时走既有的「流式连接未建立」兜底（音频保留）。
+        new obsidian.Notice("移动端暂不支持流式转写；本次录音会保留音频，请在桌面端使用流式，或切换到分段转写服务。", 9000);
+      } else if (isStreaming) {
         onStreamReady = async (mediaStream) => {
           const sampleRate = activeProfile.streamProtocol && activeProfile.streamProtocol.startsWith("openai-realtime") ? 24000 : 16000;
           const client = createStreamingTranscriptionClient(activeProfile, activeProvider, {
@@ -15265,6 +14935,8 @@ class LexVoicePlugin extends obsidian.Plugin {
         console.error("[LexVoice] streaming finish failed", e);
         text = session.streamingFullText || "";
       }
+      // 提升转写质量：流式整段文本补一遍热词修正（分段批量路径在 transcribeAudio 内部已做，流式此前漏了）
+      try { text = applyVocabularyCorrections(text, await loadVocabularyGroups(this)); } catch { /* intentionally empty */ }
       try { await this.removeLiveTranscriptBlock(session.mdPath, session.id); } catch { /* intentionally empty */ }
       session.streamingClient = null;
     } else if (isStreamingProvider) {
@@ -18446,8 +18118,11 @@ ${source}`;
         const chunkPath = this.getAvailableVaultPath(obsidian.normalizePath(`${cacheFolder}/${chunkName}`));
         if (!chunkPath) throw new Error("无法生成长音频分块缓存路径");
         await this.app.vault.createBinary(chunkPath, await chunkBlob.arrayBuffer());
+        // 内存优化：分块 WAV 已落盘，不在描述符里保留 blob（几十块 × 每块数 MB 会同时驻留内存）；
+        // 转写 worker 届时按 cachePath 惰性读回，同一时刻内存里最多只有并发数个分块。
         chunks.push({
-          blob: chunkBlob,
+          blob: null,
+          cachePath: chunkPath,
           mime: "audio/wav",
           startOffsetMs: start,
           endOffsetMs: end,
@@ -18468,6 +18143,14 @@ ${source}`;
         shouldTranscode,
         error: diagnosticError(e),
       });
+      // MiMo 场景禁止整文件兜底：需要分块的大文件本机又解不了码时，把原始大文件直发 MiMo
+      // 必然在 buildApimimoAsrChunks 里永久失败（仅收 wav/mp3 小块）= 整文件丢失 + 白烧重试。
+      let apimimo = false;
+      try { apimimo = isApimimoAsrProvider(resolveTranscribeProvider(this)); } catch { /* intentionally empty */ }
+      if (shouldChunk && apimimo) {
+        new obsidian.Notice(`「${file.name}」无法本机解码分块（MiMo 只收 wav/mp3 小块）：请先转成 wav/mp3 或改用其它转写服务后重试；本次已跳过，文件未动。`, 12000);
+        return null;
+      }
       new obsidian.Notice(`${shouldTranscode ? "AAC 转码" : "长音频分块"}失败，改用原文件转写：${(e && e.message) || e}`, 8000);
       return single;
     }
@@ -18575,6 +18258,8 @@ ${source}`;
       }
 
       const chunks = await this.prepareImportTranscriptionChunks(file, blob, durationMs, sessionStamp, i);
+      // null = 无法分块且直发必败（MiMo 解码失败场景）：跳过该文件，提示已在 prepare 内给出，文件未动。
+      if (!chunks) continue;
       const fileDurationMs = chunks.length
         ? Math.max(Number(durationMs) || 0, chunks[chunks.length - 1].endOffsetMs || 0)
         : (Number(durationMs) || 0);
@@ -18589,10 +18274,33 @@ ${source}`;
         const endOffset = cumOffsetMs + (chunk.endOffsetMs || 0);
         const isFinal = i === paths.length - 1 && c === chunks.length - 1;
 
-        let text = ""; let err = null;
+        let text = ""; let err = null; let softEmpty = false;
+        let chunkBlob = chunk.blob;
         try {
-          text = await transcribeImportAudioChunk(this, chunk.blob, chunk.mime || mime, asrConcurrency);
-          if (chunk.cleanupPath) await this.maybeDeleteSegmentCacheFile(chunk.cleanupPath);
+          if (!chunkBlob && chunk.cachePath) {
+            // 惰性加载：分块 WAV 已落盘 segment-cache，按需读回（与 readVaultAudioBlob 同一读盘习语），
+            // 避免长音频的全部分块 blob 同时驻留内存。
+            const cacheFile = this.app.vault.getAbstractFileByPath(obsidian.normalizePath(chunk.cachePath));
+            if (!(cacheFile instanceof obsidian.TFile)) throw new Error(`分块缓存不存在：${chunk.cachePath}`);
+            chunkBlob = new Blob([await this.app.vault.readBinary(cacheFile)], { type: chunk.mime || "audio/wav" });
+          }
+          text = await transcribeImportAudioChunk(this, chunkBlob, chunk.mime || mime, asrConcurrency);
+          const chunkDurMs = (Number(chunk.endOffsetMs) || 0) - (Number(chunk.startOffsetMs) || 0);
+          const durationKnownShort = chunkDurMs > 0 && chunkDurMs < 30 * 1000;
+          if (!String(text || "").trim() && !durationKnownShort) {
+            // 空结果软失败：≥30 秒（或时长未知）的块拿到 HTTP 200 但无文字，按转写失败对待——
+            // 保留缓存 WAV、进重试队列、留痕；否则整块内容被静默标成"无内容"且缓存被删 = 不可恢复丢段。
+            softEmpty = true;
+            err = new Error("转写返回空结果（服务 HTTP 200 但无文字）");
+            await this.logDiagnostic("warn", "asr.import_chunk_empty", "导入音频分块转写返回空结果", {
+              chunkIndex: c,
+              chunkCount: chunks.length,
+              startOffsetMs: startOffset,
+              endOffsetMs: endOffset,
+            });
+          } else if (chunk.cleanupPath) {
+            await this.maybeDeleteSegmentCacheFile(chunk.cleanupPath);
+          }
         } catch (e) {
           err = e;
           console.error(e);
@@ -18602,14 +18310,14 @@ ${source}`;
             audioName: file.name,
             chunkName: chunk.retryAudioName,
             mime: chunk.mime || mime,
-            size: chunk.blob && chunk.blob.size,
+            size: chunkBlob && chunkBlob.size,
             startOffsetMs: startOffset,
             endOffsetMs: endOffset,
             asrConcurrency,
             error: diagnosticError(e),
           });
         }
-        return { chunk, startOffset, endOffset, isFinal, text, err };
+        return { chunk, startOffset, endOffset, isFinal, text, err, softEmpty };
       });
 
       for (let c = 0; c < chunkResults.length; c++) {
@@ -18652,7 +18360,9 @@ ${source}`;
           "",
           segTitle,
           "",
-          result.err ? `_[转写失败（已进入重试队列）：${result.err.message || result.err}]_` : (result.text || "_[此段无内容]_"),
+          result.err
+            ? (result.softEmpty ? "_[转写失败（空结果，已进入重试队列）]_" : `_[转写失败（已进入重试队列）：${result.err.message || result.err}]_`)
+            : (result.text || "_[此段无内容]_"),
           "",
         ].join("\n");
         await this.insertBeforeSegmentsEnd(session.mdPath, block, session.id);
@@ -19009,23 +18719,61 @@ ${source}`;
   async retryTranscribeTask(task) {
     const audio = await this.readTranscribeTaskAudioBlob(task);
     const text = await transcribeAudio(this, audio.blob, audio.blob.type || "audio/wav");
-    const replacementText = text || "_[此段暂无有效转写]_";
-    if (!text) {
-      await this.logDiagnostic("warn", "queue.transcribe_empty_result", "转写重试返回空文本，已按空片段处理", {
+    if (!String(text || "").trim()) {
+      // 重试仍为空 = 失败（不再替换成"暂无有效转写"并删缓存了事）：
+      // 抛错让队列按失败记录 + 计重试次数，缓存音频保留，后续还能继续重试。
+      await this.logDiagnostic("warn", "queue.transcribe_empty_result", "转写重试返回空文本，视作失败继续排队", {
         mdPath: task.mdPath || "",
         audioName: task.audioName || "",
         startOffsetMs: task.startOffsetMs,
         endOffsetMs: task.endOffsetMs,
       });
+      throw new Error("转写重试返回空结果（服务 HTTP 200 但无文字）");
     }
+    let replaced = false;
     const mdFile = this.app.vault.getAbstractFileByPath(task.mdPath);
     if (mdFile instanceof obsidian.TFile) {
       const cur = await this.app.vault.read(mdFile);
-      const failMark = /_\[转写失败(?:（已进入重试队列）)?：[^\]]*\]_/;
-      const next = cur.replace(failMark, replacementText);
-      if (next !== cur) await this.app.vault.modify(mdFile, next);
+      const failMark = /_\[转写失败（空结果，已进入重试队列）\]_|_\[转写失败(?:（已进入重试队列）)?：[^\]]*\]_/;
+      const next = cur.replace(failMark, text);
+      if (next !== cur) {
+        await this.app.vault.modify(mdFile, next);
+        replaced = true;
+      }
     }
     if (!audio.recovered) await this.maybeDeleteSegmentCacheFile(task.audioPath, task.id);
+    if (replaced) this.maybeAutoRepolishAfterTranscribeRetry(task, mdFile);
+  }
+
+  // 补转写成功后自动刷新润色正文：当本次成功的任务是该纪要最后一个待补的 transcribe 任务时，
+  // 自动触发一次"重新整理"，让正文吸收补回的文字（否则正文永远停留在缺段版本，用户须手动重整理）。
+  maybeAutoRepolishAfterTranscribeRetry(task, mdFile) {
+    if (!(mdFile instanceof obsidian.TFile)) return;
+    const mdNorm = obsidian.normalizePath(String(task.mdPath || ""));
+    if (!mdNorm) return;
+    const tasks = this.queue && typeof this.queue.snapshot === "function"
+      ? this.queue.snapshot()
+      : ((this.queue && this.queue.tasks) || []);
+    // 当前任务成功后才会被 processOne 移除，此刻仍在队列里——按 id 排除自身；
+    // 队列顺序执行，只有清掉同一笔记最后一个失败段的那次调用会看到 0 个剩余 → 天然防止重复触发。
+    const remaining = tasks.filter(t => t && t.type === "transcribe" && t.id !== task.id
+      && obsidian.normalizePath(String(t.mdPath || "")) === mdNorm);
+    if (remaining.length) return;
+    new obsidian.Notice(`「${mdFile.basename}」全部失败段已补转写，正在重新整理正文…`, 8000);
+    const mode = this.detectModeFromMarkdown(mdFile) || getEffectivePolishMode(this.settings, this.settings.polishMode);
+    // fire-and-forget：不阻塞队列循环
+    void (async () => {
+      try {
+        await this.repolishMarkdownFile(mdFile, mode, null);
+      } catch (e) {
+        try {
+          await this.logDiagnostic("error", "queue.auto_repolish_failed", "补转写后自动重新整理失败", {
+            mdPath: mdNorm,
+            error: diagnosticError(e),
+          });
+        } catch { /* intentionally empty */ }
+      }
+    })();
   }
 
   // 把队列里所有指向 oldPath 的任务迁移到 newPath，并持久化。

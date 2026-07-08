@@ -154,6 +154,13 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     return false;
   }
 
+  createSettingsSubhead(parent, title, desc) {
+    const el = parent.createDiv({ cls: "lexvoice-settings-subhead" });
+    el.createDiv({ cls: "lexvoice-settings-subhead-title", text: title });
+    if (desc) el.createDiv({ cls: "lexvoice-settings-subhead-desc", text: desc });
+    return el;
+  }
+
   handleSettingsTabClick(tabId) {
     if (tabId !== "advanced") {
       this._advancedTapCount = 0;
@@ -868,14 +875,16 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
   }
 
   renderApiSchemeSelector(c) {
-    new obsidian.Setting(c).setName("API 方案").setHeading();
+    new obsidian.Setting(c)
+      .setName("API 方案")
+      .setDesc("把「转写服务 + AI 整理」整套存成方案，顶部一键切换、检测连通性。")
+      .setHeading();
     const schemes = Array.isArray(this.plugin.settings.llmProfiles) ? this.plugin.settings.llmProfiles : [];
     const activeId = this.plugin.settings.activeLlmProfile || "";
 
     // 自定义布局（不用 obsidian.Setting 的左名右控件，避免下拉+3按钮+长说明挤成一团）：
     // 说明整行 → 下拉(占主) + 按钮同一行 → 激活态提示整行淡字。
     const block = c.createDiv({ cls: "lexvoice-scheme-block" });
-    block.createDiv({ cls: "lexvoice-scheme-desc", text: "把「转写服务 + AI 整理」整套存成方案，顶部一键切换、检测连通性。" });
 
     const controls = block.createDiv({ cls: "lexvoice-scheme-controls" });
     const sel = controls.createEl("select", { cls: "dropdown lexvoice-scheme-select" });
@@ -950,9 +959,13 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     // ===== 顶部 · API 方案：把「转写 + AI 整理」存成一套，一键切换/检测 =====
     this.renderApiSchemeSelector(c);
 
-    new obsidian.Setting(c).setName("纪要转写").setHeading();
+    new obsidian.Setting(c)
+      .setName("语音输入")
+      .setDesc("纪要转写负责长录音、会议和音频导入；即时听写负责短语音输入，可默认复用纪要转写服务。")
+      .setHeading();
 
     this.renderDataRiskNotice(c, "is-api");
+    this.createSettingsSubhead(c, "纪要转写", "用于会议录音、长音频导入和笔记正文生成前的基础转写。");
 
     new obsidian.Setting(c).setName("转写服务")
       .setDesc("选择当前用于语音转写的服务。下方只显示所选服务的配置项。")
@@ -1072,9 +1085,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     }
     const qa = this.plugin.settings.quickDictationAsr;
 
-    new obsidian.Setting(c).setName("即时听写").setHeading();
-    const quickHint = c.createDiv({ cls: "setting-item-description lexvoice-section-hint" });
-    quickHint.setText("听写：录一小段语音，转写后由 AI 整理成结构化文本，落到光标或剪贴板。可为它单独指定转写服务和整理提示词。");
+    this.createSettingsSubhead(c, "即时听写", "录一小段语音，转写后由 AI 整理成结构化文本，落到光标或剪贴板。可单独指定转写服务和整理提示词。");
 
     const fillBailianStream = async (model) => {
       qa.endpoint = "wss://dashscope.aliyuncs.com/api-ws/v1/inference";
@@ -1128,13 +1139,29 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       await this.plugin.saveSettings();
     });
     quickPromptSetting.addButton(b => b.setButtonText("恢复默认").onClick(async () => {
-      this.plugin.settings.quickDictationPrompt = QUICK_DICTATION_DEFAULT_TEMPLATE;
-      quickPromptTa.value = QUICK_DICTATION_DEFAULT_TEMPLATE;
+      // 写回空串而非默认全文快照：空 = 跟随内置默认，插件升级改进模板时自动生效；
+      // 存快照会把用户永久冻结在旧版模板上（textarea 的 placeholder 已展示当前默认全文）。
+      this.plugin.settings.quickDictationPrompt = "";
+      quickPromptTa.value = "";
       await this.plugin.saveSettings();
-      new obsidian.Notice("已恢复默认听写整理提示词");
+      new obsidian.Notice("已恢复为内置默认（留空即自动跟随模板更新）");
     }));
 
-    new obsidian.Setting(c).setName("AI 整理服务").setHeading();
+    new obsidian.Setting(c).setName("听写落点")
+      .setDesc("整理后的文本落到哪：插入光标（Obsidian 有活动笔记时插入光标处，否则自动转剪贴板）/ 总是复制到剪贴板。")
+      .addDropdown(d => d
+        .addOption("editor", "插入光标（智能回退剪贴板）")
+        .addOption("clipboard", "总是复制到剪贴板")
+        .setValue(this.plugin.settings.quickDictationTarget === "clipboard" ? "clipboard" : "editor")
+        .onChange(async v => {
+          this.plugin.settings.quickDictationTarget = v === "clipboard" ? "clipboard" : "editor";
+          await this.plugin.saveSettings();
+        }));
+
+    new obsidian.Setting(c)
+      .setName("AI 整理")
+      .setDesc("用于纪要整理、问一问、沉淀、招聘提纲、听写清理、重整和翻译。")
+      .setHeading();
     // 「已保存配置」已升级为顶部「API 方案」（同时含转写 + AI 整理），不再在此处单列 LLM-only 版本。
 
     const activeLlmPresetId = getActiveLlmServicePresetId(this.plugin.settings);

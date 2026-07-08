@@ -7,6 +7,7 @@ export class DashScopeStreamingClient {
     this.endpoint = opts.endpoint || "wss://dashscope.aliyuncs.com/api-ws/v1/inference";
     this.apiKey = opts.apiKey;
     this.model = opts.model || "paraformer-realtime-v2";
+    this.language = String(opts.language || "").trim().toLowerCase();
     this.sampleRate = opts.sampleRate || 16000;
     this.onPartial = opts.onPartial || (() => { /* intentionally empty */ });
     this.onError = opts.onError || ((e) => console.error("[DashScopeStream]", e));
@@ -48,7 +49,8 @@ export class DashScopeStreamingClient {
             parameters: {
               format: "pcm", sample_rate: this.sampleRate,
               disfluency_removal_enabled: false,
-              language_hints: ["zh", "en"],
+              // 明确语种能提升准确率（官方文档）：用户设置了 zh/en/ja 就单一语种，否则中英混合兜底
+              language_hints: (this.language === "zh" || this.language === "en" || this.language === "ja") ? [this.language] : ["zh", "en"],
             },
             input: {},
           },
@@ -246,7 +248,7 @@ export class OpenAIRealtimeTranscriptionClient {
         this.closed = true;
         // 连接在 task-started 之前就被关闭（密钥无效 / 模型未开通 / 地址错误等）→ 让 connect() 拒绝，
         // 否则 Promise 既不 resolve 也不 reject，start() 会永久挂起、按钮彻底失灵。
-        if (!resolved) { resolved = true; reject(new Error("连接被服务端关闭：请检查密钥是否有效、Fun-ASR/Paraformer 是否已开通、地址是否为 wss://…/api-ws/v1/inference")); }
+        if (!resolved) { resolved = true; reject(new Error("连接被服务端关闭：请检查 OpenAI API Key 是否有效、账户是否有 Realtime 权限、地址是否为 wss://api.openai.com/v1/realtime")); }
         this.onClosed({ finalText: this.getFullText() });
       };
       if (typeof this.ws.on === "function") {
@@ -387,6 +389,8 @@ export class OpenAIRealtimeTranslationClient {
       };
       const onClose = () => {
         this.closed = true;
+        // 与另两个客户端同款守卫：open 前被关必须 reject，否则 connect() 永久挂起、调用方按钮失灵。
+        if (!resolved) { resolved = true; reject(new Error("连接被服务端关闭：请检查 OpenAI API Key 是否有效、账户是否有 Realtime 翻译权限")); }
         this.onClosed({
           finalText: this.getFullText(),
           sourceText: this.getSourceText(),

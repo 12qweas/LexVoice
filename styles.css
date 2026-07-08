@@ -262,20 +262,21 @@
 
 /* 快速口述：麦克风入口，跟 doc 按钮同款轻 accent tint，落在悬浮窗里不突兀 */
 /* ══════════════════════════════════════════════════════════════════════════
-   即时转写胶囊（Rosé Pine Dawn 硬编码调色板 · 由设计负责人选定，不走 Obsidian 主题变量）
+   即时转写胶囊：配色走 Obsidian 主题变量，跟随 Style Settings / 主题（含深色）。
+   语义色收在 --rp-* 里（命名沿用历史，值已换成主题变量），改这里即全联动。
    状态：is-qd-idle / is-qd-listening / is-qd-processing / is-qd-done
    .el 跨 render 持久 → 宽度形变过渡有效；子节点每次重建 → 按钮滑移编排不过渡（可接受）。
    ══════════════════════════════════════════════════════════════════════════ */
 .lexvoice-bubble.is-qd {
-  --rp-base: #faf4ed;
-  --rp-surface: #fffaf3;
-  --rp-text: #575279;
-  --rp-subtle: #797593;
-  --rp-love: #b4637a;
-  --rp-iris: #907aa9;
-  --rp-foam: #56949f;
-  --rp-border: #eaddd4;
-  --rp-ghost-border: #e6d9cf;
+  --rp-base: var(--background-primary);
+  --rp-surface: var(--background-secondary);
+  --rp-text: var(--text-normal);
+  --rp-subtle: var(--text-muted);
+  --rp-love: var(--interactive-accent);
+  --rp-iris: var(--interactive-accent);
+  --rp-foam: var(--color-green);
+  --rp-border: var(--background-modifier-border);
+  --rp-ghost-border: var(--background-modifier-border);
   display: block;
   position: relative;
   box-sizing: border-box;
@@ -288,7 +289,7 @@
   border: 1px solid var(--rp-border);
   border-radius: 999px;
   color: var(--rp-text);
-  box-shadow: 0 1px 2px rgba(87, 82, 121, 0.05), 0 14px 30px -14px rgba(87, 82, 121, 0.32);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 14px 30px -14px rgba(0, 0, 0, 0.28);
   transition: width 0.38s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .lexvoice-bubble.is-qd.is-qd-idle { width: 152px; }
@@ -321,7 +322,7 @@
 }
 .lexvoice-bubble.is-qd .lexvoice-qd-locate { left: 8px; }
 .lexvoice-bubble.is-qd .lexvoice-qd-mic { left: 104px; }
-.lexvoice-bubble.is-qd .lexvoice-qd-ghost:hover { background: #f2e9e1; }
+.lexvoice-bubble.is-qd .lexvoice-qd-ghost:hover { background: var(--background-modifier-hover); }
 .lexvoice-bubble.is-qd .lexvoice-qd-ghost svg {
   width: 17px;
   height: 17px;
@@ -357,11 +358,11 @@
   border: 0;
   border-radius: 50%;
   background: var(--rp-love);
-  color: #fffaf3;
+  color: var(--text-on-accent);
   cursor: pointer;
   line-height: 0;
   z-index: 2;
-  box-shadow: 0 6px 14px -5px rgba(180, 99, 122, 0.6);
+  box-shadow: 0 6px 14px -5px color-mix(in srgb, var(--interactive-accent) 55%, transparent);
   transition: transform 0.15s ease;
 }
 .lexvoice-bubble.is-qd.is-qd-idle .lexvoice-qd-wave { left: 56px; }
@@ -372,7 +373,7 @@
   min-width: 19px;
   min-height: 19px;
   stroke-width: 2;
-  color: #fffaf3;
+  color: var(--text-on-accent);
 }
 
 /* 声波涟漪（仅 listening）：追随波形按钮，藏在其后 */
@@ -454,7 +455,7 @@
   flex: 0 0 18px;
   margin-right: 9px;
   border-radius: 999px;
-  border: 2.4px solid rgba(144, 122, 169, 0.3);
+  border: 2.4px solid color-mix(in srgb, var(--interactive-accent) 28%, transparent);
   border-top-color: var(--rp-iris);
   animation: lexvoice-qd-spin 0.8s linear infinite;
 }
@@ -476,7 +477,7 @@
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: rgba(86, 148, 159, 0.16);
+  background: color-mix(in srgb, var(--color-green) 18%, transparent);
   line-height: 0;
 }
 .lexvoice-bubble.is-qd .lexvoice-qd-check svg {
@@ -10951,7 +10952,7 @@ select.lexvoice-rcx-in.dropdown {
 .lexvoice-scheme-select {
   flex: 1 1 220px;
   min-width: 180px;
-  max-width: 380px;
+  max-width: none;
 }
 .lexvoice-scheme-btns {
   display: flex;
@@ -11690,6 +11691,25 @@ select.lexvoice-rcx-in.dropdown {
 
 .lexvoice-settings-section-body > .setting-item:last-child {
   border-bottom: 0;
+}
+
+.lexvoice-settings-subhead {
+  padding: var(--size-4-3) 0 var(--size-2-2);
+}
+
+.lexvoice-settings-subhead-title {
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+  line-height: var(--line-height-tight);
+}
+
+.lexvoice-settings-subhead-desc {
+  max-width: 72ch;
+  margin-top: var(--size-2-1);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.45;
 }
 
 .lexvoice-settings-tabs {
