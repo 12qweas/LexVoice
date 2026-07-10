@@ -64,7 +64,8 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     containerEl.empty();
 
     const tabs = this.getVisibleSettingsTabs();
-    const tabBar = containerEl.createDiv({ cls: "lexvoice-settings-tabs" });
+    const tabShell = containerEl.createDiv({ cls: "lexvoice-settings-tabs-shell" });
+    const tabBar = tabShell.createDiv({ cls: "lexvoice-settings-tabs" });
     for (const tab of tabs) {
       const btn = tabBar.createEl("button", { text: tab.label });
       if (this.activeTab === tab.id) btn.addClass("is-active");
@@ -133,25 +134,18 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       if (isHint) next.remove();
 
       let node = details.nextElementSibling;
-      while (node && !(node.classList && node.classList.contains("setting-item-heading") && !this.shouldMergeSettingsHeading(node))) {
+      while (node && !(node.classList && node.classList.contains("setting-item-heading"))) {
         const current = node;
         node = node.nextElementSibling;
-        if (current.classList && current.classList.contains("setting-item-heading")) {
-          current.remove();
-          continue;
-        }
         body.appendChild(current);
+      }
+      for (const item of Array.from(body.children || [])) {
+        if (!item.classList || !item.classList.contains("setting-item")) continue;
+        const control = item.querySelector(".setting-item-control");
+        if (!control || control.children.length === 0) item.classList.add("is-info-only");
       }
       sectionIndex++;
     }
-  }
-
-  shouldMergeSettingsHeading(heading) {
-    if (!heading) return false;
-    const titleEl = heading.querySelector && heading.querySelector(".setting-item-name");
-    const title = ((titleEl && titleEl.textContent) || heading.textContent || "").trim();
-    if (this.activeTab === "api" && title === "当前转写服务") return true;
-    return false;
   }
 
   createSettingsSubhead(parent, title, desc) {
@@ -220,8 +214,8 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
 
   renderDataRiskNotice(parent, variant = "") {
     const cls = ["lexvoice-risk-notice", variant].filter(Boolean).join(" ");
-    const box = parent.createDiv({ cls });
-    box.createDiv({ cls: "lexvoice-risk-title", text: "数据与云端 API 风险提示" });
+    const box = parent.createEl("details", { cls });
+    box.createEl("summary", { cls: "lexvoice-risk-title", text: "数据与云端 API" });
     box.createDiv({
       cls: "lexvoice-risk-body",
       text: "LexVoice 没有自有云端存储，也不会把录音上传到 LexVoice 服务器；录音文件保存在用户选择的本地 Obsidian 库路径。转写和 AI 整理时，音频、转写文本和提示词会发送到当前配置的云端 API 或本地模型。敏感内容建议使用本地转写和本地大模型，避免通过云端 API 处理涉密、隐私、客户资料、医疗、法务、人事等信息。",
@@ -365,7 +359,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     titleLine.createDiv({ cls: "lexvoice-home-version", text: this.plugin.manifest.version || "" });
     head.createDiv({
       cls: "lexvoice-home-summary",
-      text: "在 Obsidian 桌面端完成录音、转写与 AI 整理：支持后台录制、流式或切片转写，自动按业务模式整理为可检索的 Markdown 纪要。配置一个语音转写服务即可使用；如需自动生成结构化纪要、待办与翻译，再配置一个大模型服务。",
+      text: "在 Obsidian 桌面端完成录音、转写与 AI 整理：支持后台录制、流式或切片转写，自动按业务模式整理为可检索的 Markdown 纪要。配置纪要转写服务即可使用；如需结构化纪要、待办与翻译，再配置 AI 整理服务。",
     });
     const primary = head.createDiv({ cls: "lexvoice-home-actions" });
     const apiBtn = primary.createEl("button", { text: "配置 API" });
@@ -381,7 +375,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       new obsidian.Notice("已切换为入门连接配置：硅基流动转写 + 硅基流动大模型服务。请填写访问密钥和模型标识后测试连接。", 7000);
       jump("api");
     };
-    const aiBtn = primary.createEl("button", { text: hasLlm ? "AI 整理设置" : "配置大模型" });
+    const aiBtn = primary.createEl("button", { text: hasLlm ? "AI 整理设置" : "配置 AI 整理" });
     aiBtn.onclick = () => jump(hasLlm ? "ai" : "api");
     const panelBtn = primary.createEl("button", { text: "打开实时纪要面板" });
     panelBtn.onclick = () => this.plugin.openOutlineView();
@@ -425,21 +419,21 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     const prepGrid = prep.createDiv({ cls: "lexvoice-home-prep-grid" });
     const prepItems = [
       {
-        name: "语音转写服务",
+        name: "纪要转写服务",
         need: "必填",
         price: "云端付费 / 本地免费",
         desc: "将录音转换为原始文字。可选择云端转写服务或本地 Whisper、SenseVoice 等服务；对数据本地化有要求时优先考虑本地部署。",
-        action: "配置转写服务",
+        action: "配置纪要转写",
         target: "api",
         status: hasSpeechProvider ? "已配置" : "未配置",
         statusClass: hasSpeechProvider ? "is-ready" : "is-required",
       },
       {
-        name: "大模型服务（LLM）",
+        name: "AI 整理服务（LLM）",
         need: "推荐",
         price: "按量付费",
         desc: "将原始转写整理为会议纪要、待办或访谈记录。未配置时仅保留转写文本，不会进行结构化整理。",
-        action: "配置大模型服务",
+        action: "配置 AI 整理",
         target: "api",
         status: hasLlm ? "已配置" : "未配置",
         statusClass: hasLlm ? "is-ready" : "is-required",
@@ -476,27 +470,6 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       actions.createDiv({ cls: "lexvoice-home-status " + item.statusClass, text: item.status });
       const btn = actions.createEl("button", { text: item.action });
       btn.onclick = () => jump(item.target);
-    }
-
-    const route = page.createDiv({ cls: "lexvoice-home-block" });
-    route.createEl("h3", { text: "推荐配置路径" });
-    const routeRows = [
-      ["必填", "配置语音转写", "确保单次录音可顺利完成转写。保存后在 API 页执行连通性测试；云端服务需提供访问密钥，本地服务需提前启动。", hasSpeechProvider ? "已配置" : "去配置", "api"],
-      ["推荐", "配置大模型服务", "用于生成会议纪要、标题、待办、翻译及优化自定义提示词。未配置时 LexVoice 仅保留原始转写。", hasLlm ? "已配置" : "去配置", "api"],
-      ["建议", "确认保存路径与音频输入方式", "默认录音保存于 LexVoice/录音，纪要保存于 LexVoice/转写纪要。学习视频或会议音频建议先配置「电脑音频输入 + 真实扬声器/耳机监听」。", "去设置", "general"],
-    ];
-    const BADGE_CLASS = {
-      "必填": "is-required",
-      "推荐": "is-recommended",
-      "建议": "is-suggested",
-    };
-    for (const [badge, name, desc, btnText, target] of routeRows) {
-      const row = new obsidian.Setting(route)
-        .setName(name)
-        .setDesc(desc);
-      const cls = ["lexvoice-home-row-badge", BADGE_CLASS[badge] || ""].filter(Boolean).join(" ");
-      row.nameEl.createSpan({ cls, text: badge });
-      row.addButton((btn) => btn.setButtonText(btnText).onClick(() => jump(target)));
     }
 
     const better = page.createDiv({ cls: "lexvoice-home-block" });
@@ -634,13 +607,6 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     const card = c.createDiv({ cls: "lexvoice-audio-input-card" });
 
     const head = card.createDiv({ cls: "lexvoice-audio-input-head" });
-    const copy = head.createDiv({ cls: "lexvoice-audio-input-copy" });
-    copy.createDiv({ cls: "lexvoice-audio-input-title", text: "音频输入" });
-    copy.createDiv({
-      cls: "lexvoice-audio-input-desc",
-      text: "先选录音来源；混合录音时请再指定本人说话用的麦克风，避免误用虚拟声卡导致录不到人声。",
-    });
-
     const actions = head.createDiv({ cls: "lexvoice-audio-input-actions" });
     this.createAudioInputButton(actions, "自动推荐（可再调整）", async () => {
       await this.autoConfigureAudioInput();
@@ -704,14 +670,20 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       void this.populateAudioInputVirtualSelect(vcSelect, vcHint);
     }
 
-    const warning = card.createDiv({ cls: "lexvoice-audio-input-warning" });
-    warning.setText("「可能是虚拟/远程」仅是提示，不限制选择；麦克风名称恰好含这类词的，照常选用即可。录音前可用「设备检测」确认音量条会动。");
-
     this.diagResultEl = card.createDiv({ cls: "lexvoice-diag-result lexvoice-audio-input-diag" });
   }
 
   renderGeneral(c) {
+    new obsidian.Setting(c)
+      .setName("音频输入")
+      .setDesc("选择录音来源和实际输入设备。混合录音时请明确指定本人说话使用的麦克风。")
+      .setHeading();
     this.renderAudioInputSettings(c);
+
+    new obsidian.Setting(c)
+      .setName("文件与命名")
+      .setDesc("设置新录音、纪要和会中材料的保存位置，以及新纪要的文件名格式。")
+      .setHeading();
 
     new obsidian.Setting(c).setName("LexVoice 录音文件夹")
       .setDesc("Obsidian 库内的相对路径。录音文件默认保存到 LexVoice/录音，可按需要改成其他位置。修改后仅影响新文件，已有文件不会自动迁移。")
@@ -740,6 +712,11 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     new obsidian.Setting(c).setName("纪要文件名格式")
       .setDesc("每次录音生成一篇独立纪要。用日期占位符命名：YYYY 年、MM 月、DD 日、HH 时、mm 分，例如 YYYY-MM-DD HHmm 会生成「2026-06-10 1830」。写法与 Obsidian 日记插件相同。")
       .addText(t => t.setValue(this.plugin.settings.noteFileNameFormatNew).onChange(async v => { this.plugin.settings.noteFileNameFormatNew = v; await this.plugin.saveSettings(); }));
+
+    new obsidian.Setting(c)
+      .setName("完成后动作")
+      .setDesc("控制纪要完成后的打开行为，以及是否把会议概要和待办写入当日日记。")
+      .setHeading();
 
     new obsidian.Setting(c).setName("完成后自动打开纪要")
       .addToggle(t => t.setValue(this.plugin.settings.autoOpenNoteAfterFinish).onChange(async v => { this.plugin.settings.autoOpenNoteAfterFinish = v; await this.plugin.saveSettings(); }));
@@ -778,6 +755,11 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       await this.plugin.saveSettings();
     });
 
+    new obsidian.Setting(c)
+      .setName("悬浮控制")
+      .setDesc("设置桌面悬浮气泡的显示状态和尺寸。")
+      .setHeading();
+
     new obsidian.Setting(c).setName("显示悬浮气泡")
       .setDesc("开启后常驻显示，可拖动到任意位置；关闭后隐藏。")
       .addToggle(t => t.setValue(this.plugin.settings.showFloatingBall).onChange(async v => {
@@ -813,8 +795,9 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     if (!p.model) missing.push("模型名称");
     if (needsKey && !p.apiKey) missing.push("访问密钥");
 
-    const panel = c.createDiv({ cls: "lexvoice-provider-panel" });
-    const head = panel.createDiv({ cls: "lexvoice-provider-head" });
+    const panel = c.createEl("details", { cls: "lexvoice-provider-panel" });
+    panel.open = !ready;
+    const head = panel.createEl("summary", { cls: "lexvoice-provider-head" });
     const titleWrap = head.createDiv({ cls: "lexvoice-provider-title-wrap" });
     titleWrap.createDiv({ cls: "lexvoice-provider-title", text: profile.title });
     titleWrap.createDiv({ cls: "lexvoice-provider-subtitle", text: profile.description });
@@ -903,7 +886,15 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     });
 
     const btns = controls.createDiv({ cls: "lexvoice-scheme-btns" });
-    const saveBtn = btns.createEl("button", { cls: "mod-cta", text: "保存当前为方案" });
+    const testBtn = btns.createEl("button", { text: "检测" });
+    testBtn.onclick = async () => {
+      testBtn.disabled = true; testBtn.setText("检测中…");
+      new obsidian.Notice("正在检测转写 + 大模型连通性…", 4000);
+      try { new obsidian.Notice(await this.runComboConnectivityTest(), 9000); }
+      finally { testBtn.disabled = false; testBtn.setText("检测"); }
+    };
+
+    const saveBtn = btns.createEl("button", { cls: "mod-cta", text: "保存为方案" });
     saveBtn.onclick = async () => {
       const name = await lexvoicePromptText(this.app, "为当前整套配置取个名字", "如 MiMo / DeepSeek+硅基 / 本地模型");
       if (name === null) return;
@@ -925,7 +916,8 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       this.display();
     };
     if (activeId) {
-      const delBtn = btns.createEl("button", { cls: "mod-warning", text: "删除" });
+      const delBtn = btns.createEl("button", { cls: "lexvoice-icon-button", attr: { type: "button", "aria-label": "删除当前方案", title: "删除当前方案" } });
+      obsidian.setIcon(delBtn, "trash-2");
       delBtn.onclick = async () => {
         const p = findLlmProfile(this.plugin.settings, activeId);
         this.plugin.settings.llmProfiles = normalizeLlmProfiles(this.plugin.settings.llmProfiles).filter(x => x.id !== activeId);
@@ -935,13 +927,6 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         this.display();
       };
     }
-    const testBtn = btns.createEl("button", { text: "检测" });
-    testBtn.onclick = async () => {
-      testBtn.disabled = true; testBtn.setText("检测中…");
-      new obsidian.Notice("正在检测转写 + 大模型连通性…", 4000);
-      try { new obsidian.Notice(await this.runComboConnectivityTest(), 9000); }
-      finally { testBtn.disabled = false; testBtn.setText("检测"); }
-    };
 
     if (activeId) {
       const p = findLlmProfile(this.plugin.settings, activeId);
@@ -960,12 +945,11 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     this.renderApiSchemeSelector(c);
 
     new obsidian.Setting(c)
-      .setName("语音输入")
-      .setDesc("纪要转写负责长录音、会议和音频导入；即时听写负责短语音输入，可默认复用纪要转写服务。")
+      .setName("纪要转写")
+      .setDesc("配置会议录音、长音频导入和纪要原始文本使用的转写服务。")
       .setHeading();
 
     this.renderDataRiskNotice(c, "is-api");
-    this.createSettingsSubhead(c, "纪要转写", "用于会议录音、长音频导入和笔记正文生成前的基础转写。");
 
     new obsidian.Setting(c).setName("转写服务")
       .setDesc("选择当前用于语音转写的服务。下方只显示所选服务的配置项。")
@@ -993,8 +977,6 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       syncWorkingAsrToActiveScheme(this.plugin.settings);
       await this.plugin.saveSettings();
     };
-
-    new obsidian.Setting(c).setName("当前转写服务").setHeading();
 
     new obsidian.Setting(c).setName(profile.requiresKey ? "访问密钥" : "访问密钥（可选）")
       .setDesc(profile.keyHelp)
@@ -1085,7 +1067,10 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     }
     const qa = this.plugin.settings.quickDictationAsr;
 
-    this.createSettingsSubhead(c, "即时听写", "录一小段语音，转写后由 AI 整理成结构化文本，落到光标或剪贴板。可单独指定转写服务和整理提示词。");
+    new obsidian.Setting(c)
+      .setName("即时听写")
+      .setDesc("配置短语音输入。留空可复用纪要转写服务，也可以单独使用流式听写服务。")
+      .setHeading();
 
     const fillBailianStream = async (model) => {
       qa.endpoint = "wss://dashscope.aliyuncs.com/api-ws/v1/inference";
@@ -1094,11 +1079,18 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       await this.plugin.saveSettings();
       this.display();
     };
-    new obsidian.Setting(c).setName("听写转写服务（API）")
-      .setDesc("填 wss:// 流式地址（阿里云百炼 Fun-ASR / Paraformer）→ 听写边说边出实时字幕；填普通 https 批量地址（或留空用会议服务）→ 说完再转写整理。注意：流式地址是 wss://…/api-ws/v1/inference（点下方预设最省事），别填控制台首页那个 https://…/compatible-mode/v1（那是 OpenAI 兼容的批量接口，不走实时字幕）。地址、密钥、模型三项齐全才生效。")
+    new obsidian.Setting(c).setName("听写服务")
+      .setDesc("留空时复用纪要转写服务。也可以选择下方流式预设，获得边说边出的实时字幕。")
       .addButton(b => b.setButtonText("Fun-ASR").setTooltip("阿里云百炼 Fun-ASR 流式（推荐·新一代、高精度、支持热词）").onClick(() => fillBailianStream("fun-asr-realtime")))
       .addButton(b => b.setButtonText("Paraformer-v2").setTooltip("阿里云百炼 Paraformer 流式（成熟通用、多语言、通常最便宜）").onClick(() => fillBailianStream("paraformer-realtime-v2")))
       .addButton(b => b.setButtonText("Paraformer-8k").setTooltip("阿里云百炼 Paraformer 8k 流式（电话 / 8kHz 音频）").onClick(() => fillBailianStream("paraformer-realtime-8k-v2")));
+
+    const dictationHelp = c.createEl("details", { cls: "lexvoice-setting-details" });
+    dictationHelp.createEl("summary", { text: "地址填写说明" });
+    dictationHelp.createDiv({
+      cls: "lexvoice-setting-details-copy",
+      text: "wss:// 流式地址会边说边出字幕；普通 https:// 批量地址会在说完后统一转写。阿里云百炼流式地址通常以 /api-ws/v1/inference 结尾，OpenAI 兼容的 /compatible-mode/v1 不是实时字幕接口。独立听写服务需要同时填写地址、密钥和模型。",
+    });
 
     new obsidian.Setting(c).setName("转写地址")
       .addText(t => t
@@ -1159,7 +1151,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         }));
 
     new obsidian.Setting(c)
-      .setName("AI 整理")
+      .setName("AI 整理服务")
       .setDesc("用于纪要整理、问一问、沉淀、招聘提纲、听写清理、重整和翻译。")
       .setHeading();
     // 「已保存配置」已升级为顶部「API 方案」（同时含转写 + AI 整理），不再在此处单列 LLM-only 版本。
@@ -1284,15 +1276,15 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
   renderAI(c) {
     if (!this.plugin.settings.industryProfile) this.plugin.settings.industryProfile = {};
 
-    new obsidian.Setting(c).setName("AI 转写与整理").setHeading();
+    new obsidian.Setting(c)
+      .setName("纪要生成")
+      .setDesc("设置纪要的结构、详略和重新整理偏好。参会信息与待办归属在每次录音前单独补充。")
+      .setHeading();
     const structHint = c.createDiv({ cls: "setting-item-description lexvoice-section-hint" });
-    structHint.setText("这里管理转写后的纪要整理、语言处理、HTML 报告和提示词。报告与纪要使用同一份内容来源，适合放在一起配置。");
-
-    new obsidian.Setting(c).setName("参会信息与待办归属")
-      .setDesc("可在转写前补充参会人、角色和常见称呼，用于辅助纪要整理和待办归属。当前版本不提供声纹识别或逐句说话人分离；涉及交付、考核、人事等场景时，负责人归属应以人工确认为准。");
+    structHint.setText("默认只调整整理结果，不改动原始转写。重新整理偏好仅作用于右键菜单中的派生版本。");
 
     new obsidian.Setting(c).setName("结构化程度")
-      .setDesc("宽松：散文为主，仅必要时分点。均衡：散文加 1–2 级列表（推荐）。严谨：多层嵌套列表（最多 3 级），把口语化叙述提炼为论点—支撑—证据。")
+      .setDesc("宽松：散文为主。均衡：散文加 1–2 级列表（推荐）。严谨：最多 3 级列表，强调论点与证据。")
       .addDropdown(d => d
         .addOption("loose", "宽松（散文为主）")
         .addOption("balanced", "均衡（推荐）")
@@ -1329,9 +1321,12 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     ].join("\n");
     repolishPresetHint.createEl("pre", { text: presetText });
 
-    new obsidian.Setting(c).setName("纪要翻译与语言").setHeading();
+    new obsidian.Setting(c)
+      .setName("语言与翻译")
+      .setDesc("设置 AI 整理后的纪要语言。原始转写始终保留原文。")
+      .setHeading();
     const langHint = c.createDiv({ cls: "setting-item-description lexvoice-section-hint" });
-    langHint.setText("用于多语种会议。原始转写保持原文；翻译和统一语言只发生在 AI 整理后的纪要里。");
+    langHint.setText("适用于多语种会议，可统一输出语言或保留关键原文括注。");
 
     new obsidian.Setting(c).setName("语言策略")
       .setDesc("默认跟随原文。开启后由大模型在整理纪要时统一语言。")
@@ -1376,9 +1371,12 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       });
     }
 
-    new obsidian.Setting(c).setName("HTML 报告").setHeading();
+    new obsidian.Setting(c)
+      .setName("HTML 报告")
+      .setDesc("把纪要内容生成适合阅读、分享和打印的独立 HTML 报告。")
+      .setHeading();
     const reportHint = c.createDiv({ cls: "setting-item-description lexvoice-section-hint" });
-    reportHint.setText("转写纪要和 HTML 报告是一组输出：前者用于沉淀到 Obsidian，后者用于把同一份纪要重构成更适合阅读、分享或打印的视觉报告。");
+    reportHint.setText("报告使用同一份纪要内容，不会改变 Obsidian 中的原始纪要。");
 
     new obsidian.Setting(c).setName("HTML 报告保存文件夹")
       .setDesc("相对当前 Obsidian 库的路径。生成的 HTML 报告会保存为库内文件，便于后续归档、同步或手动移动。修改后仅影响新文件，已有文件不会自动迁移。")
@@ -1409,20 +1407,23 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
           await this.plugin.saveSettings();
         }));
 
-    new obsidian.Setting(c).setName("转写提示词").setHeading();
+    new obsidian.Setting(c)
+      .setName("纪要模板")
+      .setDesc("选择默认整理模板，并管理长期复用的格式、行业规则和输出偏好。")
+      .setHeading();
     const sceneHint = c.createDiv({ cls: "setting-item-description lexvoice-section-hint" });
-    sceneHint.setText("提示词决定录音最终整理成什么样。内置提示词适合快速开始；长期复用的职业化规则、固定格式和输出偏好，可以保存为自定义提示词。");
+    sceneHint.setText("内置模板可直接使用；自定义模板会出现在录音、导入和重新整理的选择列表中。");
 
     const currentMode = getEffectivePolishMode(this.plugin.settings, this.plugin.settings.polishMode, "meeting");
     const currentMeta = getModeMeta(this.plugin.settings, currentMode);
-    new obsidian.Setting(c).setName("当前默认提示词")
-      .setDesc((currentMeta.label || currentMeta.prefix) + "。录音、导入音频和重新整理默认使用此提示词；具体操作时仍可临时切换。")
+    new obsidian.Setting(c).setName("默认纪要模板")
+      .setDesc((currentMeta.label || currentMeta.prefix) + "。录音、导入音频和重新整理默认使用此模板；具体操作时仍可临时切换。")
       .addDropdown(d => {
         for (const [key, label] of getVisibleModeEntries(this.plugin.settings, false)) d.addOption(key, label);
         d.setValue(currentMode);
         d.onChange(async v => { this.plugin.settings.polishMode = v; await this.plugin.saveSettings(); this.display(); });
       })
-      .addButton(b => b.setButtonText("打开提示词库").setCta().onClick(() => {
+      .addButton(b => b.setButtonText("打开模板库").setCta().onClick(() => {
         const modal = new PromptTemplateModal(this.app, this.plugin);
         const origClose = modal.onClose.bind(modal);
         modal.onClose = () => { origClose(); this.display(); };
@@ -1503,35 +1504,43 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     const learningCount = countMarkdownInFolder(this.plugin.settings.learningCardsFolder || DEFAULT_SETTINGS.learningCardsFolder);
     const todoCount = countMarkdownInFolder(this.plugin.settings.todoCardsFolder || DEFAULT_SETTINGS.todoCardsFolder);
 
-    new obsidian.Setting(c).setName("信息对象").setHeading();
-    c.createDiv({ cls: "setting-item-description lexvoice-section-hint" })
-      .setText("从纪要中沉淀人员、学习卡片、待办和转写词表。对象用于复用，视图用于浏览；纪要仍是原始证据和回听入口。");
+    new obsidian.Setting(c)
+      .setName("信息对象")
+      .setDesc("从纪要中沉淀人员、学习卡片、待办和转写词表。对象用于复用，视图用于浏览；纪要仍是原始证据和回听入口。")
+      .setHeading();
 
     const overview = c.createDiv({ cls: "lexvoice-object-overview-grid" });
-    const makeObjectCard = (title, countText, desc, actionText, onClick) => {
-      const btn = overview.createEl("button", { cls: "lexvoice-object-overview-card", attr: { type: "button" } });
-      btn.createDiv({ cls: "lexvoice-object-overview-title", text: title });
-      btn.createDiv({ cls: "lexvoice-object-overview-count", text: countText });
+    const makeObjectCard = (title, count, unit, desc, icon, actionLabel, onClick) => {
+      const btn = overview.createEl("button", {
+        cls: "lexvoice-object-overview-card",
+        attr: { type: "button", "aria-label": actionLabel, title: actionLabel },
+      });
+      const head = btn.createDiv({ cls: "lexvoice-object-overview-head" });
+      head.createDiv({ cls: "lexvoice-object-overview-title", text: title });
+      const countEl = head.createDiv({ cls: "lexvoice-object-overview-count" });
+      countEl.createSpan({ cls: "lexvoice-object-overview-count-value", text: String(count) });
+      countEl.createSpan({ cls: "lexvoice-object-overview-count-unit", text: unit });
       btn.createDiv({ cls: "lexvoice-object-overview-desc", text: desc });
-      btn.createDiv({ cls: "lexvoice-object-overview-action", text: actionText });
+      const iconEl = btn.createDiv({ cls: "lexvoice-object-overview-icon", attr: { "aria-hidden": "true" } });
+      obsidian.setIcon(iconEl, icon);
       btn.onclick = onClick;
       return btn;
     };
-    makeObjectCard("人员", `${peopleCount} 位`, "会议里出现的人，一人一页，关联相关纪要。", "打开人员库", () => { void this.plugin.openPeopleBase(); });
-    makeObjectCard("学习卡片", `${learningCount} 张`, "观点、机制、案例、QA 等可复用知识。", "打开卡片墙", () => { void this.plugin.openLearningWall("learning"); });
-    makeObjectCard("待办", `${todoCount} 条`, "从纪要确认出的行动项，可勾选追踪。", "打开待办墙", () => { void this.plugin.openTodoWall(); });
-    const vocabCard = makeObjectCard("转写词表", "读取中", "术语、专名和易错写法，用于提升转写准确率。", "打开词表", () => { void openVocabularyFile(); });
+    makeObjectCard("人员", peopleCount, "位", "汇总会议出现的人，一人一页，关联纪要。", "contact", "打开人员库", () => { void this.plugin.openPeopleBase(); });
+    makeObjectCard("学习卡片", learningCount, "张", "汇总观点、机制等可复用知识。", "layers-3", "打开学习卡片墙", () => { void this.plugin.openLearningWall("learning"); });
+    makeObjectCard("待办", todoCount, "条", "从纪要确认的行动项，可勾选追踪。", "list-checks", "打开待办墙", () => { void this.plugin.openTodoWall(); });
+    const vocabCard = makeObjectCard("转写词表", "…", "个", "汇总术语及易错写法，提升转写准确率。", "notebook-tabs", "打开转写词表", () => { void openVocabularyFile(); });
 
     void (async () => {
-      const countEl = vocabCard.querySelector(".lexvoice-object-overview-count");
+      const countEl = vocabCard.querySelector(".lexvoice-object-overview-count-value");
       try {
         const path = obsidian.normalizePath(this.plugin.settings.vocabularyFile || DEFAULT_SETTINGS.vocabularyFile);
         const file = this.plugin.app.vault.getAbstractFileByPath(path);
-        if (!(file instanceof obsidian.TFile)) { if (countEl) countEl.setText("0 个"); return; }
+        if (!(file instanceof obsidian.TFile)) { if (countEl) countEl.setText("0"); return; }
         const groups = parseVocabularyGroups(await this.plugin.app.vault.cachedRead(file));
-        if (countEl) countEl.setText(`${countVocabularyGroups(groups)} 个`);
+        if (countEl) countEl.setText(String(countVocabularyGroups(groups)));
       } catch {
-        if (countEl) countEl.setText("读取失败");
+        if (countEl) countEl.setText("—");
       }
     })();
 
@@ -1539,16 +1548,19 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       .setDesc("默认关闭以节省 token。开启后，转写/整理完成会自动扫描当前纪要并写入学习卡片与待办；人员和词表仍保留确认/维护流程。")
       .addToggle(t => t.setValue(!!this.plugin.settings.sedimentAutoExtract).onChange(async v => { this.plugin.settings.sedimentAutoExtract = v; await this.plugin.saveSettings(); }));
 
-    new obsidian.Setting(c).setName("补全对象库").setHeading();
+    new obsidian.Setting(c)
+      .setName("补全与去重")
+      .setDesc("从历史纪要提取人员和转写词表，并处理重复人员档案。")
+      .setHeading();
     new obsidian.Setting(c).setName("从历史纪要补全")
-      .setDesc(`人员建议待确认 ${pendingPeopleSuggestions.length} 条，已忽略 ${ignoredPeopleSuggestions.length} 条。扫描会调用当前大模型服务，涉密纪要建议使用本地模型。`)
+      .setDesc(`人员待确认 ${pendingPeopleSuggestions.length} 条，已忽略 ${ignoredPeopleSuggestions.length} 条。扫描会调用当前 AI 整理服务；涉密内容建议使用本地模型。`)
       .addButton(b => b.setButtonText("提取人员建议").setCta().onClick(async () => this.plugin.suggestPeopleDirectoryFromLibrary()))
       .addButton(b => b.setButtonText("提取转写词表").onClick(async () => this._extractVocabFromLibrary(async () => { if (vocabPathSetting) await refreshVocabStatus(vocabPathSetting); })))
       .addButton(b => b.setButtonText("待确认").setDisabled(!pendingPeopleSuggestions.length).onClick(async () => { await this.plugin.openCachedPeopleDirectorySuggestions(); this.display(); }))
       .addButton(b => b.setButtonText("已忽略").setDisabled(!ignoredPeopleSuggestions.length).onClick(async () => { await this.plugin.openIgnoredPeopleDirectorySuggestions(); this.display(); }));
 
     new obsidian.Setting(c).setName("人员去重")
-      .setDesc("按人员属性「姓名」识别重复页，合并资料、改写纪要引用，并把重复页归档。适合处理同一人被新建成 -1 / -2 的情况。")
+      .setDesc("按姓名合并重复资料，更新纪要引用，并归档带 -1 / -2 后缀的重复页。")
       .addButton(b => b.setButtonText("合并重复人员").onClick(async () => {
         const ok = await lexvoiceConfirm(this.app, "合并重复人员档案？", "LexVoice 会把同名人员页合并到主档案，改写所有指向重复页的 wiki 链接，并将重复页移到归档目录。建议先确保同步已完成。", "开始合并");
         if (!ok) return;
@@ -1564,9 +1576,12 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         }
       }));
 
-    new obsidian.Setting(c).setName("浏览入口").setHeading();
+    new obsidian.Setting(c)
+      .setName("浏览与维护")
+      .setDesc("打开对象墙和明细表格，或补齐缺失的 Base 视图。")
+      .setHeading();
     new obsidian.Setting(c).setName("对象墙")
-      .setDesc("日常浏览入口。对象总览支持按类型筛选；学习、概念和待办也可以单独打开。")
+      .setDesc("日常浏览入口，可按学习、概念和待办分类查看。")
       .addButton(b => b.setButtonText("对象总览").setCta().onClick(() => { void this.plugin.openObjectWall(); }))
       .addButton(b => b.setButtonText("学习卡片").onClick(() => { void this.plugin.openLearningWall("learning"); }))
       .addButton(b => b.setButtonText("概念").onClick(() => { void this.plugin.openLearningWall("concept"); }))
@@ -1575,15 +1590,23 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     new obsidian.Setting(c).setName("明细表格")
       .setDesc("用于核对和批量筛选，不作为主展示入口。")
       .addButton(b => b.setButtonText("人员资料").onClick(() => { void this.plugin.openPeopleBase(); }))
-      .addButton(b => b.setButtonText("全部纪要").onClick(() => this.plugin.openLexVoiceDetailBase()));
+      .addButton(b => b.setButtonText("全部纪要").onClick(() => this.plugin.openLexVoiceDetailBase()))
+      .addButton(b => b.setButtonText("补齐视图").onClick(async () => {
+        try {
+          const r = await this.plugin.createLexVoiceBases({ overwrite: false });
+          new obsidian.Notice(`表格视图创建完成：新建 ${r.created} 个，跳过 ${r.skipped} 个`);
+        } catch (e) {
+          console.error(e);
+          new obsidian.Notice(`创建失败：${e.message || e}`);
+        }
+      }));
 
-    const advanced = c.createEl("details", { cls: "lexvoice-settings-details" });
-    advanced.createEl("summary", { text: "高级设置：保存位置、扫描记录、隐私策略" });
-    const advancedBody = advanced.createDiv({ cls: "lexvoice-settings-details-body" });
-
-    new obsidian.Setting(advancedBody).setName("对象保存位置").setHeading();
-    advancedBody.createDiv({ cls: "setting-item-description lexvoice-section-hint" })
-      .setText("这些路径都是当前 Obsidian 库内的相对路径。一般不需要修改；迁移资料库结构时再调整。");
+    new obsidian.Setting(c)
+      .setName("存储与隐私")
+      .setDesc("设置对象文件位置、扫描记录和人员资料的使用范围。一般保持默认即可。")
+      .setHeading();
+    const advancedBody = c;
+    this.createSettingsSubhead(advancedBody, "保存位置", "这些路径都是当前 Obsidian 库内的相对路径，只影响后续新建内容。");
 
     vocabPathSetting = createPathSetting(advancedBody, "转写词表文件", "用于保存专有名词、术语和易错写法。", this.plugin.settings.vocabularyFile || DEFAULT_SETTINGS.vocabularyFile, "LexVoice/词汇表.md",
       async v => { this.plugin.settings.vocabularyFile = v || DEFAULT_SETTINGS.vocabularyFile; },
@@ -1617,24 +1640,9 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     createPathSetting(advancedBody, "视图文件夹", "保存 LexVoice 生成的对象墙和辅助 Base。", this.plugin.settings.lexVoiceBasesFolder || DEFAULT_SETTINGS.lexVoiceBasesFolder, "LexVoice/视图",
       async v => { this.plugin.settings.lexVoiceBasesFolder = v || DEFAULT_SETTINGS.lexVoiceBasesFolder; });
 
-    new obsidian.Setting(advancedBody).setName("转写词表维护")
-      .setDesc("打开词表进行人工维护；如是旧格式，会自动整理为分区热词表。")
-      .addButton(b => b.setButtonText("打开/创建").onClick(openVocabularyFile));
-
-    new obsidian.Setting(advancedBody).setName("表格视图维护")
-      .setDesc("用于高级筛选和核对。日常浏览请优先使用对象墙。")
-      .addButton(b => b.setButtonText("补齐表格视图").onClick(async () => {
-        try {
-          const r = await this.plugin.createLexVoiceBases({ overwrite: false });
-          new obsidian.Notice(`表格视图创建完成：新建 ${r.created} 个，跳过 ${r.skipped} 个`);
-        } catch (e) {
-          console.error(e);
-          new obsidian.Notice(`创建失败：${e.message || e}`);
-        }
-      }));
-
     const vocabScanCount = countKnowledgeExtractionHistory(this.plugin.settings, "vocabulary");
     const peopleScanCount = countKnowledgeExtractionHistory(this.plugin.settings, "people");
+    this.createSettingsSubhead(advancedBody, "扫描记录", "清空后，历史纪要可以重新进入人员和词表扫描范围。");
     new obsidian.Setting(advancedBody).setName("纪要扫描记录")
       .setDesc(`转写词表已扫描 ${vocabScanCount} 篇；人员建议已扫描 ${peopleScanCount} 篇。清空记录后，修改过或已存在的纪要可重新进入扫描。`)
       .addButton(b => b.setButtonText("清空词表记录").setDisabled(!vocabScanCount).onClick(async () => {
@@ -1660,6 +1668,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     const modeLabel = { privacy: "隐私优先", hotwords: "人名热词", localFull: "本地增强" }[normalizePeopleContextMode(this.plugin.settings.peopleContextMode)] || "隐私优先";
     const consentText = hasPeopleHotwordsConsent(this.plugin.settings) ? `已于 ${this.plugin.settings.peopleHotwordsConsentAt} 授权人名热词。` : "尚未授权人名热词。";
 
+    this.createSettingsSubhead(advancedBody, "人员资料隐私", "决定人员姓名和上下文是否会随转写或整理请求发送到当前服务。");
     new obsidian.Setting(advancedBody).setName("人员资料使用策略")
       .setDesc(`${modeLabel}。${asrScope}；${llmScope}。${consentText}`)
       .addDropdown(d => d
@@ -1826,11 +1835,10 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
   renderRecruit(c) {
     if (!isRecruitFeatureUnlocked(this.plugin.settings)) return;  // 防御：未解锁不渲染
     const s = this.plugin.settings;
-    new obsidian.Setting(c).setName("招聘项目化").setHeading();
-    c.createEl("p", {
-      cls: "lexvoice-settings-hint",
-      text: "把招聘流程项目化：每个岗位是 JD 库下的一个子文件夹（同名 JD 文件 + 候选人看板）。面试评估自动归位到对应项目，项目统计实时更新。",
-    });
+    new obsidian.Setting(c)
+      .setName("招聘项目")
+      .setDesc("设置岗位项目、候选人简历和招聘主页的保存位置。面试评估会自动归入对应岗位项目。")
+      .setHeading();
 
     this.addFolderPathSetting(c, {
       name: "JD（招聘项目）库路径",
@@ -1867,7 +1875,10 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
 
   renderAdvanced(c) {
     // ---- 录音行为 ----
-    new obsidian.Setting(c).setName("录音行为").setHeading();
+    new obsidian.Setting(c)
+      .setName("录音与转写")
+      .setDesc("控制录音切片、短录音过滤、长音频并发和临时切片保留策略。")
+      .setHeading();
 
     // 当前转写服务若是流式（Realtime 等），分段相关设置不参与工作——在描述里就地说明，免得用户调了没反应
     const advAsrId = this.plugin.settings.activeTranscribeProvider || "siliconflow";
@@ -1913,6 +1924,11 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       .setDesc("开启后保留每个后台切片音频用于排查，占用更多存储；关闭（默认）时只保留完整录音，成功转写的临时切片自动清理（失败重试所需的切片暂时保留）。")
       .addToggle(t => t.setValue(this.plugin.settings.keepSegmentAudioFiles === true).onChange(async v => { this.plugin.settings.keepSegmentAudioFiles = v; await this.plugin.saveSettings(); }));
 
+    new obsidian.Setting(c)
+      .setName("纪要与实时大纲")
+      .setDesc("控制整理后的纪要布局、自动命名和录音期间的实时大纲行为。")
+      .setHeading();
+
     new obsidian.Setting(c).setName("纪要整合排版")
       .setDesc("录音完成后笔记重排：顶部 AI 整合内容，底部可折叠原始分段。关闭后纪要按时间顺序保留原始分段，不做顶部整合。")
       .addToggle(t => t.setValue(this.plugin.settings.consolidatedLayout).onChange(async v => { this.plugin.settings.consolidatedLayout = v; await this.plugin.saveSettings(); }));
@@ -1929,17 +1945,10 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       .addToggle(t => t.setValue(this.plugin.settings.autoOpenOutlineOnRecord).onChange(async v => { this.plugin.settings.autoOpenOutlineOnRecord = v; await this.plugin.saveSettings(); }));
 
     // ---- 设备与诊断 ----
-    new obsidian.Setting(c).setName("设备与诊断").setHeading();
-
-    new obsidian.Setting(c).setName("音频设备检测")
-      .setDesc("检测麦克风、电脑音频输入是否就位。录制 B 站客户端、浏览器视频、课程或会议对方声音前建议先检查；如果录音中电平条不动，优先检查这里。")
-      .addButton(b => b.setButtonText("检测").onClick(async () => {
-        await this.runAudioDiagnostic();
-      }))
-      .addButton(b => b.setButtonText("电脑音频指引").onClick(() => {
-        new VirtualCableSetupModal(this.app, this.plugin).open();
-      }));
-    this.diagResultEl = c.createDiv({ cls: "lexvoice-diag-result" });
+    new obsidian.Setting(c)
+      .setName("诊断与日志")
+      .setDesc("记录本地诊断信息并生成排查报告。音频设备检测已统一放在「常规 > 音频输入」。")
+      .setHeading();
 
     new obsidian.Setting(c).setName("本地诊断日志")
       .setDesc("用于排查转写、AI 整理、队列和实时大纲错误。日志只保存在本地 Obsidian 库，不会自动上传；不会写入音频、转写正文、提示词或 API Key。")
@@ -1976,7 +1985,10 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       }));
 
     // ---- 外部音频联动 ----
-    new obsidian.Setting(c).setName("外部音频联动").setHeading();
+    new obsidian.Setting(c)
+      .setName("外部音频联动")
+      .setDesc("监控一个收件箱文件夹，自动处理从云盘或其他设备同步进来的音频。")
+      .setHeading();
 
     new obsidian.Setting(c).setName("收件箱文件夹")
       .setDesc("Obsidian 库内的相对路径。任何音频出现在此文件夹会被自动转写并归档。留空则禁用此功能。")
@@ -2017,7 +2029,10 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       .addButton(b => b.setButtonText("扫描并清理").onClick(() => this.plugin.cleanupEmptyShortRecordings()));
 
     // ---- 失败重试 ----
-    new obsidian.Setting(c).setName("失败重试").setHeading();
+    new obsidian.Setting(c)
+      .setName("失败与队列")
+      .setDesc("设置自动重试上限，并查看仍在等待或失败的后台任务。")
+      .setHeading();
 
     new obsidian.Setting(c).setName("最大重试次数")
       .setDesc("转写与 AI 整理任务失败后的自动重试上限，超过后需在队列或纪要中手动重试。有效范围 1–10。")

@@ -218,7 +218,9 @@ export const APIMIMO_ASR_MAX_BASE64_BYTES = Math.floor(9.5 * 1024 * 1024);
 
 export const APIMIMO_ASR_NATIVE_EXTS = new Set(["mp3", "wav"]);
 
-export const APIMIMO_ASR_CHUNK_MS = 3 * 60 * 1000;
+// 2 分钟：MiMo 单次输出上限 2K tokens，3 分钟密集中文讲话的转写文字会超 2K 被截断（实测触顶）；
+// 收窄到 2 分钟让输出稳在 2K 以内。总配速按音频秒数计、与块数无关，故缩小切块不增 TPM 压力。
+export const APIMIMO_ASR_CHUNK_MS = 2 * 60 * 1000;
 
 export const APIMIMO_ASR_MAX_CHUNKS = 160;
 
@@ -468,9 +470,16 @@ export async function requestApimimoAsrChunk(provider, prepared, endpoint) {
     if (tail) for (const line of tail.split(/\r?\n/)) feedLine(line);
     if (acc.done) { try { await reader.cancel(); } catch { /* intentionally empty */ } }
     // 反静默截断的完成规则：
-    // 1) finish_reason === "length"：输出撞 2K max tokens 被服务端截断——重试不会改变结果，判硬错误（nonRetryable）；
+    // 1) finish_reason === "length"：输出撞 2K max tokens 被截断。保住已转出的部分（半截 >> 整块丢）+
+    //    可见标记 + 告警，不再硬失败（此前硬失败 nonRetryable 会让整块永久丢，比截断更糟）。
+    //    切块已收窄到 2 分钟，此路很少触发；真触发时仅末尾少量缺失，标记提示、LLM 合并可据此标注。
     if (acc.finishReason === "length") {
-      throw apimimoPermanentError("MiMo 输出触顶（2K tokens）被截断：请缩短切块时长后重试");
+      const salvaged = String(acc.text || "").trim();
+      if (salvaged) {
+        console.warn(`[LexVoice] MiMo 输出触顶（2K）被截断，已保住 ${salvaged.length} 字（末尾可能缺失）`);
+        return `${salvaged}\n_[本段较长，末尾可能有少量内容未转完]_`;
+      }
+      throw apimimoPermanentError("MiMo 输出触顶（2K tokens）被截断且无可保留文本：请缩短切块时长后重试");
     }
     // 2) 收到 [DONE] 或非 length 的 finish_reason：正常完成，返回累积文本（空文本由调用方按软失败处理）；
     // 3) 两者都没有（连接中途断开）：绝不把半截文本当成功返回——那会重新引入"静默丢段"这一类 bug。

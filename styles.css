@@ -6235,29 +6235,41 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
    6. 设置页 Tab Bar
    ============================================================ */
 
-.lexvoice-settings-tabs {
-  display: flex;
-  gap: 0;
-  flex-wrap: wrap;
-  border-bottom: 1px solid var(--background-modifier-border);
-  margin-bottom: var(--size-4-4);
-  /* 常驻吸顶：滚动设置内容时标签栏始终可见。背景不透明 + z-index 压住下方内容。 */
+.lexvoice-settings-tabs-shell {
+  --lexvoice-settings-mask: var(--modal-background, var(--background-primary));
   position: sticky;
   top: 0;
   z-index: 5;
-  background: var(--background-primary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  margin-bottom: var(--size-4-4);
+  background: var(--lexvoice-settings-mask);
   padding-top: var(--size-2-2);
+  isolation: isolate;
 }
 
-/* 吸顶时把不透明背景向上延伸一段，盖住设置容器自带 padding-top 透出来的内容。 */
-.lexvoice-settings-tabs::before {
+/* 外层不承担滚动，因此向上延伸的遮罩不会被 overflow 裁掉。 */
+.lexvoice-settings-tabs-shell::before {
   content: "";
   position: absolute;
   left: 0;
   right: 0;
   bottom: 100%;
-  height: 48px;
-  background: var(--background-primary);
+  z-index: 0;
+  height: calc(var(--size-4-8) + var(--size-4-4));
+  background: var(--lexvoice-settings-mask);
+  box-shadow: 0 calc(0px - var(--size-4-8)) 0 var(--size-4-8) var(--lexvoice-settings-mask);
+  pointer-events: none;
+}
+
+.lexvoice-settings-tabs {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  background: transparent;
+  scrollbar-width: none;
 }
 
 .lexvoice-settings-tabs button {
@@ -6288,6 +6300,7 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
 .lexvoice-settings-content {
   display: flex;
   flex-direction: column;
+  container-type: inline-size;
 }
 
 .lexvoice-settings-content textarea {
@@ -6330,21 +6343,25 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
 .lexvoice-object-overview-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--size-4-2);
-  margin: var(--size-4-2) 0 var(--size-4-4);
+  gap: var(--size-2-3);
+  margin: 0 0 var(--size-2-2);
 }
 
 .lexvoice-object-overview-card {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--size-2-2);
-  min-height: 104px;
-  padding: var(--size-4-2);
-  border: 1px solid var(--background-modifier-border);
+  gap: 0;
+  min-width: 0;
+  min-height: 132px;
+  overflow: hidden;
+  padding: var(--size-4-3);
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 72%, transparent);
   border-radius: var(--radius-m);
-  background: var(--background-secondary);
+  background: color-mix(in srgb, var(--background-primary) 88%, var(--background-secondary));
   color: var(--text-normal);
   box-shadow: none;
+  appearance: none;
   font-family: inherit;
   height: auto;
   text-align: left;
@@ -6353,67 +6370,90 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
 }
 
 .lexvoice-object-overview-card:hover {
-  border-color: var(--background-modifier-border-hover);
-  background: var(--background-modifier-hover);
+  border-color: color-mix(in srgb, var(--interactive-accent) 30%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--background-modifier-hover) 38%, var(--background-primary));
+}
+
+.lexvoice-object-overview-card:focus-visible {
+  outline: 2px solid var(--background-modifier-border-focus);
+  outline-offset: 2px;
+}
+
+.lexvoice-object-overview-head {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--size-2-2);
+  width: 100%;
 }
 
 .lexvoice-object-overview-title {
   font-size: var(--font-ui-small);
   font-weight: var(--font-semibold);
+  line-height: var(--line-height-tight);
 }
 
 .lexvoice-object-overview-count {
+  display: inline-flex;
+  align-items: baseline;
+  flex-shrink: 0;
+  gap: 2px;
   color: var(--text-accent);
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.1;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 
-.lexvoice-object-overview-desc {
-  flex: 1;
+.lexvoice-object-overview-count-value {
+  font-size: calc(var(--font-ui-large) * 1.45);
+  font-weight: var(--font-bold);
+  letter-spacing: 0;
+}
+
+.lexvoice-object-overview-count-unit {
   color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
-  line-height: var(--line-height-normal);
-}
-
-.lexvoice-object-overview-action {
-  color: var(--text-accent);
   font-size: var(--font-ui-smaller);
   font-weight: var(--font-medium);
 }
 
-@media (max-width: 760px) {
+.lexvoice-object-overview-desc {
+  position: relative;
+  z-index: 1;
+  max-width: 9.5em;
+  margin-top: var(--size-4-3);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.55;
+}
+
+.lexvoice-object-overview-icon {
+  position: absolute;
+  right: calc(var(--size-4-3) * -0.35);
+  bottom: calc(var(--size-4-3) * -0.55);
+  width: 64px;
+  height: 64px;
+  color: var(--interactive-accent);
+  opacity: 0.09;
+  pointer-events: none;
+}
+
+.lexvoice-object-overview-icon svg {
+  width: 100%;
+  height: 100%;
+  stroke-width: 1.5;
+}
+
+@container (max-width: 600px) {
   .lexvoice-object-overview-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-@media (max-width: 460px) {
+@container (max-width: 320px) {
   .lexvoice-object-overview-grid {
     grid-template-columns: 1fr;
   }
-}
-
-.lexvoice-settings-details {
-  margin: var(--size-4-4) 0;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-m);
-  background: var(--background-secondary);
-}
-
-.lexvoice-settings-details > summary {
-  cursor: pointer;
-  padding: var(--size-4-3);
-  color: var(--text-normal);
-  font-weight: var(--font-semibold);
-}
-
-.lexvoice-settings-details-body {
-  padding: 0 var(--size-4-3) var(--size-4-3);
-}
-
-.lexvoice-settings-details-body > .setting-item:first-child {
-  border-top: 0;
 }
 
 /* 设置页通用 textarea —— 占满宽度，原生字体 */
@@ -6442,11 +6482,10 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
 }
 
 .lexvoice-setting-details {
-  margin: calc(var(--size-4-1) * -1) 0 var(--size-4-3);
-  padding: var(--size-2-2) var(--size-2-3);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-s);
-  background: var(--background-secondary);
+  margin: 0 0 var(--size-4-3);
+  padding: var(--size-2-2) 0;
+  border: 0;
+  background: transparent;
   color: var(--text-muted);
 }
 
@@ -6462,6 +6501,14 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
   white-space: pre-wrap;
   color: var(--text-muted);
   font-family: var(--font-text);
+  font-size: var(--font-ui-smaller);
+  line-height: var(--line-height-normal);
+}
+
+.lexvoice-setting-details-copy {
+  margin-top: var(--size-2-2);
+  max-width: 72ch;
+  color: var(--text-muted);
   font-size: var(--font-ui-smaller);
   line-height: var(--line-height-normal);
 }
@@ -6485,17 +6532,16 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
   display: flex;
   flex-direction: column;
   gap: var(--size-4-3);
-  margin: var(--size-4-2) 0 var(--size-4-4);
-  padding: var(--size-4-4);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-m);
-  background: var(--background-secondary);
+  margin: 0 0 var(--size-4-2);
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 .lexvoice-audio-input-head {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  align-items: center;
+  justify-content: flex-start;
   gap: var(--size-4-4);
 }
 
@@ -6522,7 +6568,7 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
 .lexvoice-audio-input-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: var(--size-2-2);
   flex-shrink: 0;
 }
@@ -6533,7 +6579,7 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
 
 .lexvoice-audio-input-grid {
   display: grid;
-  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--size-4-3);
 }
 
@@ -7779,26 +7825,27 @@ select.lexvoice-rcx-in.dropdown {
 
 
 .lexvoice-risk-notice {
-  display: flex;
-  flex-direction: column;
-  gap: var(--size-2-2);
-  border: 1px solid rgba(var(--color-orange-rgb), 0.35);
-  border-radius: var(--radius-s);
-  padding: var(--size-4-3);
-  background: var(--background-secondary);
+  margin: var(--size-2-2) 0 var(--size-4-2);
+  color: var(--text-muted);
 }
 
 .lexvoice-risk-notice.is-api {
-  margin: var(--size-2-3) 0 var(--size-4-4);
+  margin-top: 0;
 }
 
 .lexvoice-risk-title {
-  color: var(--text-warning);
-  font-size: var(--font-ui-small);
-  font-weight: var(--font-semibold);
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-medium);
 }
 
 .lexvoice-risk-body {
+  margin-top: var(--size-2-2);
+  padding: var(--size-2-3) var(--size-4-2);
+  border-left: 2px solid var(--text-warning);
+  border-radius: var(--radius-s);
+  background: color-mix(in srgb, var(--background-modifier-error) 24%, transparent);
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
   line-height: var(--line-height-normal);
@@ -7966,18 +8013,39 @@ select.lexvoice-rcx-in.dropdown {
 }
 
 .lexvoice-provider-panel {
-  margin: 12px 0 18px;
-  padding: 14px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 8px;
-  background: var(--background-secondary);
+  margin: 0 0 var(--size-4-3);
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 .lexvoice-provider-head {
+  position: relative;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--size-4-3);
+  padding: var(--size-2-2) 0 var(--size-2-2) var(--size-4-3);
+  cursor: pointer;
+  list-style: none;
+}
+
+.lexvoice-provider-head::-webkit-details-marker {
+  display: none;
+}
+
+.lexvoice-provider-head::before {
+  content: "›";
+  position: absolute;
+  left: 0;
+  color: var(--text-faint);
+  font-size: var(--font-ui-small);
+  line-height: var(--line-height-tight);
+  transition: transform 0.12s ease;
+}
+
+.lexvoice-provider-panel[open] > .lexvoice-provider-head::before {
+  transform: rotate(90deg);
 }
 
 .lexvoice-provider-title-wrap {
@@ -7986,32 +8054,32 @@ select.lexvoice-rcx-in.dropdown {
 
 .lexvoice-provider-title {
   color: var(--text-normal);
-  font-weight: 700;
-  font-size: 15px;
-  line-height: 1.35;
+  font-weight: var(--font-semibold);
+  font-size: var(--font-ui-small);
+  line-height: var(--line-height-tight);
 }
 
 .lexvoice-provider-subtitle {
-  margin-top: 6px;
+  margin-top: var(--size-2-1);
   color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: var(--font-ui-smaller);
+  line-height: var(--line-height-normal);
 }
 
 .lexvoice-provider-badges {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 6px;
+  gap: var(--size-2-2);
   flex: 0 0 auto;
 }
 
 .lexvoice-provider-badge,
 .lexvoice-provider-status {
   border: 1px solid var(--background-modifier-border);
-  border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 11px;
+  border-radius: var(--radius-s);
+  padding: var(--size-2-1) var(--size-2-3);
+  font-size: var(--font-ui-smaller);
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -8027,26 +8095,26 @@ select.lexvoice-rcx-in.dropdown {
 }
 
 .lexvoice-provider-body {
-  margin-top: 10px;
+  margin: var(--size-2-2) 0 0 var(--size-4-3);
 }
 
 .lexvoice-provider-checklist {
-  margin: 0 0 0 18px;
+  margin: 0 0 0 var(--size-4-4);
   padding: 0;
   color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.6;
+  font-size: var(--font-ui-smaller);
+  line-height: var(--line-height-normal);
 }
 
 .lexvoice-provider-missing,
 .lexvoice-provider-note,
 .lexvoice-provider-price,
 .lexvoice-provider-streaming-tip {
-  margin-top: 10px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  font-size: 12px;
-  line-height: 1.5;
+  margin-top: var(--size-2-3);
+  padding: var(--size-2-2) var(--size-2-3);
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-smaller);
+  line-height: var(--line-height-normal);
 }
 
 .lexvoice-provider-missing {
@@ -8066,7 +8134,7 @@ select.lexvoice-rcx-in.dropdown {
 }
 
 .lexvoice-provider-streaming-tip {
-  margin: 6px 0 0;
+  margin: var(--size-2-2) 0 0;
   color: var(--text-muted);
   background: var(--background-secondary);
   border-left: 2px solid var(--color-accent);
@@ -8075,8 +8143,8 @@ select.lexvoice-rcx-in.dropdown {
 .lexvoice-provider-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
+  gap: var(--size-2-2);
+  margin-top: var(--size-2-3);
 }
 
 @media (max-width: 680px) {
@@ -8196,7 +8264,27 @@ select.lexvoice-rcx-in.dropdown {
 
 
 .lexvoice-tpl-modal {
-  max-width: 860px;
+  width: min(720px, calc(100vw - var(--size-4-8)));
+  max-width: 720px;
+}
+
+.lexvoice-tpl-modal > h2 {
+  margin: 0 0 var(--size-2-2);
+  color: var(--text-normal);
+  font-size: var(--font-ui-large);
+  line-height: var(--line-height-tight);
+}
+
+.lexvoice-tpl-modal .lexvoice-tpl-desc {
+  max-width: 68ch;
+  margin-bottom: var(--size-4-3);
+  line-height: var(--line-height-normal);
+}
+
+.lexvoice-tpl-modal .lexvoice-tpl-body {
+  max-height: 68vh;
+  overflow-y: auto;
+  padding-right: var(--size-2-2);
 }
 
 .lexvoice-tpl-principle {
@@ -8227,16 +8315,16 @@ select.lexvoice-rcx-in.dropdown {
 }
 
 .lexvoice-tpl-mode-pill {
-  width: 28px;
-  height: 28px;
+  width: var(--icon-l, 24px);
+  height: var(--icon-l, 24px);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  border-radius: 6px;
-  background: var(--background-secondary);
+  border-radius: var(--radius-s);
+  background: transparent;
   color: var(--text-muted);
-  border: 1px solid var(--background-modifier-border);
+  border: 0;
   line-height: 1;
   font-size: var(--font-ui-smaller);
 }
@@ -8273,10 +8361,11 @@ select.lexvoice-rcx-in.dropdown {
   align-items: center;
   justify-content: space-between;
   gap: var(--size-4-2);
-  padding: var(--size-4-3);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-s);
-  background: var(--background-secondary);
+  padding: 0 0 var(--size-4-3);
+  border: 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+  border-radius: 0;
+  background: transparent;
 }
 
 .lexvoice-tpl-current {
@@ -8289,8 +8378,31 @@ select.lexvoice-rcx-in.dropdown {
   margin-bottom: var(--size-2-2);
 }
 
+.lexvoice-tpl-list {
+  gap: 0;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
 .lexvoice-tpl-row {
-  align-items: flex-start;
+  align-items: center;
+  gap: var(--size-2-3);
+  padding: var(--size-2-3) var(--size-2-2);
+  border: 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.lexvoice-tpl-row.is-active {
+  border-color: var(--background-modifier-border);
+  box-shadow: inset 2px 0 0 var(--interactive-accent);
+  background: var(--background-modifier-hover);
+}
+
+.lexvoice-tpl-row-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .lexvoice-tpl-row-actions {
@@ -10944,20 +11056,20 @@ select.lexvoice-rcx-in.dropdown {
   margin-bottom: 10px;
 }
 .lexvoice-scheme-controls {
-  display: flex;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: var(--size-2-2);
   align-items: center;
-  flex-wrap: wrap;
 }
 .lexvoice-scheme-select {
-  flex: 1 1 220px;
-  min-width: 180px;
+  width: 100%;
+  min-width: 0;
   max-width: none;
 }
 .lexvoice-scheme-btns {
   display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: var(--size-2-2);
+  flex-wrap: nowrap;
   align-items: center;
 }
 .lexvoice-scheme-status {
@@ -10975,6 +11087,17 @@ select.lexvoice-rcx-in.dropdown {
 }
 .lexvoice-scheme-status-hint {
   color: var(--text-faint);
+}
+
+@media (max-width: 760px) {
+  .lexvoice-scheme-controls,
+  .lexvoice-settings-content.is-mobile .lexvoice-scheme-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .lexvoice-scheme-btns {
+    flex-wrap: wrap;
+  }
 }
 
 /* 招聘设置·文件夹路径不存在时的警示行 + 创建按钮 */
@@ -11627,8 +11750,9 @@ select.lexvoice-rcx-in.dropdown {
 
 /* Settings tab internal sections. Top-level tabs stay unchanged; each tab body is grouped into collapsible native sections. */
 .lexvoice-settings-section {
-  margin: 0 0 var(--size-2-3);
+  margin: 0;
   border: 0;
+  border-bottom: 1px solid var(--background-modifier-border);
   border-radius: 0;
   background: transparent;
   overflow: visible;
@@ -11638,8 +11762,8 @@ select.lexvoice-rcx-in.dropdown {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: var(--size-2-3) 0 var(--size-2-2) var(--size-4-4);
+  gap: var(--size-2-1);
+  padding: var(--size-4-3) 0 var(--size-4-3) var(--size-4-4);
   cursor: pointer;
   color: var(--text-normal);
   list-style: none;
@@ -11654,7 +11778,7 @@ select.lexvoice-rcx-in.dropdown {
   content: "›";
   position: absolute;
   left: 0;
-  top: var(--size-2-3);
+  top: var(--size-4-3);
   color: var(--text-faint);
   font-size: var(--font-ui-small);
   font-weight: var(--font-medium);
@@ -11674,7 +11798,7 @@ select.lexvoice-rcx-in.dropdown {
 }
 
 .lexvoice-settings-section-desc {
-  max-width: 72ch;
+  max-width: 100%;
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
   font-weight: var(--font-normal);
@@ -11682,7 +11806,7 @@ select.lexvoice-rcx-in.dropdown {
 }
 
 .lexvoice-settings-section-body {
-  padding: 0 0 var(--size-4-2) var(--size-4-4);
+  padding: 0 0 var(--size-4-4) var(--size-4-4);
 }
 
 .lexvoice-settings-section-body > .setting-item:first-child {
@@ -11693,8 +11817,42 @@ select.lexvoice-rcx-in.dropdown {
   border-bottom: 0;
 }
 
+.lexvoice-settings-section-body > .setting-item:not(.setting-item-heading) {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(180px, 280px);
+  align-items: start;
+  gap: var(--size-4-4);
+}
+
+.lexvoice-settings-section-body > .setting-item.is-info-only > .setting-item-info {
+  grid-column: 1 / -1;
+}
+
+.lexvoice-settings-section-body > .setting-item > .setting-item-info,
+.lexvoice-settings-section-body > .setting-item > .setting-item-control {
+  min-width: 0;
+}
+
+.lexvoice-settings-section-body > .setting-item > .setting-item-control {
+  display: flex;
+  width: 100%;
+  max-width: 280px;
+  justify-self: end;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--size-2-2);
+}
+
+.lexvoice-settings-section-body > .setting-item > .setting-item-control > input[type="text"],
+.lexvoice-settings-section-body > .setting-item > .setting-item-control > input[type="password"],
+.lexvoice-settings-section-body > .setting-item > .setting-item-control > select.dropdown {
+  flex: 1 1 180px;
+  width: 100%;
+  max-width: none;
+}
+
 .lexvoice-settings-subhead {
-  padding: var(--size-4-3) 0 var(--size-2-2);
+  padding: var(--size-4-4) 0 var(--size-2-2);
 }
 
 .lexvoice-settings-subhead-title {
@@ -11713,16 +11871,83 @@ select.lexvoice-rcx-in.dropdown {
 }
 
 .lexvoice-settings-tabs {
-  background: color-mix(in srgb, var(--background-secondary) 72%, var(--background-primary) 28%);
+  overscroll-behavior-inline: contain;
 }
 
-.lexvoice-settings-tabs::before {
-  content: "";
-  display: block;
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 100%;
-  height: 48px;
-  background: color-mix(in srgb, var(--background-secondary) 72%, var(--background-primary) 28%);
+.lexvoice-settings-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.lexvoice-settings-tabs button {
+  flex: 0 0 auto;
+}
+
+.lexvoice-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--input-height);
+  min-width: var(--input-height);
+  height: var(--input-height);
+  padding: 0;
+}
+
+.lexvoice-icon-button svg {
+  width: var(--icon-s);
+  height: var(--icon-s);
+}
+
+@media (max-width: 760px) {
+  .lexvoice-settings-section-body > .setting-item:not(.setting-item-heading) {
+    grid-template-columns: 1fr;
+    gap: var(--size-2-2);
+  }
+
+  .lexvoice-settings-section-body > .setting-item > .setting-item-info,
+  .lexvoice-settings-section-body > .setting-item > .setting-item-control {
+    grid-column: 1;
+  }
+
+  .lexvoice-settings-section-body > .setting-item > .setting-item-control {
+    width: 100%;
+    max-width: none;
+    justify-self: stretch;
+    justify-content: flex-start;
+  }
+}
+
+@container (max-width: 500px) {
+  .lexvoice-settings-section-body > .setting-item:not(.setting-item-heading) {
+    grid-template-columns: 1fr;
+    gap: var(--size-2-2);
+  }
+
+  .lexvoice-settings-section-body > .setting-item > .setting-item-info,
+  .lexvoice-settings-section-body > .setting-item > .setting-item-control {
+    grid-column: 1;
+  }
+
+  .lexvoice-settings-section-body > .setting-item > .setting-item-control {
+    width: 100%;
+    max-width: none;
+    justify-self: stretch;
+    justify-content: flex-start;
+  }
+}
+
+.lexvoice-settings-content.is-mobile .lexvoice-settings-section-body > .setting-item:not(.setting-item-heading) {
+  grid-template-columns: 1fr;
+  gap: var(--size-2-2);
+}
+
+.lexvoice-settings-content.is-mobile .lexvoice-settings-section-body > .setting-item > .setting-item-info,
+.lexvoice-settings-content.is-mobile .lexvoice-settings-section-body > .setting-item > .setting-item-control {
+  grid-column: 1;
+}
+
+.lexvoice-settings-content.is-mobile .lexvoice-settings-section-body > .setting-item > .setting-item-control {
+  width: 100%;
+  max-width: none;
+  justify-self: stretch;
+  justify-content: flex-start;
 }

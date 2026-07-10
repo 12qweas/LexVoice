@@ -18118,8 +18118,8 @@ ${source}`;
         const chunkPath = this.getAvailableVaultPath(obsidian.normalizePath(`${cacheFolder}/${chunkName}`));
         if (!chunkPath) throw new Error("无法生成长音频分块缓存路径");
         await this.app.vault.createBinary(chunkPath, await chunkBlob.arrayBuffer());
-        // 内存优化：分块 WAV 已落盘，不在描述符里保留 blob（几十块 × 每块数 MB 会同时驻留内存）；
-        // 转写 worker 届时按 cachePath 惰性读回，同一时刻内存里最多只有并发数个分块。
+        // 分块 WAV 已落盘，不在描述符里保留 blob；转写 worker 通过 adapter 从 .cache 点目录按需读回。
+        // 这样既避开 vault 文件树不索引点目录的问题，也避免全部分块同时驻留内存。
         chunks.push({
           blob: null,
           cachePath: chunkPath,
@@ -18278,11 +18278,12 @@ ${source}`;
         let chunkBlob = chunk.blob;
         try {
           if (!chunkBlob && chunk.cachePath) {
-            // 惰性加载：分块 WAV 已落盘 segment-cache，按需读回（与 readVaultAudioBlob 同一读盘习语），
-            // 避免长音频的全部分块 blob 同时驻留内存。
-            const cacheFile = this.app.vault.getAbstractFileByPath(obsidian.normalizePath(chunk.cachePath));
-            if (!(cacheFile instanceof obsidian.TFile)) throw new Error(`分块缓存不存在：${chunk.cachePath}`);
-            chunkBlob = new Blob([await this.app.vault.readBinary(cacheFile)], { type: chunk.mime || "audio/wav" });
+            // segment-cache 在 .cache 点目录，必须走 adapter（可访问点目录）而非
+            // getAbstractFileByPath（对点目录恒返回 null，会误判缓存不存在）。
+            const cp = obsidian.normalizePath(chunk.cachePath);
+            const adapter = this.app.vault.adapter;
+            if (!(await adapter.exists(cp))) throw new Error(`分块缓存不存在：${chunk.cachePath}`);
+            chunkBlob = new Blob([await adapter.readBinary(cp)], { type: chunk.mime || "audio/wav" });
           }
           text = await transcribeImportAudioChunk(this, chunkBlob, chunk.mime || mime, asrConcurrency);
           const chunkDurMs = (Number(chunk.endOffsetMs) || 0) - (Number(chunk.startOffsetMs) || 0);
