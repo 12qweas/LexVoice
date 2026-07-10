@@ -60,6 +60,10 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     return tabs;
   }
   display() {
+    this.renderSettings();
+  }
+
+  renderSettings() {
     const { containerEl } = this;
     containerEl.empty();
 
@@ -161,7 +165,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       this._advancedTapAt = 0;
     }
     this.activeTab = tabId;
-    this.display();
+    this.renderSettings();
     if (tabId === "advanced") {
       this.handleAdvancedEasterEggTap().catch((e) => console.error("[LexVoice] HR easter egg failed", e));
     }
@@ -179,7 +183,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     this.plugin.settings.recruitFeatureUnlocked = true;
     await this.plugin.saveSettings();
     this.plugin.refreshOutlineView();
-    this.display();
+    this.renderSettings();
     this.showHrUnlockFireworks();
     new obsidian.Notice("尊贵的内部用户，您已成功解锁 LexVoice 4 HR", 6000);
   }
@@ -341,7 +345,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
 
   renderHome(c) {
     const page = c.createDiv({ cls: "lexvoice-home" });
-    const jump = (tab) => { this.activeTab = tab; this.display(); };
+    const jump = (tab) => { this.activeTab = tab; this.renderSettings(); };
     const hasSpeechProvider = (() => {
       const id = this.plugin.settings.activeTranscribeProvider || "siliconflow";
       const p = (this.plugin.settings.transcribeProviders || {})[id] || {};
@@ -403,7 +407,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       const done = await this.applyOneCardProvider(oneCardProviderId, oneCardKey);
       if (done) {
         new obsidian.Notice(cfg.applyDesc + " 已存为方案，可在「API」页顶部切换。点「检测」可测连通性。", 8000);
-        this.display();
+        this.renderSettings();
       }
     }));
     // 检测：测当前转写 + 大模型连通性
@@ -610,7 +614,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     const actions = head.createDiv({ cls: "lexvoice-audio-input-actions" });
     this.createAudioInputButton(actions, "自动推荐（可再调整）", async () => {
       await this.autoConfigureAudioInput();
-      this.display();
+      this.renderSettings();
     });
     this.createAudioInputButton(actions, "设备检测", async () => {
       await this.runAudioDiagnostic();
@@ -629,7 +633,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     modeSelect.addEventListener("change", async () => {
       this.plugin.settings.captureMode = normalizeAudioInputMode(modeSelect.value);
       await this.plugin.saveSettings();
-      this.display();
+      this.renderSettings();
     });
     const modeHint = modeField.createDiv({ cls: "lexvoice-audio-input-hint" });
     modeHint.setText(mode === "mic"
@@ -744,7 +748,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       this.plugin.settings.dailyMeetingOverviewTemplate = DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE;
       await this.plugin.saveSettings();
       new obsidian.Notice("已恢复默认日记模板");
-      this.display();
+      this.renderSettings();
     }));
     const dailyTplTa = c.createEl("textarea", { cls: "lexvoice-textarea lexvoice-textarea-mono" });
     dailyTplTa.rows = 8;
@@ -877,12 +881,12 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     sel.value = activeId;
     sel.addEventListener("change", async () => {
       const id = sel.value;
-      if (!id) { this.plugin.settings.activeLlmProfile = ""; await this.plugin.saveSettings(); this.display(); return; }
+      if (!id) { this.plugin.settings.activeLlmProfile = ""; await this.plugin.saveSettings(); this.renderSettings(); return; }
       applyLlmProfileToWorkingConfig(this.plugin.settings, id);
       await this.plugin.saveSettings();
       const p = findLlmProfile(this.plugin.settings, id);
       new obsidian.Notice(`已切换到方案「${p ? p.name : id}」${p && p.asr ? "（转写 + AI 整理已一并切换）" : "（仅 AI 整理）"}`, 5000);
-      this.display();
+      this.renderSettings();
     });
 
     const btns = controls.createDiv({ cls: "lexvoice-scheme-btns" });
@@ -913,7 +917,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       this.plugin.settings.activeLlmProfile = id;
       await this.plugin.saveSettings();
       new obsidian.Notice(`已保存方案「${trimmed}」（含转写 + AI 整理）`, 5000);
-      this.display();
+      this.renderSettings();
     };
     if (activeId) {
       const delBtn = btns.createEl("button", { cls: "lexvoice-icon-button", attr: { type: "button", "aria-label": "删除当前方案", title: "删除当前方案" } });
@@ -924,7 +928,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         this.plugin.settings.activeLlmProfile = "";
         await this.plugin.saveSettings();
         new obsidian.Notice(`已删除方案「${p ? p.name : activeId}」（当前转写 / 大模型配置仍保留在下方，可重新保存）`, 6000);
-        this.display();
+        this.renderSettings();
       };
     }
 
@@ -963,7 +967,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
           .onChange(async v => {
             this.plugin.settings.activeTranscribeProvider = v;
             await this.plugin.saveSettings();
-            this.display();
+            this.renderSettings();
           });
       });
 
@@ -1008,7 +1012,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         .addButton(b => b.setButtonText("恢复推荐值").onClick(async () => {
           const ok = await this.restoreTranscribeProviderDefaults(activeId);
           new obsidian.Notice(ok ? "已恢复当前转写服务的推荐连接信息，不会覆盖访问密钥。" : "当前服务没有内置推荐值。", 6000);
-          this.display();
+          this.renderSettings();
         }));
     }
 
@@ -1077,7 +1081,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       qa.model = model;
       // 密钥留给用户自己填（dashscope API Key）
       await this.plugin.saveSettings();
-      this.display();
+      this.renderSettings();
     };
     new obsidian.Setting(c).setName("听写服务")
       .setDesc("留空时复用纪要转写服务。也可以选择下方流式预设，获得边说边出的实时字幕。")
@@ -1169,7 +1173,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
           this.plugin.settings.llmServicePreset = id || "";
           if (!preset) {
             await this.plugin.saveSettings();
-            this.display();
+            this.renderSettings();
             return;
           }
           if (preset.endpoint) this.plugin.settings.llmEndpoint = preset.endpoint;
@@ -1179,7 +1183,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
           }
           await this.plugin.saveSettings();
           new obsidian.Notice(`已应用服务预设：${preset.label}。请确认访问密钥和模型标识后测试连接。`, 6000);
-          this.display();
+          this.renderSettings();
         });
       });
 
@@ -1213,7 +1217,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         this.plugin.settings.llmApiKey = sfSpeechKey;
         await this.plugin.saveSettings();
         new obsidian.Notice("已复用硅基流动转写密钥到大模型服务。", 5000);
-        this.display();
+        this.renderSettings();
       }));
     } else if (mimoSpeechKey && !this.plugin.settings.llmApiKey && /xiaomimimo\.com/i.test(llmEndpointNow)) {
       // MiMo 同平台一把 Key：转写已填、AI 整理还空 → 一键复用（与硅基流动「复用转写密钥」同款，仅填密钥）
@@ -1221,7 +1225,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         this.plugin.settings.llmApiKey = mimoSpeechKey;
         await this.plugin.saveSettings();
         new obsidian.Notice("已复用 MiMo 转写密钥到大模型服务。", 5000);
-        this.display();
+        this.renderSettings();
       }));
     }
 
@@ -1244,7 +1248,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
             syncWorkingConfigToLlmProfile(this.plugin.settings, this.plugin.settings.activeLlmProfile);
             await this.plugin.saveSettings();
             new obsidian.Notice(`已选择模型：${id}`, 4000);
-            this.display();
+            this.renderSettings();
           });
         } catch (e) {
           new obsidian.Notice(`获取模型列表失败：${(e && e.message) || e}。可手动填写模型标识。`, 8000);
@@ -1335,7 +1339,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         .addOption("translate", "统一为目标语言")
         .addOption("bilingual", "目标语言为主，关键原文括注")
         .setValue(this.plugin.settings.briefingTranslationMode || "off")
-        .onChange(async v => { this.plugin.settings.briefingTranslationMode = v; await this.plugin.saveSettings(); this.display(); }));
+        .onChange(async v => { this.plugin.settings.briefingTranslationMode = v; await this.plugin.saveSettings(); this.renderSettings(); }));
 
     if ((this.plugin.settings.briefingTranslationMode || "off") !== "off") {
       new obsidian.Setting(c).setName("目标语言")
@@ -1346,7 +1350,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
           .addOption("ko", "한국어")
           .addOption("custom", "自定义")
           .setValue(this.plugin.settings.briefingTargetLanguage || "zh-CN")
-          .onChange(async v => { this.plugin.settings.briefingTargetLanguage = v; await this.plugin.saveSettings(); this.display(); }));
+          .onChange(async v => { this.plugin.settings.briefingTargetLanguage = v; await this.plugin.saveSettings(); this.renderSettings(); }));
 
       if ((this.plugin.settings.briefingTargetLanguage || "zh-CN") === "custom") {
         new obsidian.Setting(c).setName("自定义目标语言")
@@ -1421,12 +1425,12 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       .addDropdown(d => {
         for (const [key, label] of getVisibleModeEntries(this.plugin.settings, false)) d.addOption(key, label);
         d.setValue(currentMode);
-        d.onChange(async v => { this.plugin.settings.polishMode = v; await this.plugin.saveSettings(); this.display(); });
+        d.onChange(async v => { this.plugin.settings.polishMode = v; await this.plugin.saveSettings(); this.renderSettings(); });
       })
       .addButton(b => b.setButtonText("打开模板库").setCta().onClick(() => {
         const modal = new PromptTemplateModal(this.app, this.plugin);
         const origClose = modal.onClose.bind(modal);
-        modal.onClose = () => { origClose(); this.display(); };
+        modal.onClose = () => { origClose(); this.renderSettings(); };
         modal.open();
       }));
 
@@ -1556,8 +1560,8 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       .setDesc(`人员待确认 ${pendingPeopleSuggestions.length} 条，已忽略 ${ignoredPeopleSuggestions.length} 条。扫描会调用当前 AI 整理服务；涉密内容建议使用本地模型。`)
       .addButton(b => b.setButtonText("提取人员建议").setCta().onClick(async () => this.plugin.suggestPeopleDirectoryFromLibrary()))
       .addButton(b => b.setButtonText("提取转写词表").onClick(async () => this._extractVocabFromLibrary(async () => { if (vocabPathSetting) await refreshVocabStatus(vocabPathSetting); })))
-      .addButton(b => b.setButtonText("待确认").setDisabled(!pendingPeopleSuggestions.length).onClick(async () => { await this.plugin.openCachedPeopleDirectorySuggestions(); this.display(); }))
-      .addButton(b => b.setButtonText("已忽略").setDisabled(!ignoredPeopleSuggestions.length).onClick(async () => { await this.plugin.openIgnoredPeopleDirectorySuggestions(); this.display(); }));
+      .addButton(b => b.setButtonText("待确认").setDisabled(!pendingPeopleSuggestions.length).onClick(async () => { await this.plugin.openCachedPeopleDirectorySuggestions(); this.renderSettings(); }))
+      .addButton(b => b.setButtonText("已忽略").setDisabled(!ignoredPeopleSuggestions.length).onClick(async () => { await this.plugin.openIgnoredPeopleDirectorySuggestions(); this.renderSettings(); }));
 
     new obsidian.Setting(c).setName("人员去重")
       .setDesc("按姓名合并重复资料，更新纪要引用，并归档带 -1 / -2 后缀的重复页。")
@@ -1569,7 +1573,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
           new obsidian.Notice(result.merged
             ? `已合并 ${result.merged} 个重复人员页，更新 ${result.updatedLinks} 篇引用`
             : "没有发现需要合并的重复人员页");
-          this.display();
+          this.renderSettings();
         } catch (e) {
           console.error("[LexVoice] merge duplicate people failed", e);
           new obsidian.Notice(`合并重复人员失败：${(e && e.message) || e}`, 8000);
@@ -1651,7 +1655,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         this.plugin.clearKnowledgeExtractionHistory("vocabulary");
         await this.plugin.saveSettings();
         new obsidian.Notice("已清空转写词表扫描记录");
-        this.display();
+        this.renderSettings();
       }))
       .addButton(b => b.setButtonText("清空人员记录").setDisabled(!peopleScanCount).onClick(async () => {
         const ok = await lexvoiceConfirm(this.app, "清空人员建议扫描记录？", `${peopleScanCount} 篇纪要将重新进入扫描范围；重新扫描会再次调用大模型服务，云端按量产生费用。`, "清空");
@@ -1659,7 +1663,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         this.plugin.clearKnowledgeExtractionHistory("people");
         await this.plugin.saveSettings();
         new obsidian.Notice("已清空人员建议扫描记录");
-        this.display();
+        this.renderSettings();
       }));
 
     const transcribeProvider = resolveTranscribeProvider(this.plugin);
@@ -1682,12 +1686,12 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
             const ok = await new Promise(resolve => {
               new PeopleHotwordsConsentModal(this.app, (confirmed) => resolve(confirmed)).open();
             });
-            if (!ok) { this.display(); return; }
+            if (!ok) { this.renderSettings(); return; }
             this.plugin.settings.peopleHotwordsConsentAt = new Date().toISOString();
           }
           this.plugin.settings.peopleContextMode = next;
           await this.plugin.saveSettings();
-          this.display();
+          this.renderSettings();
         }))
       .addButton(b => b.setButtonText("撤销授权")
         .setDisabled(!hasPeopleHotwordsConsent(this.plugin.settings))
@@ -1696,7 +1700,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
           if (normalizePeopleContextMode(this.plugin.settings.peopleContextMode) === "hotwords") this.plugin.settings.peopleContextMode = "privacy";
           await this.plugin.saveSettings();
           new obsidian.Notice("已撤销人名热词授权：后续转写与整理请求不再附带人员姓名和称呼，使用策略已自动切回「隐私优先」。");
-          this.display();
+          this.renderSettings();
         }));
   }
 
@@ -1757,12 +1761,12 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       .setDesc("建议先执行「检查更新」。发现新版本后可一键安装；当前版本号相同时，也可重新拉取官方发布文件用于修复本地副本。安装前会备份当前插件文件和设置。")
       .addButton(b => b.setButtonText("检查更新").onClick(async () => {
         await this.plugin.checkForUpdates({ silent: false });
-        this.display();
+        this.renderSettings();
       }))
       .addButton(b => b.setButtonText("一键增量更新").setCta().onClick(async () => {
         try {
           await this.plugin.installAvailableUpdate();
-          this.display();
+          this.renderSettings();
         } catch (e) {
           console.error(e);
           new obsidian.Notice("LexVoice 更新失败：" + ((e && e.message) || e), 12000);

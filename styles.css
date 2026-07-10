@@ -2765,9 +2765,9 @@ body .menu.lexvoice-menu .menu-item-icon svg,
 body .menu.lexvoice-menu .menu-item-icon .svg-icon,
 body .lexvoice-menu .menu-item-icon svg,
 body .lexvoice-menu .menu-item-icon .svg-icon {
-  width: 16px !important;
+  width: 16px;
   min-width: 16px;
-  height: 16px !important;
+  height: 16px;
   min-height: 16px;
   stroke-width: 2;
 }
