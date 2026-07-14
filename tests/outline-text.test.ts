@@ -6,6 +6,8 @@ import {
   normalizeOutlineMarkdownForDisplay,
   validateRealtimeOutlineMarkdown,
   parseRealtimeOutlineStateFromMarkdown,
+  selectIncrementalRealtimeOutlineSegments,
+  repairRealtimeOutlineAnchors,
   mergeStableRealtimeOutlineNodes,
   cleanRealtimeOutlineItemText,
   makeRealtimeOutlineNode,
@@ -78,6 +80,79 @@ describe("validateRealtimeOutlineMarkdown —— 富大纲不被误杀", () => {
   it("空大纲 + 有历史 → empty_outline；空大纲 + 无历史 → ok", () => {
     expect(validateRealtimeOutlineMarkdown("", { previousOutline: "- [[r|0:30]] 旧" }).reason).toBe("empty_outline");
     expect(validateRealtimeOutlineMarkdown("").ok).toBe(true);
+  });
+});
+
+describe("selectIncrementalRealtimeOutlineSegments —— 已提交游标与 backlog 顺序", () => {
+  const segment = (index: number, text = `段落${index}`) => ({ index, text });
+
+  it("窗口封顶时从最早未提交段开始，不从尾部截断，也只提交本轮实际覆盖的段", () => {
+    const source = Array.from({ length: 15 }, (_, index) => segment(index));
+    const selected = selectIncrementalRealtimeOutlineSegments(source, {
+      sinceCount: 3,
+      lookbackSegments: 1,
+      maxSegments: 4,
+      maxChars: 6000,
+    });
+    expect(selected.segments.map((item: any) => item.index)).toEqual([2, 3, 4, 5]);
+    expect(selected.newSegments.map((item: any) => item.index)).toEqual([3, 4, 5]);
+    expect(selected.commitThroughCount).toBe(6);
+    expect(selected.hasRemainingText).toBe(true);
+  });
+
+  it("游标按原始 segments 下标计算，空段不会造成 valid 数组错位", () => {
+    const source = [segment(0, "已有"), segment(1, ""), segment(2, "新增")];
+    const selected = selectIncrementalRealtimeOutlineSegments(source, {
+      sinceCount: 1,
+      maxSegments: 10,
+      maxChars: 6000,
+    });
+    expect(selected.newSegments.map((item: any) => item.index)).toEqual([2]);
+    expect(selected.commitThroughCount).toBe(3);
+  });
+
+  it("尾部只有空段时无需调用 LLM，也可安全确认到末尾", () => {
+    const selected = selectIncrementalRealtimeOutlineSegments(
+      [segment(0, "已有"), segment(1, ""), segment(2, "")],
+      { sinceCount: 1, maxSegments: 10, maxChars: 6000 }
+    );
+    expect(selected.newUsedCount).toBe(0);
+    expect(selected.commitThroughCount).toBe(3);
+  });
+});
+
+describe("repairRealtimeOutlineAnchors —— LLM 漏时间链接的确定性修复", () => {
+  it("同名旧主题恢复历史锚点，新主题按新增转写顺序补锚点", () => {
+    const previous = "- [[rec.webm|00:10]] 旧主题\n  - 旧证据";
+    const fresh = "- 旧主题\n  - 新补充\n- 新主题\n  - 新证据";
+    const repaired = repairRealtimeOutlineAnchors(fresh, {
+      previousOutline: previous,
+      anchorSources: [{ anchor: "[[rec.webm|03:00]]", index: 3 }],
+    });
+    expect(repaired.outline).toContain("- [[rec.webm|00:10]] 旧主题");
+    expect(repaired.outline).toContain("- [[rec.webm|03:00]] 新主题");
+    expect(repaired.restoredCount).toBe(1);
+    expect(repaired.unresolvedCount).toBe(0);
+    expect(validateRealtimeOutlineMarkdown(repaired.outline, { previousOutline: previous }).ok).toBe(true);
+  });
+
+  it("首轮全漏锚点时，可由本轮转写锚点恢复为合法时间轴", () => {
+    const repaired = repairRealtimeOutlineAnchors("- 主题甲\n- 主题乙", {
+      anchorSources: [
+        { anchor: "[[rec.webm|01:00]]", index: 1 },
+        { anchor: "[[rec.webm|02:00]]", index: 2 },
+      ],
+    });
+    expect(repaired.repairedCount).toBe(2);
+    expect(repaired.unresolvedCount).toBe(0);
+    expect(validateRealtimeOutlineMarkdown(repaired.outline).ok).toBe(true);
+  });
+
+  it("没有可用转写锚点时保持未解决状态，交给上层判废而不是伪造时间", () => {
+    const repaired = repairRealtimeOutlineAnchors("- 新主题", { anchorSources: [] });
+    expect(repaired.repairedCount).toBe(0);
+    expect(repaired.unresolvedCount).toBe(1);
+    expect(repaired.outline).toBe("- 新主题");
   });
 });
 

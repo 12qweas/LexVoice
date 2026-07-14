@@ -173,6 +173,139 @@ export function parseRealtimeOutlineStateFromMarkdown(markdown) {
   return nodes.slice(-REALTIME_OUTLINE_STATE_MAX_NODES);
 }
 
+// Select the earliest uncommitted transcript segments, plus a small read-only
+// lookback window for continuity. The returned commitThroughCount only covers
+// segments actually included in this batch, so a capped window can never skip
+// an older backlog and falsely mark it as processed.
+export function selectIncrementalRealtimeOutlineSegments(segments, opts = {}) {
+  const source = Array.isArray(segments) ? segments : [];
+  const totalSegmentCount = source.length;
+  const maxSegments = Math.max(1, Math.floor(Number(opts.maxSegments) || 10));
+  const maxChars = Math.max(200, Math.floor(Number(opts.maxChars) || 6000));
+  const sinceCount = Math.min(totalSegmentCount, Math.max(0, Math.floor(Number(opts.sinceCount) || 0)));
+  const requestedLookback = Math.max(0, Math.floor(Number(opts.lookbackSegments) || 0));
+  const lookbackCount = Math.min(requestedLookback, Math.max(0, maxSegments - 1));
+
+  const valid = source
+    .map((segment, sourceIndex) => ({ segment, sourceIndex }))
+    .filter(({ segment }) => segment && String(segment.text || "").trim());
+  const previous = valid.filter(({ sourceIndex }) => sourceIndex < sinceCount).slice(-lookbackCount);
+  const pending = valid.filter(({ sourceIndex }) => sourceIndex >= sinceCount);
+  const selectedEntries = previous.slice();
+  const selectedNewEntries = [];
+  let chars = selectedEntries.reduce((sum, item) => sum + String(item.segment.text || "").trim().length, 0);
+
+  for (const item of pending) {
+    if (selectedEntries.length >= maxSegments) break;
+    const chunkChars = String(item.segment.text || "").trim().length;
+    if (selectedNewEntries.length > 0 && chars + chunkChars > maxChars) break;
+    selectedEntries.push(item);
+    selectedNewEntries.push(item);
+    chars += chunkChars;
+  }
+
+  let commitThroughCount = sinceCount;
+  if (selectedNewEntries.length) {
+    commitThroughCount = selectedNewEntries[selectedNewEntries.length - 1].sourceIndex + 1;
+    if (selectedNewEntries.length === pending.length) commitThroughCount = totalSegmentCount;
+  } else if (!pending.length) {
+    // Empty/failed ASR segments carry no outline information and are safe to
+    // acknowledge without spending an LLM request.
+    commitThroughCount = totalSegmentCount;
+  }
+
+  const firstSelectedIndex = selectedEntries.length ? selectedEntries[0].sourceIndex : totalSegmentCount;
+  return {
+    segments: selectedEntries.map(({ segment }) => segment),
+    newSegments: selectedNewEntries.map(({ segment }) => segment),
+    usedCount: selectedEntries.length,
+    newUsedCount: selectedNewEntries.length,
+    omittedBeforeCount: valid.filter(({ sourceIndex }) => sourceIndex < firstSelectedIndex).length,
+    totalTextCount: valid.length,
+    totalSegmentCount,
+    approxChars: chars,
+    isIncremental: sinceCount > 0,
+    sinceCount,
+    deltaTotalCount: pending.length,
+    commitThroughCount,
+    hasRemainingText: selectedNewEntries.length < pending.length,
+  };
+}
+
+function renderRealtimeOutlineNodesMarkdown(nodes) {
+  return (Array.isArray(nodes) ? nodes : []).map((node) => {
+    const head = `- ${node.anchor ? `${node.anchor} ` : ""}${node.title}`.trimEnd();
+    const children = (Array.isArray(node.children) ? node.children : [])
+      .map((child) => `  - ${child}`);
+    return [head, ...children].join("\n");
+  }).join("\n");
+}
+
+// LLMs occasionally preserve the outline content but omit every audio link.
+// Restore exact historical anchors by title first, then assign anchors from
+// the newly supplied transcript segments in chronological order. This keeps
+// timeline links deterministic and prevents a useful generation from being
+// discarded only because the model missed Markdown syntax.
+export function repairRealtimeOutlineAnchors(markdown, opts = {}) {
+  const source = String(markdown || "").trim();
+  const nodes = parseRealtimeOutlineStateFromMarkdown(source);
+  if (!nodes.length) {
+    return { outline: source, repairedCount: 0, restoredCount: 0, unresolvedCount: 0 };
+  }
+
+  const previousNodes = parseRealtimeOutlineStateFromMarkdown(opts.previousOutline || "");
+  const previousByTitle = new Map();
+  for (const node of previousNodes) {
+    const key = realtimeOutlineDedupKey(node.title);
+    if (key && node.anchor && !previousByTitle.has(key)) previousByTitle.set(key, node.anchor);
+  }
+
+  const anchorSources = (Array.isArray(opts.anchorSources) ? opts.anchorSources : [])
+    .map((item, index) => ({
+      anchor: String(item && item.anchor || "").trim(),
+      index: Number.isFinite(Number(item && item.index)) ? Number(item.index) : index,
+    }))
+    .filter((item) => REALTIME_OUTLINE_ANCHOR_RE.test(item.anchor))
+    .sort((a, b) => a.index - b.index);
+  const usedAnchors = new Set(nodes.map((node) => node.anchor).filter(Boolean));
+  let sourceCursor = 0;
+  let repairedCount = 0;
+  let restoredCount = 0;
+  let unresolvedCount = 0;
+
+  for (const node of nodes) {
+    if (node.anchor) continue;
+    const previousAnchor = previousByTitle.get(realtimeOutlineDedupKey(node.title));
+    if (previousAnchor) {
+      node.anchor = previousAnchor;
+      node.time = getRealtimeOutlineAnchorTime(previousAnchor);
+      usedAnchors.add(previousAnchor);
+      repairedCount++;
+      restoredCount++;
+      continue;
+    }
+    while (sourceCursor < anchorSources.length && usedAnchors.has(anchorSources[sourceCursor].anchor)) {
+      sourceCursor++;
+    }
+    const next = anchorSources[sourceCursor++];
+    if (!next) {
+      unresolvedCount++;
+      continue;
+    }
+    node.anchor = next.anchor;
+    node.time = getRealtimeOutlineAnchorTime(next.anchor);
+    usedAnchors.add(next.anchor);
+    repairedCount++;
+  }
+
+  return {
+    outline: renderRealtimeOutlineNodesMarkdown(nodes),
+    repairedCount,
+    restoredCount,
+    unresolvedCount,
+  };
+}
+
 // children 单调并集：只增不删、按 realtimeOutlineDedupKey 去重、existing 优先、截断 MAX_CHILDREN。
 // 单调 = 模型某轮漏给的子要点不会删旧的；某轮给的脏/近义子要点最多多一条噪音、不顶替历史子要点。
 // 代价（诚实）：早轮一条"错但独特"的子要点会被永久钉死（dedupKey 只挡近义、不挡内容错）——
