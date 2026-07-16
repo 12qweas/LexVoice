@@ -154,6 +154,57 @@ describe("repairRealtimeOutlineAnchors —— LLM 漏时间链接的确定性修
     expect(repaired.unresolvedCount).toBe(1);
     expect(repaired.outline).toBe("- 新主题");
   });
+
+  it("不信任模型时间：旧主题恢复历史锚点，新主题替换为真实分段锚点", () => {
+    const previous = "- [[rec.webm|00:10]] 旧主题\n  - 旧证据";
+    const fresh = "- [[fake.webm|99:99]] 旧主题\n- [[fake.webm|88:88]] 新主题";
+    const repaired = repairRealtimeOutlineAnchors(fresh, {
+      previousOutline: previous,
+      anchorSources: [{ anchor: "[[rec.webm|03:00]]", index: 3 }],
+    });
+    expect(repaired.outline).toContain("- [[rec.webm|00:10]] 旧主题");
+    expect(repaired.outline).toContain("- [[rec.webm|03:00]] 新主题");
+    expect(repaired.outline).not.toContain("fake.webm");
+    expect(repaired.replacedCount).toBe(2);
+  });
+
+  it("多个新主题按真实候选位置单调分布，不采用模型重复时间", () => {
+    const fresh = ["甲", "乙", "丙", "丁"]
+      .map((title) => `- [[fake.webm|09:09]] ${title}`)
+      .join("\n");
+    const repaired = repairRealtimeOutlineAnchors(fresh, {
+      anchorSources: [
+        { anchor: "[[rec.webm|01:00]]", index: 1 },
+        { anchor: "[[rec.webm|01:30]]", index: 2 },
+        { anchor: "[[rec.webm|02:00]]", index: 3 },
+        { anchor: "[[rec.webm|02:30]]", index: 4 },
+      ],
+    });
+    const nodes = parseRealtimeOutlineStateFromMarkdown(repaired.outline);
+    expect(nodes.map((node) => node.time)).toEqual(["01:00", "01:30", "02:00", "02:30"]);
+    expect(new Set(nodes.map((node) => node.anchor)).size).toBe(4);
+  });
+
+  it("主题多于真实分段时允许共享区间起点，不伪造额外秒数", () => {
+    const repaired = repairRealtimeOutlineAnchors("- 甲\n- 乙\n- 丙\n- 丁", {
+      anchorSources: [
+        { anchor: "[[rec.webm|00:00]]", index: 0 },
+        { anchor: "[[rec.webm|03:00]]", index: 1 },
+      ],
+    });
+    const nodes = parseRealtimeOutlineStateFromMarkdown(repaired.outline);
+    expect(nodes.map((node) => node.time)).toEqual(["00:00", "00:00", "03:00", "03:00"]);
+  });
+
+  it("没有真实来源时移除模型伪造时间，但结构仍可按宽松模式验收", () => {
+    const repaired = repairRealtimeOutlineAnchors("- [[fake.webm|09:09]] 新主题", { anchorSources: [] });
+    expect(repaired.outline).toBe("- 新主题");
+    expect(repaired.unresolvedCount).toBe(1);
+    expect(validateRealtimeOutlineMarkdown(repaired.outline, {
+      previousOutline: "- [[rec.webm|00:10]] 旧主题",
+      allowUntimedTopLevel: true,
+    }).ok).toBe(true);
+  });
 });
 
 describe("normalizeRealtimeOutlineList —— 连排拆行 + 全 Unicode 破折号 + 锚点硬切", () => {
@@ -211,6 +262,22 @@ describe("mergeStableRealtimeOutlineNodes —— 历史冻结 + 末尾增量 + �
       [node("a1", "A"), node("a2", "B")]
     );
     expect(state.length).toBe(2);
+  });
+  it("同一时间区间的不同主题全部保留，时间不再充当唯一键", () => {
+    const state = mergeStableRealtimeOutlineNodes(
+      [node("a1", "主题甲")],
+      [node("a1", "主题甲", ["补充"]), node("a1", "主题乙"), node("a1", "主题丙")]
+    );
+    expect(state.map((item) => item.title)).toEqual(["主题甲", "主题乙", "主题丙"]);
+    expect(state[0].children).toEqual(["补充"]);
+  });
+  it("同区间多个历史主题按标题各自补充，不串写 children", () => {
+    const state = mergeStableRealtimeOutlineNodes(
+      [node("a1", "主题甲", ["甲旧"]), node("a1", "主题乙", ["乙旧"])],
+      [node("a1", "主题甲", ["甲新"]), node("a1", "主题乙", ["乙新"])]
+    );
+    expect(state[0].children).toEqual(["甲旧", "甲新"]);
+    expect(state[1].children).toEqual(["乙旧", "乙新"]);
   });
   it("历史非末尾节点被新话题挤下后，后续同锚点轮仍能补子要点（单调、title 冻结）", () => {
     // A 在轮 k 只有 1 个子要点，随后 B 追加把 A 挤下末尾

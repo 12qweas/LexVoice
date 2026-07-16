@@ -241,11 +241,11 @@ function renderRealtimeOutlineNodesMarkdown(nodes) {
   }).join("\n");
 }
 
-// LLMs occasionally preserve the outline content but omit every audio link.
-// Restore exact historical anchors by title first, then assign anchors from
-// the newly supplied transcript segments in chronological order. This keeps
-// timeline links deterministic and prevents a useful generation from being
-// discarded only because the model missed Markdown syntax.
+// Audio anchors are program-owned metadata, not part of the LLM contract.
+// Always restore exact historical anchors by title and replace anchors on new
+// nodes with approximate anchors derived from the real transcript segments.
+// This prevents a useful outline from being rejected or merged incorrectly
+// because the model omitted, copied, repeated, or invented a timestamp.
 export function repairRealtimeOutlineAnchors(markdown, opts = {}) {
   const source = String(markdown || "").trim();
   const nodes = parseRealtimeOutlineStateFromMarkdown(source);
@@ -267,41 +267,55 @@ export function repairRealtimeOutlineAnchors(markdown, opts = {}) {
     }))
     .filter((item) => REALTIME_OUTLINE_ANCHOR_RE.test(item.anchor))
     .sort((a, b) => a.index - b.index);
-  const usedAnchors = new Set(nodes.map((node) => node.anchor).filter(Boolean));
-  let sourceCursor = 0;
   let repairedCount = 0;
   let restoredCount = 0;
+  let replacedCount = 0;
   let unresolvedCount = 0;
+  const freshNodes = [];
 
   for (const node of nodes) {
-    if (node.anchor) continue;
     const previousAnchor = previousByTitle.get(realtimeOutlineDedupKey(node.title));
     if (previousAnchor) {
+      if (node.anchor !== previousAnchor) repairedCount++;
+      if (node.anchor && node.anchor !== previousAnchor) replacedCount++;
       node.anchor = previousAnchor;
       node.time = getRealtimeOutlineAnchorTime(previousAnchor);
-      usedAnchors.add(previousAnchor);
-      repairedCount++;
       restoredCount++;
       continue;
     }
-    while (sourceCursor < anchorSources.length && usedAnchors.has(anchorSources[sourceCursor].anchor)) {
-      sourceCursor++;
-    }
-    const next = anchorSources[sourceCursor++];
+    freshNodes.push(node);
+  }
+
+  for (let index = 0; index < freshNodes.length; index++) {
+    const node = freshNodes[index];
+    // Spread topics monotonically over the real source window. There may be
+    // more candidate anchors than topics because each transcript segment
+    // contributes several approximate positions.
+    const sourceIndex = anchorSources.length
+      ? Math.min(anchorSources.length - 1, Math.floor(index * anchorSources.length / freshNodes.length))
+      : -1;
+    const next = sourceIndex >= 0 ? anchorSources[sourceIndex] : null;
     if (!next) {
+      if (node.anchor) {
+        node.anchor = "";
+        node.time = "";
+        repairedCount++;
+        replacedCount++;
+      }
       unresolvedCount++;
       continue;
     }
+    if (node.anchor !== next.anchor) repairedCount++;
+    if (node.anchor && node.anchor !== next.anchor) replacedCount++;
     node.anchor = next.anchor;
     node.time = getRealtimeOutlineAnchorTime(next.anchor);
-    usedAnchors.add(next.anchor);
-    repairedCount++;
   }
 
   return {
     outline: renderRealtimeOutlineNodesMarkdown(nodes),
     repairedCount,
     restoredCount,
+    replacedCount,
     unresolvedCount,
   };
 }
@@ -342,15 +356,42 @@ export function mergeStableRealtimeOutlineNodes(existingNodes, freshNodes) {
   const existing = (Array.isArray(existingNodes) ? existingNodes : []).filter(Boolean);
   const fresh = (Array.isArray(freshNodes) ? freshNodes : []).filter(Boolean);
   if (!existing.length) return fresh.slice(-REALTIME_OUTLINE_STATE_MAX_NODES);
+  const freshByTitle = new Map();
   const freshByAnchor = new Map();
-  for (const n of fresh) { if (n.anchor && !freshByAnchor.has(n.anchor)) freshByAnchor.set(n.anchor, n); }
-  const existingAnchors = new Set(existing.map((n) => n.anchor).filter(Boolean));
-  const existingTitles = new Set(existing.map((n) => realtimeOutlineDedupKey(n.title)).filter(Boolean));
+  for (const node of fresh) {
+    const titleKey = realtimeOutlineDedupKey(node.title);
+    if (titleKey && !freshByTitle.has(titleKey)) freshByTitle.set(titleKey, node);
+    if (node.anchor) {
+      const bucket = freshByAnchor.get(node.anchor) || [];
+      bucket.push(node);
+      freshByAnchor.set(node.anchor, bucket);
+    }
+  }
+  const existingAnchorCounts = new Map();
+  const existingCompositeKeys = new Set();
+  const existingTitles = new Set();
+  for (const node of existing) {
+    const titleKey = realtimeOutlineDedupKey(node.title);
+    if (titleKey) existingTitles.add(titleKey);
+    if (node.anchor) existingAnchorCounts.set(node.anchor, (existingAnchorCounts.get(node.anchor) || 0) + 1);
+    existingCompositeKeys.add(`${node.anchor || ""}|${titleKey}`);
+  }
+  const consumedFresh = new Set();
   const result = [];
   for (let i = 0; i < existing.length; i++) {
     const node = existing[i];
-    const freshMatch = node.anchor ? freshByAnchor.get(node.anchor) : null;
+    const titleKey = realtimeOutlineDedupKey(node.title);
+    let freshMatch = titleKey ? freshByTitle.get(titleKey) : null;
+    if (freshMatch && consumedFresh.has(freshMatch)) freshMatch = null;
+    // Backward compatibility for older outputs that retained an exact unique
+    // anchor but lightly rewrote the title. Never use anchor-only matching when
+    // several topics share the same source interval.
+    if (!freshMatch && node.anchor && existingAnchorCounts.get(node.anchor) === 1) {
+      const candidates = (freshByAnchor.get(node.anchor) || []).filter((item) => !consumedFresh.has(item));
+      if (candidates.length === 1) freshMatch = candidates[0];
+    }
     if (freshMatch) {
+      consumedFresh.add(freshMatch);
       // children 单调并集；title/anchor/time 全取 existing —— 历史冻结，模型乱改 title 进不来。
       result.push(Object.assign({}, node, {
         children: mergeOutlineChildrenMonotonic(node.children, freshMatch.children),
@@ -359,16 +400,17 @@ export function mergeStableRealtimeOutlineNodes(existingNodes, freshNodes) {
       result.push(node); // 无同锚点 fresh：原样保留（历史里已有的子要点也不丢）
     }
   }
-  // 追加真正的新话题（锚点不在历史里；无锚点的按归一键去重，避免措辞微改即每轮重复累积）。
-  const appendedAnchors = new Set();
+  // 追加真正的新话题。时间锚点只表示大致区间，不是唯一键：同一三分钟
+  // 分段可以有多个不同主题，按「区间 + 标题」复合键去重，绝不能只按时间吞掉后者。
+  const appendedCompositeKeys = new Set();
   for (const node of fresh) {
-    if (node.anchor) {
-      if (existingAnchors.has(node.anchor) || appendedAnchors.has(node.anchor)) continue;
-      appendedAnchors.add(node.anchor);
-    } else {
-      const t = realtimeOutlineDedupKey(node.title);
-      if (t && existingTitles.has(t)) continue;
-    }
+    if (consumedFresh.has(node)) continue;
+    const titleKey = realtimeOutlineDedupKey(node.title);
+    if (!titleKey) continue;
+    const compositeKey = `${node.anchor || ""}|${titleKey}`;
+    if (existingCompositeKeys.has(compositeKey) || appendedCompositeKeys.has(compositeKey)) continue;
+    if (!node.anchor && existingTitles.has(titleKey)) continue;
+    appendedCompositeKeys.add(compositeKey);
     result.push(node);
   }
   return result.slice(-REALTIME_OUTLINE_STATE_MAX_NODES);
@@ -380,6 +422,7 @@ export function mergeStableRealtimeOutlineNodes(existingNodes, freshNodes) {
 // 改写历史结构。顶部（首个带锚点之前）的无锚点总览行无论如何仍丢弃（挂无可挂、会挤坏时间轴）。
 export function normalizeOutlineMarkdownForDisplay(text, opts = {}) {
   const attachUntimed = !!(opts && opts.attachUntimed);
+  const preserveUntimedTopLevel = !!(opts && opts.preserveUntimedTopLevel);
   const src = String(text || "").trim();
   if (!src) return "";
   const lines = src.split(/\r?\n/);
@@ -408,6 +451,11 @@ export function normalizeOutlineMarkdownForDisplay(text, opts = {}) {
       const body = topBullet[2] || "";
       const hasTime = /\[\[[^\]]+\|\d{1,2}:\d{2}(?::\d{2})?\]\]/.test(body);
       if (!hasTime) {
+        if (preserveUntimedTopLevel) {
+          out.push(line);
+          afterTimedTopLevel = false;
+          continue;
+        }
         // 首个带锚点 L1 之后冒出的无锚点顶层行 = 延续讨论。开启 attachUntimed 时降级挂靠为上一带锚点
         // 节点的子项（治"内容白丢"），挂靠后落到上一话题 children、被冻结合并保留；不开启则按旧逻辑丢。
         if (attachUntimed && seenTimedTop) {
@@ -545,14 +593,16 @@ export function validateRealtimeOutlineMarkdown(outline, opts = {}) {
   if (topBullets.length - prevTopCount > 8) {
     return { ok: false, reason: "too_many_top_level_bullets" };
   }
-  const timedTopBullets = topBullets.filter((body) => /\[\[[^\]]+\|\d{1,2}:\d{2}(?::\d{2})?\]\]/.test(body));
-  const hasPreviousTimed = /\[\[[^\]]+\|\d{1,2}:\d{2}(?::\d{2})?\]\]/.test(previousOutline);
-  if (hasPreviousTimed && timedTopBullets.length === 0) {
-    return { ok: false, reason: "lost_all_time_anchors" };
-  }
-  const untimedRatio = topBullets.length ? (topBullets.length - timedTopBullets.length) / topBullets.length : 0;
-  if (hasPreviousTimed && untimedRatio > 0.35) {
-    return { ok: false, reason: "too_many_untimed_top_level_items" };
+  if (!opts.allowUntimedTopLevel) {
+    const timedTopBullets = topBullets.filter((body) => /\[\[[^\]]+\|\d{1,2}:\d{2}(?::\d{2})?\]\]/.test(body));
+    const hasPreviousTimed = /\[\[[^\]]+\|\d{1,2}:\d{2}(?::\d{2})?\]\]/.test(previousOutline);
+    if (hasPreviousTimed && timedTopBullets.length === 0) {
+      return { ok: false, reason: "lost_all_time_anchors" };
+    }
+    const untimedRatio = topBullets.length ? (topBullets.length - timedTopBullets.length) / topBullets.length : 0;
+    if (hasPreviousTimed && untimedRatio > 0.35) {
+      return { ok: false, reason: "too_many_untimed_top_level_items" };
+    }
   }
   const suspiciousNumberedTitle = topBullets.find((body) => /\]\]\s*\d+[.)、．]/.test(body));
   if (suspiciousNumberedTitle) {

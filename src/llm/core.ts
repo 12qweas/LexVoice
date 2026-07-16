@@ -7,14 +7,8 @@ import { delayMs } from '../shared/util-audio';
 import { extractLlmContent } from '../shared/util-json';
 import { diagnosticError } from '../shared/util-key-diag';
 import { withPromiseTimeout, getHeaderValue, parseRetryAfterMs, parseRequestUrlJson, getRequestUrlText } from '../shared/util-http';
-
-type LlmQueueItem = {
-  priority: number;
-  seq: number;
-  run: () => unknown;
-  resolve: (value: unknown) => void;
-  reject: (reason?: unknown) => void;
-};
+import { LlmRequestQueue } from './request-queue';
+export { LlmRequestQueue } from './request-queue';
 
 type LlmHttpError = Error & {
   status?: number;
@@ -22,44 +16,6 @@ type LlmHttpError = Error & {
   retryAfterMs?: number;
   nonRetryable?: boolean;
 };
-
-export class LlmRequestQueue {
-  items: LlmQueueItem[];
-  running: number;
-  seq: number;
-  constructor() {
-    this.items = [];
-    this.running = 0;
-    this.seq = 0;
-  }
-  enqueue(priority, run) {
-    return new Promise((resolve, reject) => {
-      this.items.push({
-        priority: Number(priority) || 1,
-        seq: ++this.seq,
-        run,
-        resolve,
-        reject,
-      });
-      this.pump();
-    });
-  }
-  pump() {
-    if (this.running > 0) return;
-    const next = this.items
-      .sort((a, b) => (a.priority - b.priority) || (a.seq - b.seq))
-      .shift();
-    if (!next) return;
-    this.running += 1;
-    void Promise.resolve()
-      .then(next.run)
-      .then(next.resolve, next.reject)
-      .finally(() => {
-        this.running = Math.max(0, this.running - 1);
-        this.pump();
-      });
-  }
-}
 
 export const LLM_REQUEST_QUEUE = new LlmRequestQueue();
 
@@ -208,7 +164,7 @@ export function getLlmRequestPriority(options) {
 
 export function runQueuedLlmRequest(options, run) {
   if (options && options.skipQueue) return run();
-  return LLM_REQUEST_QUEUE.enqueue(getLlmRequestPriority(options || {}), run);
+  return LLM_REQUEST_QUEUE.enqueue(getLlmRequestPriority(options || {}), run, options && options.signal);
 }
 
 export function accumulateLlmSseDataLine(line, state) {
@@ -316,7 +272,18 @@ export async function requestLlmChatCompletion(plugin, messages, options) {
   const headers = buildLlmHeaders(llmApiKey, endpoint);
   const timeoutMs = resolveLlmRequestTimeoutMs(options || {});
   return await runQueuedLlmRequest(options || {}, async () => {
-    const controller = timeoutMs > 0 && typeof AbortController !== "undefined" ? new AbortController() : null;
+    const externalSignal = options && options.signal;
+    const controller = (timeoutMs > 0 || externalSignal) && typeof AbortController !== "undefined"
+      ? new AbortController()
+      : null;
+    const onExternalAbort = () => { try { controller?.abort(); } catch { /* intentionally empty */ } };
+    if (externalSignal && typeof externalSignal.addEventListener === "function") {
+      externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+      if (externalSignal.aborted) onExternalAbort();
+    }
+    const detachExternalAbort = () => {
+      try { externalSignal?.removeEventListener?.("abort", onExternalAbort); } catch { /* intentionally empty */ }
+    };
     let timer = null;
     // 空闲超时：流式读取时每收到一个 chunk 都调 armTimer 重置；只有 timeoutMs 内"完全没有新数据"
     // 才视为真卡死并 abort。这样慢但在持续输出的响应不会被误杀、不会白白浪费已计费的生成。
@@ -337,17 +304,29 @@ export async function requestLlmChatCompletion(plugin, messages, options) {
       });
     } catch (e) {
       if (timer) window.clearTimeout(timer);
+      detachExternalAbort();
       if (controller && controller.signal && controller.signal.aborted) {
-        const err = new Error(`LLM 调用超时：${Math.round(timeoutMs / 1000)} 秒内没有响应`);
-        await logLlmRequestDiagnostic(plugin, "error", "llm.fetch_failed", "LLM 请求发送失败", {
+        const cancelled = !!(externalSignal && externalSignal.aborted);
+        const err = new Error(cancelled
+          ? "LLM 调用已取消"
+          : `LLM 调用超时：${Math.round(timeoutMs / 1000)} 秒内没有响应`);
+        if (cancelled) err.name = "AbortError";
+        await logLlmRequestDiagnostic(
+          plugin,
+          cancelled ? "info" : "error",
+          cancelled ? "llm.request_cancelled" : "llm.fetch_failed",
+          cancelled ? "LLM 请求已取消" : "LLM 请求发送失败",
+          {
           endpoint,
           model: llmModel ? "<set>" : "",
           messageChars,
           payloadChars,
           timeoutMs,
           aborted: true,
+          cancelled,
           error: diagnosticError(err),
-        });
+          }
+        );
         throw err;
       }
       await logLlmRequestDiagnostic(plugin, "error", "llm.fetch_failed", "LLM 请求发送失败", {
@@ -433,6 +412,7 @@ export async function requestLlmChatCompletion(plugin, messages, options) {
       return await res.json();
     } finally {
       if (timer) window.clearTimeout(timer);
+      detachExternalAbort();
     }
   });
 }

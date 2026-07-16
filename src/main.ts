@@ -43,6 +43,7 @@ import { SHARED_DISCIPLINE, STRUCTURE_LEVEL_INSTRUCTIONS } from "./prompts/disci
 import { INDUSTRY_META_PROMPT } from "./prompts/industry-meta";
 import { JOBPORTRAIT_SYSTEM_PROMPT, JOBPORTRAIT_FOLLOWUP_RULES } from "./prompts/recruit-hrbp";
 import { CLEAN_TRANSCRIPT_SYSTEM, buildCleanTranscriptChunkPrompt, QUICK_DICTATION_SYSTEM, buildQuickDictationCleanupPrompt } from "./prompts/clean-transcript";
+import { RealtimeOutlineCoordinator, runInOutlineSessionTail } from "./outline-coordinator";
 
 
 
@@ -955,10 +956,14 @@ const REALTIME_OUTLINE_MAX_MEMORY_CHARS = 800; // 与 prompt 的"memory ≤600�
 const REALTIME_OUTLINE_LOOKBACK_SEGMENTS = 1;
 const REALTIME_OUTLINE_MIN_NEW_SEGMENTS = 2;
 const REALTIME_OUTLINE_MIN_NEW_CHARS = 200;
+const REALTIME_OUTLINE_INITIAL_MIN_SEGMENTS = 2;
+const REALTIME_OUTLINE_INITIAL_MIN_CHARS = 120;
 const REALTIME_OUTLINE_MIN_SILENT_INTERVAL_MS = 30000;
 const REALTIME_OUTLINE_SILENT_TIMEOUT_MS = 35000;
 const REALTIME_OUTLINE_MANUAL_TIMEOUT_MS = 45000;
 const REALTIME_OUTLINE_FINAL_TIMEOUT_MS = 45000;
+const REALTIME_OUTLINE_RETRY_GUARD_MS = 300;
+const REALTIME_OUTLINE_BUSY_RETRY_MS = 2000;
 // 大纲 max_tokens 分档（按总纲："最终那次该说完不为省钱截断"）：
 // - silent：控制延迟，保持适度上限；长会真正需要内容时由 manual / final 那次补足
 // - final / manual：用户停止录音后那一次，必须把完整大纲跑全，不被实时档预算连累
@@ -1064,7 +1069,10 @@ function buildRealtimeOutlineAnchorSources(segments) {
     .map((segment, index) => ({
       anchor: getAudioTimeLink(segment && segment.audioName, getSegmentAudioLinkOffsetMs(segment)),
       text: String((segment && segment.text) || "").trim(),
-      index: Number.isFinite(Number(segment && segment.index)) ? Number(segment.index) : index,
+      // The source segment is the time interval. Several outline topics may
+      // intentionally receive the same start anchor; exact seconds are not a
+      // content identity and must not be fabricated for uniqueness.
+      index: Math.max(0, Number(segment && segment.startOffsetMs) || index),
     }))
     .filter((item) => item.anchor && item.text);
 }
@@ -1115,7 +1123,7 @@ function buildRollingOutlineContext(previousMemory, previousOutline, windowed) {
       // 首轮模式（无 isIncremental）：仍允许合并重复的旧节点。两种情况共用同一段大纲，
       // 但增量是默认走的，绝大多数后续轮次都受这条约束保护。
       isIncremental
-        ? "下面是已经显示给用户的大纲。**整段视为只读历史**：所有一级条目（包括它们的 `[[file|HH:MM]]` 时间戳、行文措辞、顺序）都必须原样保留。本轮的任务只是 **追加** 新内容，不是重写。"
+        ? "下面是已经显示给用户的大纲。**整段视为只读历史**：所有一级条目的标题、子条目和顺序都必须保留。本轮的任务只是 **追加** 新内容，不是重写。回听链接由程序维护，不属于你需要处理的内容。"
         : "下面是侧边栏当前显示的大纲。它只用于保持连续性；请保留仍然重要的主线，合并重复或过细的旧节点。",
       "",
       outline
@@ -1130,10 +1138,10 @@ function buildRollingOutlineContext(previousMemory, previousOutline, windowed) {
         : `这些是上次大纲之后新转写出来的段落。请只为这些新段落生成新的一级或子条目，老一级条目原样保留。`,
       "",
       "**输出要求（增量模式）**：",
-      "- 完整复制【当前可见大纲】里所有老一级条目（连同时间戳、子条目、顺序）—— 一字不改。",
-      "- 在大纲末尾按时间顺序 **追加** 由新增转写引出的新一级条目（用新段落里实际出现的 `[[file|HH:MM]]` 链接）。",
-      "- 如果新增转写明显是某个老一级条目的延续 / 补充细节，则不新建 L1，而是在该老 L1 下追加子条目（子条目不带时间戳）。",
-      "- 严禁：改写、合并、重排、删除任何老一级条目；严禁把新段落的时间戳赋给老一级条目。",
+      "- 完整复制【当前可见大纲】里所有老一级条目的标题、子条目和顺序；回听链接可以省略，程序会恢复。",
+      "- 在大纲末尾按讨论顺序 **追加** 由新增转写引出的新一级条目。",
+      "- 如果新增转写明显是某个老一级条目的延续 / 补充细节，则不新建 L1，而是在该老 L1 下追加子条目。",
+      "- 严禁：改写、合并、重排、删除任何老一级条目。不要生成或校对时间戳。",
       ""
     );
   } else {
@@ -1172,12 +1180,11 @@ function buildRealtimeOutlineEnvelopeInstruction() {
     "【可见大纲写法】",
     "- <lexvoice-outline> 内只能放用户可读的大纲列表。",
     "- 要输出一份结合主题记忆和最近窗口后的更新版大纲，不要只输出新增内容。",
-    "- 合并重复节点，删掉已经不重要的细枝末节；保留能帮助用户回忆现场的关键词和时间锚点。",
+    "- 合并重复节点，删掉已经不重要的细枝末节；保留能帮助用户回忆现场的关键词和层级。",
     "- 控制在 8 个一级节点以内。**每个一级节点必须带 2-4 个子要点**，提炼该话题下的关键论点、事实、数据、人名或结论 —— 只有光秃秃的一级标题没有意义，子要点才是大纲的灵魂。话题确实只有一句话时至少给 1 个子要点。",
-    "- 每个一级节点必须是一个具体章节/话题，并尽量以输入中真实存在的 `[[音频文件|HH:MM]]` 回听链接开头；没有明确时间锚点的信息只能放到相邻章节的子条目里。",
-    "- 严禁在 <lexvoice-outline> 里输出无时间锚点的总述行，例如「课程结构」「本节包括」「四个部分」这类横跨全局的摘要；这些内容属于主题记忆，不属于可点击大纲。",
-    "- 顶层格式只能是：`- [[音频文件|HH:MM]] 章节标题`。子项格式只能是两个空格缩进：`  - 子要点`。",
-    "- 不确定时间锚点时，不要新增顶层节点；把信息写进 <lexvoice-memory>，或追加到最近一个已有顶层节点的子项。",
+    "- 每个一级节点必须是一个具体章节/话题；不要输出「课程结构」「本节包括」「四个部分」这类横跨全局的总述行。",
+    "- 顶层格式只能是：`- 章节标题`。子项格式只能是两个空格缩进：`  - 子要点`。",
+    "- 不要生成、复制或校对 `[[音频文件|HH:MM]]`；LexVoice 会根据真实音频分段自动挂上近似回听位置。",
     "",
     "【换行铁律 · 最重要】",
     "- 每个条目必须独占一行，用真正的换行符分隔。",
@@ -1185,7 +1192,7 @@ function buildRealtimeOutlineEnvelopeInstruction() {
     "- 一行里只能有一个 `- ` 开头；子项缩进两个空格后另起一行。",
     "",
     "【合格示例】",
-    "- [[rec.m4a|04:41]] 商业化思维的四个问题",
+    "- 商业化思维的四个问题",
     "  - 解决什么问题",
     "  - 正确商业化思维",
     "  - 感受量化手段",
@@ -1193,7 +1200,7 @@ function buildRealtimeOutlineEnvelopeInstruction() {
     "【不合格示例，禁止输出】",
     "- 课程结构与开场四问：课程四部分、四个场景、寻找手段",
     "- 课程结构 - 课程四部分 - 四个场景 - 学员A - 学员B（错误：多条目连排一行）",
-    "- [[rec.m4a|04:41]] 1.解决什么问题 2.正确商业化思维 3.感受量化手段",
+    "- 1.解决什么问题 2.正确商业化思维 3.感受量化手段",
   ].join("\n");
 }
 
@@ -1283,7 +1290,7 @@ function renderRealtimeOutlineStateMarkdown(state) {
   return lines.join("\n").trim();
 }
 
-function buildOutlineAudioAnchorInstruction() {
+function buildEvidenceAudioAnchorInstruction() {
   return `【回听锚点 · 极其重要 · 时间戳钉死规则】
 转写内容按段落提供，并在段落信息里带有 Obsidian 音频回听链接，例如 \`[[音频文件.webm|12:34]]\`。
 
@@ -1302,6 +1309,14 @@ function buildOutlineAudioAnchorInstruction() {
 `;
 }
 
+function buildProgramOwnedOutlineAnchorInstruction() {
+  return `【回听位置】
+你只负责判断主题和组织要点，不负责生成时间戳。
+- 不要输出、复制或校对 \`[[音频文件|HH:MM]]\`。
+- LexVoice 会在收到结构后，根据真实转写分段为一级节点挂上近似回听位置。
+- 具体秒数不参与内容质量判断；即使无法挂载时间，也要完整输出合格的大纲结构。`;
+}
+
 // 招聘需求挖掘 · 会中 coverage-scan prompt（spec §5.2.B）：整场转写 → 14 维覆盖状态 JSON。
 // system 用 JOBPORTRAIT_SYSTEM_PROMPT。languageInstruction 前置（前缀缓存）。
 function buildCoverageScanPrompt(transcript, languageInstruction) {
@@ -1310,7 +1325,7 @@ function buildCoverageScanPrompt(transcript, languageInstruction) {
 
 【先判断场景】若截至目前的对话明显不是在沟通某岗位招人标准（更像研讨、闲聊或其它会议），所有维度如实标 missing 即可，不要为了凑覆盖率把无关内容硬塞进某一维。
 
-${buildOutlineAudioAnchorInstruction()}
+${buildEvidenceAudioAnchorInstruction()}
 
 【14 个维度（key 固定，不可增删改）】
 硬性要求(hard)：years（年限）/ education（学历）/ industry（行业）/ must_have（必须经验）/ salary（期望薪酬）
@@ -1359,7 +1374,7 @@ function buildOutlinePrompt(modeLabel, modeKey, transcript, captureMode, languag
 
 ${buildSourceAwareOutlineInstruction(captureMode, modeKey)}
 
-${buildOutlineAudioAnchorInstruction()}
+${buildProgramOwnedOutlineAnchorInstruction()}
 
 ${buildRealtimeOutlineEnvelopeInstruction()}
 
@@ -1368,7 +1383,7 @@ ${buildRealtimeOutlineEnvelopeInstruction()}
 
 【可见大纲格式】
 \`\`\`
-- <主题，4-8 字> [[音频文件.webm|12:34]]
+- <主题，4-8 字>
   - ❓ <面试官提问，精简成一句>
   - 💬 <候选人回答的关键点 1>
   - 💬 <候选人回答的关键点 2>
@@ -1411,7 +1426,7 @@ ${transcript}`;
 
 ${buildSourceAwareOutlineInstruction(captureMode, modeKey)}
 
-${buildOutlineAudioAnchorInstruction()}
+${buildProgramOwnedOutlineAnchorInstruction()}
 
 ${buildRealtimeOutlineEnvelopeInstruction()}
 
@@ -1434,7 +1449,7 @@ ${buildRealtimeOutlineEnvelopeInstruction()}
 
 【输出】
 - <lexvoice-outline> 内使用纯 Markdown 列表，缩进表达层级
-- 每条简短，不解释、不前言、不结语；一级条目可在末尾带一个回听锚点
+- 每条简短，不解释、不前言、不结语；一级条目不要写时间戳或回听链接
 - 转写不完整时只整理已出现的内容${langBlock}
 
 实时整理上下文：
@@ -1584,7 +1599,11 @@ function hasRealtimeOutlineRunnableBacklog(session) {
   const hasPriorOutput = session && session.mode === "recruit-needs"
     ? !!(session.jobPortraitCoverage && session.jobPortraitCoverage.updatedAt)
     : !!(session && session.realtimeOutline);
-  if (!hasPriorOutput) return true;
+  if (!hasPriorOutput) {
+    if (session && session.mode === "recruit-needs") return true;
+    return newSegments >= REALTIME_OUTLINE_INITIAL_MIN_SEGMENTS
+      || newChars >= REALTIME_OUTLINE_INITIAL_MIN_CHARS;
+  }
   return newSegments >= REALTIME_OUTLINE_MIN_NEW_SEGMENTS || newChars >= REALTIME_OUTLINE_MIN_NEW_CHARS;
 }
 
@@ -1641,7 +1660,13 @@ function getRealtimeOutlineQueuedDelayMs(session, opts = {}) {
   const intervalUntil = updatedAt
     ? updatedAt + getRealtimeOutlineMinSilentIntervalMs({ local: !!opts.local })
     : 0;
-  return Math.max(1000, backoffUntil - now, intervalUntil - now);
+  const deadlineWait = Math.max(backoffUntil - now, intervalUntil - now, 0);
+  const floor = Number(session && session.activeSegmentJobs || 0) > 0
+    ? REALTIME_OUTLINE_BUSY_RETRY_MS
+    : 1000;
+  // 定时器可能比目标时刻提前数毫秒触发。留出 guard，避免刚好仍在退避期时
+  // shouldRun=false 后丢掉整条重试链。
+  return Math.max(floor, deadlineWait > 0 ? deadlineWait + REALTIME_OUTLINE_RETRY_GUARD_MS : 0);
 }
 
 function shouldRunRealtimeOutline(session, opts = {}) {
@@ -1659,6 +1684,12 @@ function shouldRunRealtimeOutline(session, opts = {}) {
   const hasPriorRealtimeOutput = session.mode === "recruit-needs"
     ? !!(session.jobPortraitCoverage && session.jobPortraitCoverage.updatedAt)
     : !!session.realtimeOutline;
+  if (opts.silent && !hasPriorRealtimeOutput && !isRecruitFirstScan) {
+    const newSegments = getRealtimeOutlineNewSegmentCount(session);
+    const newChars = getRealtimeOutlineNewTextChars(session);
+    if (newSegments < REALTIME_OUTLINE_INITIAL_MIN_SEGMENTS
+      && newChars < REALTIME_OUTLINE_INITIAL_MIN_CHARS) return false;
+  }
   if (opts.silent && hasPriorRealtimeOutput) {
     if (isRealtimeOutlineSilentIntervalActive(session, { local: !!opts.local })) return false;
     const newSegments = getRealtimeOutlineNewSegmentCount(session);
@@ -6524,11 +6555,9 @@ class OutlineView extends obsidian.ItemView {
     super(leaf);
     this.plugin = plugin;
     this.aiOutline = "";
-    this.outlineRunning = false;
     this.lastOutlineSegmentCount = 0;
     this.lastOutlineWorkbenchSignature = "";
     this.outlineSessionId = "";
-    this.outlineRunSeq = 0;
     this._renderRaf = 0;
     this._lastSig = "";
     this._lastRenderedOutline = "";
@@ -6588,7 +6617,9 @@ class OutlineView extends obsidian.ItemView {
         && this.plugin.session
         && this.plugin.session.segments.length > 0
         && !this.aiOutline) {
-      window.setTimeout(() => { void this.refreshAIOutline({ silent: true }); }, 400);
+      window.setTimeout(() => {
+        this.plugin.scheduleRealtimeOutline({ delayMs: 0, reason: "view-open" });
+      }, 400);
     }
   }
   async onClose() {
@@ -6601,7 +6632,12 @@ class OutlineView extends obsidian.ItemView {
   syncSessionOutline(session) {
     const id = session && session.id ? session.id : "";
     const previousId = this.outlineSessionId || "";
-    if (id === previousId) return;
+    if (id === previousId) {
+      this.aiOutline = session && session.realtimeOutline ? session.realtimeOutline : "";
+      this.lastOutlineSegmentCount = session && session.realtimeOutlineSegmentCount ? session.realtimeOutlineSegmentCount : 0;
+      this.lastOutlineWorkbenchSignature = session && session.realtimeOutlineWorkbenchSignature ? session.realtimeOutlineWorkbenchSignature : "";
+      return;
+    }
     this.outlineSessionId = id;
     if (id) {
       this.showRecentHome = false;
@@ -6613,7 +6649,6 @@ class OutlineView extends obsidian.ItemView {
     this.aiOutline = session && session.realtimeOutline ? session.realtimeOutline : "";
     this.lastOutlineSegmentCount = session && session.realtimeOutlineSegmentCount ? session.realtimeOutlineSegmentCount : 0;
     this.lastOutlineWorkbenchSignature = session && session.realtimeOutlineWorkbenchSignature ? session.realtimeOutlineWorkbenchSignature : "";
-    this.outlineQueued = false;
   }
   // 通过 rAF 合并连续 emit；如签名（结构性状态）未变只做轻量更新，否则全量 render
   scheduleUpdate() {
@@ -6657,6 +6692,8 @@ class OutlineView extends obsidian.ItemView {
           workbench.materials.map(item => item.path).join(","),
         ].join(":")
       : "";
+    const outlineCoordinatorState = this.plugin.getRealtimeOutlineCoordinatorState();
+    const outlineForSignature = (session && session.realtimeOutline) || this.aiOutline || "";
     return [
       session ? session.id : "idle",
       recState,
@@ -6664,12 +6701,12 @@ class OutlineView extends obsidian.ItemView {
       segs.length, segDone, segErr,
       // length + FNV hash 双保险：length 抓快速差异、hash 抓"等长但内容变了"(改写/锚点时间变/A↔B换位/
       // 子要点措辞替换)——否则后台生成改了大纲但长度没变时 scheduleUpdate 不重建 DOM，用户看到旧大纲。
-      this.aiOutline ? `${this.aiOutline.length}:${hashRealtimeOutlineText(this.aiOutline)}` : 0,
+      outlineForSignature ? `${outlineForSignature.length}:${hashRealtimeOutlineText(outlineForSignature)}` : 0,
       // recruit-needs 的大纲不进 aiOutline，coverage 变化要单独进签名才会触发重渲染；
       // 追问卡反馈（已问/忽略，session 级）也进签名，否则点按钮后卡片不消失。
       session && session.mode === "recruit-needs" && session.jobPortraitCoverage
         ? `${session.jobPortraitCoverage.covered}:${session.jobPortraitCoverage.updatedAt}:${Object.keys((session && session.followupFeedback) || {}).sort().join(",")}` : "",
-      this.outlineRunning ? 1 : 0,
+      `${outlineCoordinatorState.phase}:${outlineCoordinatorState.runId}:${outlineCoordinatorState.queued}:${outlineCoordinatorState.reason}`,
       queueN,
       mode,            // ← 模式切换会触发重渲染（招聘上下文卡片显隐）
       captureMode,     // ← 音频输入方式切换会触发设备状态条重渲染
@@ -9856,6 +9893,14 @@ class OutlineView extends obsidian.ItemView {
     const items = this.getOutlineChapterItems(body);
     if (!items.length) return;
     const current = items[items.length - 1];
+    const currentMs = this.getOutlineChapterTimeMs(current);
+    const currentItems = Number.isFinite(currentMs)
+      ? items.filter((item) => {
+        const ms = this.getOutlineChapterTimeMs(item);
+        return Number.isFinite(ms) && Math.abs(ms - currentMs) < 500;
+      })
+      : [current];
+    const currentSet = new Set(currentItems);
     const viewingMs = Number.isFinite(this.outlineViewingMs) ? this.outlineViewingMs : null;
     let viewingItem = null;
     for (const li of items) {
@@ -9866,7 +9911,7 @@ class OutlineView extends obsidian.ItemView {
       li.onclick = (evt) => {
         const target = evt.target;
         if (target && target.closest && target.closest("a,button")) return;
-        if (li === current) {
+        if (currentSet.has(li)) {
           this.outlineViewingMs = null;
           this.lastLiveOutlineFocusKey = "";
         } else if (Number.isFinite(ms)) {
@@ -9879,7 +9924,7 @@ class OutlineView extends obsidian.ItemView {
     const isRecording = recInfo && recInfo.state === "recording";
     const isPaused = recInfo && recInfo.state === "paused";
     if ((isRecording || isPaused) && current) {
-      current.addClass("is-generating");
+      for (const item of currentItems) item.addClass("is-generating");
       if (!current.querySelector(".lexvoice-outline-live-badge")) {
         const badge = activeDocument.createElement("span");
         badge.className = "lexvoice-outline-live-badge";
@@ -9937,10 +9982,16 @@ class OutlineView extends obsidian.ItemView {
     const items = this.getOutlineChapterItems(body);
     if (!items.length) return;
     const currentMs = Math.max(0, Number(this.inlineAudioEl.currentTime) || 0) * 1000;
-    let activeIndex = -1;
     const times = items.map((li) => this.getOutlineChapterTimeMs(li));
+    let activeTime = NaN;
     for (let i = 0; i < times.length; i++) {
-      if (Number.isFinite(times[i]) && times[i] <= currentMs + 250) activeIndex = i;
+      if (Number.isFinite(times[i]) && times[i] <= currentMs + 250) activeTime = times[i];
+    }
+    let activeMarkerIndex = -1;
+    if (Number.isFinite(activeTime)) {
+      for (let i = 0; i < times.length; i++) {
+        if (Number.isFinite(times[i]) && Math.abs(times[i] - activeTime) < 500) activeMarkerIndex = i;
+      }
     }
     for (let i = 0; i < items.length; i++) {
       const li = items[i];
@@ -9950,11 +10001,13 @@ class OutlineView extends obsidian.ItemView {
       li.removeClass("is-upcoming");
       const oldWave = li.querySelector(".lexvoice-outline-mini-wave");
       if (oldWave) oldWave.remove();
-      if (activeIndex >= 0 && i < activeIndex) li.addClass("is-played");
-      else if (i === activeIndex) {
+      if (Number.isFinite(activeTime) && Number.isFinite(times[i]) && times[i] < activeTime) li.addClass("is-played");
+      else if (Number.isFinite(activeTime) && Number.isFinite(times[i]) && Math.abs(times[i] - activeTime) < 500) {
         li.addClass("is-playing");
-        const target = li.querySelector(":scope > p") || li;
-        this.addOutlineMiniWave(target, "", li);
+        if (i === activeMarkerIndex) {
+          const target = li.querySelector(":scope > p") || li;
+          this.addOutlineMiniWave(target, "", li);
+        }
       } else li.addClass("is-upcoming");
       li.onclick = (evt) => {
         const target = evt.target;
@@ -10835,6 +10888,7 @@ class OutlineView extends obsidian.ItemView {
   }
 
   renderAIOutline(root, session, recInfo = null, recordingIssue = null) {
+    const outlineRunning = this.plugin.isRealtimeOutlineRunning(session);
     const aiWrap = root.createDiv({ cls: "lexvoice-outline-section lexvoice-outline-ai-section" });
     const aiHead = aiWrap.createDiv({ cls: "lexvoice-outline-ai-head is-utility" });
     const aiTitle = aiHead.createDiv({ cls: "lexvoice-outline-source-title" });
@@ -10842,10 +10896,10 @@ class OutlineView extends obsidian.ItemView {
     try { obsidian.setIcon(aiIcon, session && session.mode === "recruit" ? "user-check" : "sparkles"); } catch { /* intentionally empty */ }
     aiTitle.createSpan({ text: session && session.mode === "recruit" ? "AI 面试大纲" : "AI 整理大纲" });
     aiHead.createDiv({ cls: "lexvoice-outline-source-badge", text: session && session.mode === "recruit" ? "转写 + AI 判断" : "由转写整理" });
-    const refreshBtn = aiHead.createEl("button", { text: this.outlineRunning ? "停止等待" : "刷新" });
+    const refreshBtn = aiHead.createEl("button", { text: outlineRunning ? "停止等待" : "刷新" });
     refreshBtn.disabled = !session || session.segments.length === 0;
     refreshBtn.onclick = () => {
-      if (this.outlineRunning) this.cancelOutlineGeneration();
+      if (outlineRunning) this.cancelOutlineGeneration();
       else void this.refreshAIOutline({ force: true });
     };
 
@@ -10856,7 +10910,7 @@ class OutlineView extends obsidian.ItemView {
       this.renderRecruitNeedsOutlineDom(body, session);
       return;
     }
-    const outlineText = normalizeOutlineMarkdownForDisplay(this.aiOutline || (session && session.realtimeOutline) || "");
+    const outlineText = normalizeOutlineMarkdownForDisplay((session && session.realtimeOutline) || this.aiOutline || "");
     if (outlineText) {
       const isRecruit = session && session.mode === "recruit";
       if (isRecruit) body.addClass("is-recruit-mode");
@@ -12472,13 +12526,10 @@ class OutlineView extends obsidian.ItemView {
   }
 
   cancelOutlineGeneration() {
-    this.outlineRunSeq = (this.outlineRunSeq || 0) + 1;
-    this.outlineRunning = false;
-    this.outlineQueued = false;
-    // 一并清掉会话级生成死锁与退避，让"停止等待"真正解卡——否则锁没释放，后续刷新还会堵在同一把锁上，越点越死。
-    try { const s = this.plugin.session; if (s) { s._outlineGenLock = Promise.resolve(); markRealtimeOutlineSuccess(s); } } catch { /* intentionally empty */ }
+    const session = this.plugin.session;
+    if (session) this.plugin.cancelRealtimeOutline(session.id);
     void this.plugin.logDiagnostic("warn", "outline.cancel_waiting", "用户停止等待实时大纲生成", {
-      segmentCount: this.plugin.session && this.plugin.session.segments ? this.plugin.session.segments.length : 0,
+      segmentCount: session && session.segments ? session.segments.length : 0,
       lastOutlineSegmentCount: this.lastOutlineSegmentCount,
     });
     this.render();
@@ -12486,83 +12537,28 @@ class OutlineView extends obsidian.ItemView {
 
   async refreshAIOutline(opts) {
     const silent = !!(opts && opts.silent);
-    // 手动点「刷新」= 用户明确要求"现在重算一遍"，force 跳过 isRealtimeOutlineCurrent/间隔/新增段等节流门，
-    // 否则大纲刚生成过（或软失败把游标推满导致 isRealtimeOutlineCurrent 恒真）时点刷新会静默无反应（"按不了"）。
     const force = !!(opts && opts.force);
     const session = this.plugin.session;
     if (!session || session.segments.length === 0) return;
     this.syncSessionOutline(session);
-    // 手动强制刷新 = 硬复位：清掉可能卡住的运行标志 / 会话级生成死锁 / 退避——绝不因"前面某轮卡死"把手动刷新也一起挡掉。
-    // 让在飞的旧轮结果作废（seq++，其 finally 靠 runSeq 校验不再回写），并重置那把可能永不释放的 _outlineGenLock。
-    if (force) {
-      this.outlineRunSeq = (this.outlineRunSeq || 0) + 1;
-      this.outlineRunning = false;
-      this.outlineQueued = false;
-      try { session._outlineGenLock = Promise.resolve(); } catch { /* intentionally empty */ }
-      try { markRealtimeOutlineSuccess(session); } catch { /* intentionally empty */ }
+    if (silent && !force) {
+      this.plugin.scheduleRealtimeOutline({ delayMs: 0, reason: "view-refresh" });
+      return;
     }
-    if (this.outlineRunning) { this.outlineQueued = true; return; }
-    const local = isLocalLlmEndpoint(this.plugin.settings && this.plugin.settings.llmEndpoint);
-    if (!shouldRunRealtimeOutline(session, { silent, local, force })) return;
-    const runId = (this.outlineRunSeq || 0) + 1;
-    this.outlineRunSeq = runId;
-    this.outlineRunning = true;
-    this.render();
     try {
-      const baseTimeout = silent ? REALTIME_OUTLINE_SILENT_TIMEOUT_MS : REALTIME_OUTLINE_MANUAL_TIMEOUT_MS;
-      const result = await this.plugin.generateRealtimeOutlineForSession(session, {
-        timeoutMs: local ? baseTimeout * 2 : baseTimeout,
+      await this.plugin.refreshRealtimeOutlineInBackground({
         silent,
         force,
-        maxTokens: REALTIME_OUTLINE_SILENT_MAX_TOKENS,
-        local,
+        reason: force ? "manual-refresh" : "view-refresh",
       });
-      if (this.outlineRunSeq !== runId) return;
-      this.aiOutline = result;
+      this.aiOutline = session.realtimeOutline || "";
       this.lastOutlineSegmentCount = Math.max(0, Number(session.realtimeOutlineSegmentCount) || 0);
       this.lastOutlineWorkbenchSignature = session.realtimeOutlineWorkbenchSignature || "";
-      this.outlineErrorCount = 0;
-      markRealtimeOutlineSuccess(session);
-      if (hasRealtimeOutlineRunnableBacklog(session)) this.outlineQueued = true;
     } catch (e) {
-      console.error(e);
-      this.outlineErrorCount = (this.outlineErrorCount || 0) + 1;
-      markRealtimeOutlineFailure(session);
-      if (silent && hasRealtimeOutlineRunnableBacklog(session)) this.outlineQueued = true;
-      if (!silent) {
-        this.plugin.setRecordingIssue(classifyRecordingIssue(e), {
-          source: "outline",
-          message: getErrorMessage(e),
-          startedAtMs: getSegmentsDurationMs(session && session.segments),
-        });
-      }
-      await this.plugin.logDiagnostic("error", "outline.generate_failed", "实时大纲生成失败", {
-        silent,
-        errorCount: this.outlineErrorCount,
-        segmentCount: session.segments.length,
-        lastOutlineSegmentCount: this.lastOutlineSegmentCount,
-        memoryChars: String(session.realtimeOutlineMemory || "").length,
-        window: session.realtimeOutlineWindow || null,
-        mode: session.mode,
-        captureMode: session.captureMode,
-        error: diagnosticError(e),
-      });
-      if (!silent || this.outlineErrorCount === 1) {
-        new obsidian.Notice(`大纲生成失败：${(e && e.message) || e}`);
-      }
+      if (!(e && e.name === "AbortError")) console.error("[LexVoice] realtime outline refresh failed", e);
     } finally {
-      if (this.outlineRunSeq === runId) {
-        this.outlineRunning = false;
-        this.render();
-        if (this.outlineQueued) {
-          this.outlineQueued = false;
-          const pendingSession = this.plugin.session;
-          if (pendingSession && hasRealtimeOutlineRunnableBacklog(pendingSession)) {
-            const wait = getRealtimeOutlineQueuedDelayMs(pendingSession, { local });
-            window.setTimeout(() => { void this.refreshAIOutline({ silent: true }); }, wait);
-          }
-        }
-      }
+      this.syncSessionOutline(this.plugin.session);
+      this.render();
     }
   }
 }
@@ -12578,6 +12574,13 @@ class LexVoicePlugin extends obsidian.Plugin {
     this.queue.load(this.persistedQueue);
     this.session = null;
     this.recordingIssue = null;
+    this.outlineCoordinator = new RealtimeOutlineCoordinator({
+      getActiveSessionId: () => (this.session && this.session.id) || "",
+      evaluate: (request) => this.evaluateRealtimeOutlineRequest(request),
+      execute: (request) => this.executeRealtimeOutlineRequest(request),
+      onFailure: (request, error) => this.getRealtimeOutlineRetryDecision(request, error),
+      onStateChange: () => this.refreshOutlineView(),
+    });
 
     // 转写进度状态栏：常驻、一眼可见队列/转写跑到哪——消解"点了转写就黑盒"的焦虑。点击打开队列。
     this._importBusy = null;
@@ -12871,6 +12874,7 @@ class LexVoicePlugin extends obsidian.Plugin {
   }
 
   onunload() {
+    try { if (this.outlineCoordinator) this.outlineCoordinator.dispose(); } catch { /* intentionally empty */ }
     void (async () => {
       try { if (this.recorder && this.recorder.state !== "idle") await this.recorder.stop(); } catch { /* intentionally empty */ }
     })();
@@ -13824,88 +13828,173 @@ class LexVoicePlugin extends obsidian.Plugin {
     return null;
   }
 
-  scheduleRealtimeOutline() {
-    if (this.outlineRefreshTimer) window.clearTimeout(this.outlineRefreshTimer);
-    const delay = Math.max(2500, this.settings.realtimeOutlineDebounceMs || 1500);
-    const local = isLocalLlmEndpoint(this.settings.llmEndpoint);
-    this.outlineRefreshTimer = window.setTimeout(() => {
-      this.outlineRefreshTimer = null;
-      if (!shouldRunRealtimeOutline(this.session, { silent: true, local })) {
-        if (hasRealtimeOutlineRunnableBacklog(this.session)
-          && (isRealtimeOutlineBackoffActive(this.session) || isRealtimeOutlineSilentIntervalActive(this.session, { local }))) {
-          const wait = getRealtimeOutlineQueuedDelayMs(this.session, { local });
-          this.outlineRefreshTimer = window.setTimeout(() => {
-            this.outlineRefreshTimer = null;
-            this.scheduleRealtimeOutline();
-          }, wait);
-        }
-        return;
-      }
-      const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_OUTLINE);
-      let handledByView = false;
-      for (const leaf of leaves) {
-        const v = leaf.view;
-        if (v && typeof v.refreshAIOutline === "function") {
-          handledByView = true;
-          v.refreshAIOutline({ silent: true });
-        }
-      }
-      if (!handledByView) void this.refreshRealtimeOutlineInBackground({ silent: true });
-    }, delay);
+  scheduleRealtimeOutline(opts = {}) {
+    const session = this.session;
+    if (!session || !session.id) return;
+    const requestedDelay = Number(opts && opts.delayMs);
+    const delay = Number.isFinite(requestedDelay) && requestedDelay >= 0
+      ? Math.max(250, Math.round(requestedDelay))
+      : Math.max(2500, this.settings.realtimeOutlineDebounceMs || 1500);
+    this.outlineCoordinator.schedule({
+      sessionId: session.id,
+      silent: true,
+      reason: (opts && opts.reason) || "segment",
+      delayMs: delay,
+      local: isLocalLlmEndpoint(this.settings.llmEndpoint),
+    });
   }
 
   async refreshRealtimeOutlineInBackground(opts = {}) {
     const session = this.session;
-    if (!session || !session.segments || !session.segments.length) return;
-    if (this._backgroundOutlineRunning) {
-      this._backgroundOutlineQueued = true;
-      return;
-    }
+    if (!session || !session.id || !session.segments || !session.segments.length) return "";
     const local = isLocalLlmEndpoint(this.settings.llmEndpoint);
-    if (!shouldRunRealtimeOutline(session, { silent: !!opts.silent, force: !!opts.force, final: !!opts.final, local })) return;
-    this._backgroundOutlineRunning = true;
+    return await this.outlineCoordinator.request({
+      sessionId: session.id,
+      silent: !!opts.silent,
+      force: !!opts.force,
+      final: !!opts.final,
+      reason: opts.reason || (opts.force ? "manual-refresh" : "background"),
+      timeoutMs: opts.timeoutMs,
+      maxTokens: opts.maxTokens,
+      local,
+    });
+  }
+
+  getRealtimeOutlineCoordinatorState() {
+    return this.outlineCoordinator
+      ? this.outlineCoordinator.getState()
+      : { phase: "idle", sessionId: "", runId: 0, queued: 0, reason: "", startedAt: 0, nextRunAt: 0, lastError: "" };
+  }
+
+  isRealtimeOutlineRunning(session = this.session) {
+    const state = this.getRealtimeOutlineCoordinatorState();
+    return !!(session && state.phase === "running" && state.sessionId === session.id);
+  }
+
+  cancelRealtimeOutline(sessionId) {
+    if (this.outlineCoordinator) this.outlineCoordinator.cancel(sessionId);
+  }
+
+  evaluateRealtimeOutlineRequest(request) {
+    const session = this.session;
+    if (!session || session.id !== request.sessionId) {
+      return { ready: false, retry: false, reason: "stale-session" };
+    }
+    if (!this.settings.enableRealtimeOutline && session.mode !== "recruit-needs") {
+      return { ready: false, retry: false, reason: "disabled" };
+    }
+    const local = !!request.local || isLocalLlmEndpoint(this.settings.llmEndpoint);
+    if (shouldRunRealtimeOutline(session, {
+      silent: !!request.silent,
+      force: !!request.force,
+      final: !!request.final,
+      local,
+    })) {
+      return { ready: true };
+    }
+    if (!request.silent || !hasRealtimeOutlineRunnableBacklog(session)) {
+      return { ready: false, retry: false, reason: "no-runnable-backlog" };
+    }
+    let reason = "waiting";
+    if (Number(session.activeSegmentJobs || 0) > 0) reason = "asr-busy";
+    else if (isRealtimeOutlineBackoffActive(session)) reason = "failure-backoff";
+    else if (isRealtimeOutlineSilentIntervalActive(session, { local })) reason = "minimum-interval";
+    return {
+      ready: false,
+      retry: true,
+      delayMs: getRealtimeOutlineQueuedDelayMs(session, { local }),
+      reason,
+    };
+  }
+
+  getRealtimeOutlineRetryDecision(request) {
+    const session = this.session;
+    if (!request.silent || !session || session.id !== request.sessionId) {
+      return { retry: false, reason: "failed" };
+    }
+    if (!hasRealtimeOutlineRunnableBacklog(session)) {
+      return { retry: false, reason: "no-runnable-backlog" };
+    }
+    const local = !!request.local || isLocalLlmEndpoint(this.settings.llmEndpoint);
+    return {
+      retry: true,
+      delayMs: getRealtimeOutlineQueuedDelayMs(session, { local }),
+      reason: "failure-backoff",
+    };
+  }
+
+  async executeRealtimeOutlineRequest(request) {
+    const session = this.session;
+    if (!session || session.id !== request.sessionId) return "";
+    const local = !!request.local || isLocalLlmEndpoint(this.settings.llmEndpoint);
+    const explicitTimeout = Number(request.timeoutMs) > 0 ? Number(request.timeoutMs) : 0;
+    const baseTimeout = request.silent ? REALTIME_OUTLINE_SILENT_TIMEOUT_MS : REALTIME_OUTLINE_MANUAL_TIMEOUT_MS;
+    const effectiveTimeout = explicitTimeout || baseTimeout;
     try {
-      // 本地档：基础超时 ×2（在 generateRealtimeOutlineForSession 内由 getRealtimeOutlineTimeoutMs 处理），
-      // 这里如果调用方显式传 timeoutMs，本地档也对它放大一倍
-      const explicitTimeout = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 0;
-      const baseTimeout = opts.silent ? REALTIME_OUTLINE_SILENT_TIMEOUT_MS : REALTIME_OUTLINE_MANUAL_TIMEOUT_MS;
-      const effectiveTimeout = explicitTimeout || baseTimeout;
-      await this.generateRealtimeOutlineForSession(session, {
+      const result = await this.generateRealtimeOutlineForSession(session, {
         timeoutMs: local ? effectiveTimeout * 2 : effectiveTimeout,
-        silent: !!opts.silent,
-        force: !!opts.force,
-        final: !!opts.final,
-        maxTokens: opts.maxTokens || REALTIME_OUTLINE_SILENT_MAX_TOKENS,
+        silent: !!request.silent,
+        force: !!request.force,
+        final: !!request.final,
+        maxTokens: request.maxTokens || REALTIME_OUTLINE_SILENT_MAX_TOKENS,
         local,
+        signal: request.signal,
       });
       markRealtimeOutlineSuccess(session);
-      if (hasRealtimeOutlineRunnableBacklog(session)) this._backgroundOutlineQueued = true;
+      this.clearRecordingIssue("network");
+      this.clearRecordingIssue("service");
+      await this.logDiagnostic("info", "outline.generate_succeeded", "实时大纲生成完成", {
+        silent: !!request.silent,
+        force: !!request.force,
+        reason: request.reason || "",
+        segmentCount: session.segments.length,
+        committedSegmentCount: session.realtimeOutlineSegmentCount || 0,
+        remainingSegmentCount: getRealtimeOutlineNewSegmentCount(session),
+        outputChars: String(session.realtimeOutline || "").length,
+        window: session.realtimeOutlineWindow || null,
+        mode: session.mode,
+      });
       this.refreshOutlineView();
+      if (request.silent && hasRealtimeOutlineRunnableBacklog(session)) {
+        this.scheduleRealtimeOutline({
+          delayMs: getRealtimeOutlineQueuedDelayMs(session, { local }),
+          reason: "backlog",
+        });
+      }
+      return result;
     } catch (e) {
-      console.error("[LexVoice] background realtime outline failed", e);
+      if (request.signal && request.signal.aborted) throw e;
+      console.error("[LexVoice] realtime outline failed", e);
       markRealtimeOutlineFailure(session);
-      if (opts.silent && hasRealtimeOutlineRunnableBacklog(session)) this._backgroundOutlineQueued = true;
-      await this.logDiagnostic("error", "outline.background_generate_failed", "后台实时大纲生成失败", {
-        silent: !!opts.silent,
+      const retryInMs = request.silent && hasRealtimeOutlineRunnableBacklog(session)
+        ? getRealtimeOutlineQueuedDelayMs(session, { local })
+        : 0;
+      await this.logDiagnostic("error", "outline.generate_failed", "实时大纲生成失败", {
+        silent: !!request.silent,
+        force: !!request.force,
+        reason: request.reason || "",
         local,
+        errorCount: session.realtimeOutlineFailureCount || 0,
         segmentCount: session.segments.length,
         lastOutlineSegmentCount: session.realtimeOutlineSegmentCount || 0,
         memoryChars: String(session.realtimeOutlineMemory || "").length,
         window: session.realtimeOutlineWindow || null,
         mode: session.mode,
         captureMode: session.captureMode,
+        retryInMs,
         error: diagnosticError(e),
       });
-    } finally {
-      this._backgroundOutlineRunning = false;
-      if (this._backgroundOutlineQueued) {
-        this._backgroundOutlineQueued = false;
-        const pendingSession = this.session;
-        if (pendingSession && hasRealtimeOutlineRunnableBacklog(pendingSession)) {
-          const wait = getRealtimeOutlineQueuedDelayMs(pendingSession, { local });
-          window.setTimeout(() => { void this.refreshRealtimeOutlineInBackground({ silent: true }); }, wait);
-        }
+      if (!request.silent) {
+        this.setRecordingIssue(classifyRecordingIssue(e), {
+          source: "outline",
+          message: getErrorMessage(e),
+          startedAtMs: getSegmentsDurationMs(session.segments),
+        });
+        new obsidian.Notice(`大纲生成失败：${(e && e.message) || e}`);
+      } else if (Number(session.realtimeOutlineFailureCount || 0) === 1) {
+        new obsidian.Notice("实时大纲暂时未更新，转写仍在继续，稍后会自动重试。", 7000);
       }
+      throw e;
     }
   }
 
@@ -13953,7 +14042,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     if (!session) return false;
     if (opts.force) return true;
     if (this.hasActiveRecordingOrTranscription(session)) return false;
-    if (this._backgroundOutlineRunning) return false;
+    if (this.isRealtimeOutlineRunning(session)) return false;
     const rec = this.recorder;
     if (rec && rec.state === "recording") {
       const info = rec.getInfo ? rec.getInfo() : {};
@@ -14087,21 +14176,16 @@ class LexVoicePlugin extends obsidian.Plugin {
 
   async generateRealtimeOutlineForSession(session, opts = {}) {
     if (!session) return "";
-    // session 级单飞锁：View / background / final(收尾) 三条触发路径都走这里，用 per-session promise 串行化，
-    // 杜绝并发 read-modify-write 互相覆盖 session.realtimeOutlineState / jobPortraitCoverage。
-    const prevLock = session._outlineGenLock || Promise.resolve();
-    let releaseLock = () => { /* intentionally empty */ };
-    session._outlineGenLock = new Promise((r) => { releaseLock = r; });
-    // 等上一轮释放锁，但绝不无限等：正常调用会在自己的 timeoutMs 内结束并释放锁（比锁等待窗短，不会误并发）；
-    // 只有上一轮"真卡死"（LLM 挂起、连超时都没掐掉）时，最多等一个略长于超时的窗口就放行——保证一次卡死
-    // 不会永久拖垮之后每一轮大纲（含收尾补大纲）。这是死锁的兜底，配合手动刷新的即时硬复位。
-    const lockWaitMs = (Number(opts.timeoutMs) || REALTIME_OUTLINE_SILENT_TIMEOUT_MS) + 5000;
-    try { await Promise.race([prevLock, new Promise((r) => window.setTimeout(r, lockWaitMs))]); } catch { /* intentionally empty */ }
-    try {
-      return await this._genOutlineInner(session, opts);
-    } finally {
-      releaseLock();
-    }
+    // Strict per-session promise tail. Never bypass or reset this tail: allowing a second
+    // read-modify-write after an arbitrary lock timeout can overwrite a newer outline.
+    return await runInOutlineSessionTail(session, async () => {
+        if (opts.signal && opts.signal.aborted) {
+          const error = new Error("实时大纲生成已取消");
+          error.name = "AbortError";
+          throw error;
+        }
+        return await this._genOutlineInner(session, opts);
+      });
   }
   async _genOutlineInner(session, opts = {}) {
     if (!session || !session.segments || !session.segments.length) return "";
@@ -14165,24 +14249,33 @@ class LexVoicePlugin extends obsidian.Plugin {
       payload: { max_tokens: maxTokens },
       priority: opts.final ? "normal" : "background",
       noRetry: !opts.final,
+      signal: opts.signal,
       // 实时大纲是"快速结构化抽取"，强制关思维链（无视全局思考档）：更快、更省，且避免推理内容/前言污染输出踩软失败。
       thinkingMode: "fast",
     });
+    if (opts.signal && opts.signal.aborted) {
+      const error = new Error("实时大纲生成已取消");
+      error.name = "AbortError";
+      throw error;
+    }
     const parsed = parseRealtimeOutlineResponse(raw, session.realtimeOutline, session.realtimeOutlineMemory);
     const repaired = repairRealtimeOutlineAnchors(parsed.outline, {
       previousOutline: session.realtimeOutline,
       anchorSources: buildRealtimeOutlineAnchorSources(windowed.newSegments),
     });
-    // attachUntimed:true 只用于模型本轮 fresh 输出——把无锚点延续行降级挂靠为上一节点子项，
-    // 不再整轮丢光（治 no_top_level_bullets 内容白丢）。state 渲染那次(下方 19331)不开，避免改写历史。
-    const result = normalizeOutlineMarkdownForDisplay(repaired.outline, { attachUntimed: true });
+    // 时间是程序拥有的近似导航元数据，不是 LLM 输出协议。若某轮没有可用音频锚点，
+    // 仍保留无时间的顶层结构，不能因时间缺失把话题降级或整轮判废。
+    const result = normalizeOutlineMarkdownForDisplay(repaired.outline, { preserveUntimedTopLevel: true });
     let validation;
     if (parsed.outlineWasFallback && windowed.newUsedCount > 0) {
       validation = { ok: false, reason: "fallback_outline_only" };
     } else if (!result.trim() && windowed.newUsedCount > 0) {
       validation = { ok: false, reason: "empty_generated_outline" };
     } else {
-      validation = validateRealtimeOutlineMarkdown(result, { previousOutline: session.realtimeOutline });
+      validation = validateRealtimeOutlineMarkdown(result, {
+        previousOutline: session.realtimeOutline,
+        allowUntimedTopLevel: true,
+      });
     }
     if (!validation.ok) {
       session.realtimeOutlineWindow = {
@@ -14198,6 +14291,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         workbenchChars: workbenchSignature.length,
         rejectedReason: validation.reason,
         repairedAnchorCount: repaired.repairedCount,
+        replacedModelAnchorCount: repaired.replacedCount,
         unresolvedAnchorCount: repaired.unresolvedCount,
       };
       try {
@@ -14210,6 +14304,7 @@ class LexVoicePlugin extends obsidian.Plugin {
           attemptedSegmentCount,
           newUsedCount: windowed.newUsedCount,
           repairedAnchorCount: repaired.repairedCount,
+          replacedModelAnchorCount: repaired.replacedCount,
           unresolvedAnchorCount: repaired.unresolvedCount,
           hasOld: !!(session.realtimeOutline && String(session.realtimeOutline).trim()),
         });
@@ -14248,6 +14343,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       totalSegmentCount: processedSegmentCount,
       hasRemainingText: windowed.hasRemainingText,
       repairedAnchorCount: repaired.repairedCount,
+      replacedModelAnchorCount: repaired.replacedCount,
       restoredAnchorCount: repaired.restoredCount,
       unresolvedAnchorCount: repaired.unresolvedCount,
       workbenchChars: workbenchSignature.length,
@@ -14290,6 +14386,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       payload: { max_tokens: maxTokens },
       priority: "background",
       noRetry: true,
+      signal: opts.signal,
     });
     // 早期轮(转写还短、模型最易误判 covered)不冻结，让误判可自我纠正；积累够了再启用单调累积防闪回。
     // 闪回的真凶(滑动窗口)已改为喂整场，所以早期放开纠正不会让闪回回归。
