@@ -34,7 +34,8 @@ import { SEDIMENT_GROUP_CONFIG, SEDIMENT_GROUP_ORDER, VOCABULARY_SECTIONS } from
 import { AUDIO_EXT, TEXT_IMPORT_EXT } from "./shared/catalog-import";
 import { isRecord, pickDefined, genId, pad, formatElapsed, sanitizeFilename, escapeRegExp, stripHtmlText, safeDecodeUriText, normalizeAudioLinkTarget } from "./shared/util-common";
 import { escapeHtmlText, makeFileWikiLink } from "./shared/util-markdown";
-import { mimeFromExt, extFromMime, isAsrNonRetryableError, pickMimeType, assertAudioCaptureSupported } from "./shared/util-audio";
+import { mimeFromExt, extFromMime, isAsrNonRetryableError, isTransientAsrError, pickMimeType, assertAudioCaptureSupported } from "./shared/util-audio";
+import { LIVE_ASR_CIRCUIT_COOLDOWN_MS, LIVE_ASR_TASK_STATUS, classifyLiveAsrBacklog, createLiveAsrCircuitState, isLiveAsrCircuitOpen, recordLiveAsrFailure, recordLiveAsrSuccess, summarizeLiveAsrJobs } from "./asr/live-segment-policy";
 import { isLocalLlmEndpoint } from "./shared/util-llm-endpoint";
 import { obfuscateApiKey, deobfuscateApiKey, redactDiagnosticText, sanitizeDiagnosticData, diagnosticError } from "./shared/util-key-diag";
 import { extractJsonObject } from "./shared/util-json";
@@ -44,6 +45,7 @@ import { INDUSTRY_META_PROMPT } from "./prompts/industry-meta";
 import { JOBPORTRAIT_SYSTEM_PROMPT, JOBPORTRAIT_FOLLOWUP_RULES } from "./prompts/recruit-hrbp";
 import { CLEAN_TRANSCRIPT_SYSTEM, buildCleanTranscriptChunkPrompt, QUICK_DICTATION_SYSTEM, buildQuickDictationCleanupPrompt } from "./prompts/clean-transcript";
 import { RealtimeOutlineCoordinator, runInOutlineSessionTail } from "./outline-coordinator";
+import { buildLexVoiceVersionPayload, replaceExistingLexVoiceActiveVersionBlock, replaceLeadingFrontmatter, sanitizeLexVoiceActiveVersionBody, splitLeadingFrontmatter, splitLexVoiceVersionPayload } from "./version-content";
 
 
 
@@ -956,6 +958,11 @@ const REALTIME_OUTLINE_MAX_MEMORY_CHARS = 800; // 与 prompt 的"memory ≤600�
 const REALTIME_OUTLINE_LOOKBACK_SEGMENTS = 1;
 const REALTIME_OUTLINE_MIN_NEW_SEGMENTS = 2;
 const REALTIME_OUTLINE_MIN_NEW_CHARS = 200;
+// A sizeable incremental batch must produce at least one visible structural
+// change. Otherwise the model may silently echo saturated history while the
+// committed cursor advances past real discussion.
+const REALTIME_OUTLINE_MIN_SEMANTIC_DELTA_CHARS = 500;
+const REALTIME_OUTLINE_MAX_NO_CHANGE_REJECTIONS = 1;
 const REALTIME_OUTLINE_INITIAL_MIN_SEGMENTS = 2;
 const REALTIME_OUTLINE_INITIAL_MIN_CHARS = 120;
 const REALTIME_OUTLINE_MIN_SILENT_INTERVAL_MS = 30000;
@@ -1118,12 +1125,9 @@ function buildRollingOutlineContext(previousMemory, previousOutline, windowed) {
   if (outline) {
     lines.push(
       "",
-      "【当前可见大纲 · 不可改动 · 这是已生效的事实】",
-      // 增量模式（有 previousOutline + windowed.isIncremental）：明确禁止重写老条目。
-      // 首轮模式（无 isIncremental）：仍允许合并重复的旧节点。两种情况共用同一段大纲，
-      // 但增量是默认走的，绝大多数后续轮次都受这条约束保护。
+      "【当前可见大纲参考 · 程序已冻结保存】",
       isIncremental
-        ? "下面是已经显示给用户的大纲。**整段视为只读历史**：所有一级条目的标题、子条目和顺序都必须保留。本轮的任务只是 **追加** 新内容，不是重写。回听链接由程序维护，不属于你需要处理的内容。"
+        ? "下面只用于判断新增内容是否延续已有话题。完整历史由程序保存和合并；不要复制、重写、删减或重排这里的条目。回听链接也由程序维护。"
         : "下面是侧边栏当前显示的大纲。它只用于保持连续性；请保留仍然重要的主线，合并重复或过细的旧节点。",
       "",
       outline
@@ -1138,10 +1142,12 @@ function buildRollingOutlineContext(previousMemory, previousOutline, windowed) {
         : `这些是上次大纲之后新转写出来的段落。请只为这些新段落生成新的一级或子条目，老一级条目原样保留。`,
       "",
       "**输出要求（增量模式）**：",
-      "- 完整复制【当前可见大纲】里所有老一级条目的标题、子条目和顺序；回听链接可以省略，程序会恢复。",
-      "- 在大纲末尾按讨论顺序 **追加** 由新增转写引出的新一级条目。",
-      "- 如果新增转写明显是某个老一级条目的延续 / 补充细节，则不新建 L1，而是在该老 L1 下追加子条目。",
-      "- 严禁：改写、合并、重排、删除任何老一级条目。不要生成或校对时间戳。",
+      "- <lexvoice-outline> **只返回本轮增量**，不要复制【当前可见大纲参考】中的任何未变化条目。",
+      "- 新话题按讨论顺序输出新的一级条目。当前批次通常 1-6 个一级条目；历史已有多少节点都不影响本轮提炼。",
+      "- 如果新增转写明显延续某个历史话题，请复用该历史一级标题，并且只输出本轮新增的子要点；程序会把它们并回原节点。",
+      "- 同一大话题出现新的分支、结论、案例或讨论阶段时，使用更具体的新一级标题，不要把很长一段讨论无限塞进旧节点。",
+      "- 只要新增转写包含实质讨论，至少输出 1 个一级条目，并保留能区分本轮内容的具体子要点。",
+      "- 严禁改写、合并、重排或删除历史条目。不要生成或校对时间戳。",
       ""
     );
   } else {
@@ -1157,7 +1163,8 @@ function buildRollingOutlineContext(previousMemory, previousOutline, windowed) {
   return lines.join("\n");
 }
 
-function buildRealtimeOutlineEnvelopeInstruction() {
+function buildRealtimeOutlineEnvelopeInstruction(opts = {}) {
+  const incremental = !!(opts && opts.incremental);
   return [
     "【输出协议】",
     "请严格输出两个 XML 风格块，不要前言、不要解释、不要代码围栏：",
@@ -1179,9 +1186,14 @@ function buildRealtimeOutlineEnvelopeInstruction() {
     "",
     "【可见大纲写法】",
     "- <lexvoice-outline> 内只能放用户可读的大纲列表。",
-    "- 要输出一份结合主题记忆和最近窗口后的更新版大纲，不要只输出新增内容。",
-    "- 合并重复节点，删掉已经不重要的细枝末节；保留能帮助用户回忆现场的关键词和层级。",
-    "- 控制在 8 个一级节点以内。**每个一级节点必须带 2-4 个子要点**，提炼该话题下的关键论点、事实、数据、人名或结论 —— 只有光秃秃的一级标题没有意义，子要点才是大纲的灵魂。话题确实只有一句话时至少给 1 个子要点。",
+    ...(incremental ? [
+      "- 本轮是增量更新：只输出新增转写对应的新节点或补充节点，不要复制历史大纲。",
+      "- 当前批次通常控制在 1-6 个一级节点；这是单批次约束，不是整场会议的总节点上限。",
+    ] : [
+      "- 本轮是首轮整理：只整理当前提供的转写，通常控制在 1-8 个一级节点。",
+      "- 合并当前批次中的重复节点；保留能帮助用户回忆现场的关键词和层级。",
+    ]),
+    "- **每个一级节点必须带 2-4 个子要点**，提炼该话题下的关键论点、事实、数据、人名或结论。话题确实只有一句话时至少给 1 个子要点。",
     "- 每个一级节点必须是一个具体章节/话题；不要输出「课程结构」「本节包括」「四个部分」这类横跨全局的总述行。",
     "- 顶层格式只能是：`- 章节标题`。子项格式只能是两个空格缩进：`  - 子要点`。",
     "- 不要生成、复制或校对 `[[音频文件|HH:MM]]`；LexVoice 会根据真实音频分段自动挂上近似回听位置。",
@@ -1366,7 +1378,7 @@ ${transcript}`;
 // 只对变化的转写部分重新计算 —— 纯降本提速，不改输出质量。
 // languageInstruction 由调用方传入并前置（不要再用 applyBriefingLanguageInstruction 追加到末尾，
 // 否则语种指令会落在变化内容之后、进入不可缓存的尾巴）。
-function buildOutlinePrompt(modeLabel, modeKey, transcript, captureMode, languageInstruction) {
+function buildOutlinePrompt(modeLabel, modeKey, transcript, captureMode, languageInstruction, opts = {}) {
   const langBlock = languageInstruction ? `\n\n${String(languageInstruction).trim()}` : "";
   // 招聘面试模式：大纲严格按"问题 → 回答 → AI 评价"组织
   if (modeKey === "recruit") {
@@ -1376,7 +1388,7 @@ ${buildSourceAwareOutlineInstruction(captureMode, modeKey)}
 
 ${buildProgramOwnedOutlineAnchorInstruction()}
 
-${buildRealtimeOutlineEnvelopeInstruction()}
+${buildRealtimeOutlineEnvelopeInstruction(opts)}
 
 【结构 · 每个面试主题为一个节点】
 在 <lexvoice-outline> 内，把每一轮"面试官提问 → 候选人回答"归到一个**主题节点**下：节点标题是 4-8 字主题（概括这一轮在聊的能力/话题，不是原话问题），下挂这一轮的提问、回答要点、AI 评价、追问。
@@ -1428,7 +1440,7 @@ ${buildSourceAwareOutlineInstruction(captureMode, modeKey)}
 
 ${buildProgramOwnedOutlineAnchorInstruction()}
 
-${buildRealtimeOutlineEnvelopeInstruction()}
+${buildRealtimeOutlineEnvelopeInstruction(opts)}
 
 【方法 · 归并】
 找到讨论中可以归并的"共同上一级概念"。
@@ -2159,7 +2171,7 @@ function buildLexVoiceActiveVersionBlock(versionMeta, body) {
     LEXVOICE_ACTIVE_VERSION_START,
     metaLines,
     "",
-    String(body || "").trim() || "_[当前版本无内容]_",
+    sanitizeLexVoiceActiveVersionBody(body),
     LEXVOICE_ACTIVE_VERSION_END,
   ].join("\n").replace(/\n{4,}/g, "\n\n\n");
 }
@@ -2167,8 +2179,8 @@ function buildLexVoiceActiveVersionBlock(versionMeta, body) {
 function replaceLexVoiceActiveVersionBlock(markdown, versionMeta, body) {
   const text = String(markdown || "");
   const block = buildLexVoiceActiveVersionBlock(versionMeta, body);
-  const re = /<!--\s*lexvoice-active-version-start\s*-->[\s\S]*?<!--\s*lexvoice-active-version-end\s*-->/;
-  if (re.test(text)) return text.replace(re, block);
+  const replaced = replaceExistingLexVoiceActiveVersionBlock(text, block);
+  if (replaced !== null) return replaced;
   // First adoption of the version model compacts the mother note:
   // keep only frontmatter, H1, active display block, and raw/source metadata.
   // The previous rendered minutes/clean text is already persisted in the version store.
@@ -2679,7 +2691,7 @@ function getRecentQueueProcessingState(plugin, file) {
   const transcribeTasks = tasks.filter((task) => task && task.type === "transcribe");
   const mergeTasks = tasks.filter((task) => task && task.type === "merge");
   const failedStatuses = new Set(["failed", "missing"]);
-  const activeStatuses = new Set(["running", "processing"]);
+  const activeStatuses = new Set(["running", "processing", LIVE_ASR_TASK_STATUS]);
   const blockedMergeTask = mergeTasks.find((task) => statusOf(task) === "blocked");
   if (blockedMergeTask) {
     const serviceBlocked = isLlmServiceBlockedError(blockedMergeTask.lastError || "");
@@ -3904,21 +3916,46 @@ class RecorderService {
     const startOffset = this.segmentStartOffsetMs;
     const index = this.segmentIndex;
 
-    await this._awaitRecorderStop(this.recorder, () => undefined, undefined);
+    let blob = null;
+    let cutError = null;
+    try {
+      await this._awaitRecorderStop(this.recorder, () => undefined, undefined);
 
-    const blob = new Blob(chunksAtCut, { type: mimeAtCut });
-    this.segmentIndex++;
-    this.segmentStartOffsetMs = endOffset;
-    this.nextCutAtElapsed = this.getNextCutAtElapsed(endOffset);
+      blob = new Blob(chunksAtCut, { type: mimeAtCut });
+      this.segmentIndex++;
+      this.segmentStartOffsetMs = endOffset;
+      this.nextCutAtElapsed = this.getNextCutAtElapsed(endOffset);
 
-    if (this.state !== "idle") this.startNewRecorder();
-    this.cutting = false;
+      if (this.state !== "idle") this.startNewRecorder();
+    } catch (e) {
+      cutError = e;
+      // 分段重启失败时不能继续显示成“正在录音”。暂停分段录音，但保留独立 masterRecorder，
+      // 用户停止录音后仍可保存整场音频；本次已切出的 blob 也会在下方继续交给转写。
+      this.state = "paused";
+      this.pausedAt = Date.now();
+      try { if (this.masterRecorder && this.masterRecorder.state === "recording") this.masterRecorder.pause(); } catch { /* intentionally empty */ }
+      this.issue = makeRecordingIssue("service", {
+        reason: "segment-restart-failed",
+        stoppedAtMs: endOffset,
+        message: "录音分段无法继续，已暂停。请停止录音以保存完整音频后重试。",
+      });
+      try { this.plugin.setRecordingIssue("service", this.issue); } catch { /* intentionally empty */ }
+      try {
+        void this.plugin.logDiagnostic("error", "recording.segment_cut_failed", "录音分段切换失败，已暂停并保留完整录音", {
+          index, startOffsetMs: startOffset, endOffsetMs: endOffset, error: diagnosticError(e),
+        });
+      } catch { /* intentionally empty */ }
+    } finally {
+      // 任何异常都必须释放切片锁；否则此后所有 tick 都会永久跳过分段。
+      this.cutting = false;
+    }
 
-    if (this.onSegment) {
+    if (blob && this.onSegment) {
       try { await this.onSegment({ blob, index, startOffsetMs: startOffset, endOffsetMs: endOffset, isFinal: false, ext: extFromMime(mimeAtCut) }); }
       catch (e) { console.error("[LexVoice] onSegment error", e); }
     }
     this.emit();
+    if (cutError) throw cutError;
   }
   pause() {
     if (this.state !== "recording") return;
@@ -3930,9 +3967,44 @@ class RecorderService {
   }
   resume() {
     if (this.state !== "paused") return;
-    try { this.recorder.resume(); } catch { /* intentionally empty */ }
-    try { if (this.masterRecorder && this.masterRecorder.state === "paused") this.masterRecorder.resume(); } catch { /* intentionally empty */ }
+    let segmentReady = false;
+    let masterReady = !this.masterRecorder || this.masterRecorder.state === "recording";
+    try {
+      if (this.recorder && this.recorder.state === "paused") {
+        this.recorder.resume();
+        segmentReady = true;
+      } else if (!this.recorder || this.recorder.state === "inactive") {
+        // 分段重启失败后 recorder 已经 inactive。继续录音时必须真正创建新 recorder，
+        // 不能只把 UI 状态改回 recording。
+        this.startNewRecorder();
+        segmentReady = this.recorder && this.recorder.state === "recording";
+      } else {
+        segmentReady = this.recorder.state === "recording";
+      }
+    } catch (e) {
+      console.error("[LexVoice] segment recorder resume failed", e);
+    }
+    try {
+      if (this.masterRecorder && this.masterRecorder.state === "paused") this.masterRecorder.resume();
+      masterReady = !this.masterRecorder || this.masterRecorder.state === "recording";
+    } catch (e) {
+      console.error("[LexVoice] master recorder resume failed", e);
+      masterReady = false;
+    }
+    if (!segmentReady || !masterReady) {
+      try { if (this.recorder && this.recorder.state === "recording") this.recorder.pause(); } catch { /* intentionally empty */ }
+      this.issue = makeRecordingIssue("service", {
+        reason: "recorder-resume-failed",
+        stoppedAtMs: this.getInfo().elapsed,
+        message: "录音器未能恢复，仍保持暂停。请停止录音以保存已有音频。",
+      });
+      try { this.plugin.setRecordingIssue("service", this.issue); } catch { /* intentionally empty */ }
+      this.emit();
+      return;
+    }
     this.pausedFor += Date.now() - this.pausedAt;
+    this.issue = null;
+    try { this.plugin.clearRecordingIssue("service"); } catch { /* intentionally empty */ }
     this.state = "recording";
     this.emit();
   }
@@ -3963,15 +4035,18 @@ class RecorderService {
     this.segmentIndex++;
     this.emit();
 
-    if (this.onSegment && finalBlob) {
+    const masterOnly = !finalBlob && !!(master && master.blob) && index > 0;
+    const finalAudioBlob = finalBlob || (!masterOnly && master && master.blob) || null;
+    if (this.onSegment && (finalAudioBlob || masterOnly)) {
       try {
         await this.onSegment({
-          blob: finalBlob,
+          blob: finalAudioBlob || new Blob([], { type: mime }),
           index,
           startOffsetMs: startOffset,
           endOffsetMs: elapsedAtStop,
           isFinal: true,
-          ext: extFromMime(mime),
+          masterOnly,
+          ext: extFromMime((finalAudioBlob && finalAudioBlob.type) || mime),
           masterBlob: master && master.blob,
           masterMime: master && master.mime,
           masterExt: extFromMime((master && master.mime) || mime),
@@ -5286,16 +5361,6 @@ function normalizeBriefingFrontmatterFields(raw, mode, baseKey) {
   return cleaned;
 }
 
-function splitLeadingFrontmatter(markdown) {
-  const text = String(markdown || "").replace(/^\uFEFF/, "");
-  const match = text.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/);
-  if (!match) return { frontmatter: "", body: text };
-  return {
-    frontmatter: match[0].replace(/\n*$/, "\n"),
-    body: text.slice(match[0].length).replace(/^\n+/, ""),
-  };
-}
-
 // \u4ECE\u5168\u6587\u91CC\u628A\u6240\u6709"\u539F\u59CB / \u5143\u6570\u636E"\u5757\uFF08\u4EFB\u610F\u6DF1\u5EA6\uFF09\u62BD\u51FA\u6765\uFF0C\u4F5C\u4E3A rawTail \u4FDD\u7559\u5230\u672B\u5C3E\u3002
 // \u8C03\u7528\u8005\u62FF\u5230 withoutRaw \u4E4B\u540E\u53EF\u4EE5\u5B89\u5168\u5730\u628A"\u5DF2\u6574\u7406\u5185\u5BB9"\u5377\u6210 <details>\u4E0A\u4E00\u7248\u7EAA\u8981>\uFF0C
 // \u4E0D\u4F1A\u518D\u628A\u6BB5\u843D / \u539F\u59CB\u97F3\u9891 / \u6C89\u6DC0\u5757\u8FD9\u4E9B\u91CD\u578B\u5185\u5BB9\u5D4C\u5957\u8FDB details \u9020\u6210\u7206\u70B8\u5F0F\u589E\u957F\u3002
@@ -6138,6 +6203,21 @@ function buildChunkMergePrompt(joinedChunk, partIndex, partTotal, timeRange) {
 ${joinedChunk}`;
 }
 
+function renderLongSessionRawFallbackGroup(group, partIndex) {
+  const list = Array.isArray(group) ? group : [];
+  const start = formatElapsed(Number(list[0] && list[0].startOffsetMs) || 0);
+  const end = formatElapsed(Number(list[list.length - 1] && list[list.length - 1].endOffsetMs) || 0);
+  const segments = list.map((seg, index) => {
+    const segStart = Math.max(0, Number(seg && seg.startOffsetMs) || 0);
+    const segEnd = Math.max(segStart, Number(seg && seg.endOffsetMs) || segStart);
+    const audioOffset = Math.max(0, Number(seg && seg.audioStartOffsetMs) || segStart);
+    const anchor = seg && seg.audioName ? ` ${getAudioTimeLink(seg.audioName, audioOffset)}` : "";
+    const text = String((seg && seg.text) || "").trim() || "_[本段无可用转写]_";
+    return `### 段落 ${index + 1} · ${formatElapsed(segStart)}–${formatElapsed(segEnd)}${anchor}\n\n${text}`;
+  }).join("\n\n");
+  return `## 第 ${partIndex} 部分 · ${start}–${end}（原始转写保底）\n\n${segments || "_[本部分无可用转写]_"}`;
+}
+
 // 超长会议分段整理 + 拼接：当单次输出装不下完整纪要时，按时间切成多段分别整理，再拼成一篇。
 // 仅在 desired > ceiling 的超长场景触发（见 mergeAndPolish 的 shouldChunk）。返回 null 表示无法分段、退回单次。
 async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, originalFrontmatter, repolishOptions, ceiling) {
@@ -6158,6 +6238,7 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
   const partSummaries = [];
   const partBodies = [];
   let anyTruncated = false;
+  let rawFallbackFromPart = 0;
   for (let i = 0; i < groups.length; i++) {
     const g = groups[i];
     const joinedChunk = g.map((s, j) => formatMergeSegmentForPrompt(s, j)).join("\n\n");
@@ -6167,7 +6248,22 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
     up = applyRepolishPreferenceInstruction(up, repolishOptions, plugin.settings);
     up = applyBriefingLanguageInstruction(up, plugin.settings);
     if (peopleContext) up = peopleContext + "\n\n---\n\n" + up;
-    const { text, truncated } = await callBriefingMergeLlm(plugin, sys, up, { stream: true, payload: { max_tokens: safeCeiling } }, { mode, chunked: true, part: i + 1, partTotal: groups.length });
+    let response;
+    try {
+      response = await callBriefingMergeLlm(plugin, sys, up, { stream: true, payload: { max_tokens: safeCeiling } }, { mode, chunked: true, part: i + 1, partTotal: groups.length });
+    } catch (e) {
+      // 已完成的分组是有效且已经产生费用的结果，不能因后续一组失败全部丢弃后再整场重跑。
+      // 从失败组开始直接保留按时间排列的原始转写，确保长会至少有完整可核对的输出。
+      rawFallbackFromPart = i + 1;
+      await logLlmRequestDiagnostic(plugin, "warn", "llm.merge_long_session_partial_fallback", "超长会议部分整理失败，保留已完成部分并用原始转写补齐后续", {
+        mode, failedPart: i + 1, partTotal: groups.length, completedParts: i, error: diagnosticError(e),
+      });
+      for (let j = i; j < groups.length; j++) {
+        partBodies.push(renderLongSessionRawFallbackGroup(groups[j], j + 1));
+      }
+      break;
+    }
+    const { text, truncated } = response;
     if (truncated) anyTruncated = true;
     // 解析并剥掉本部分机器注释，避免散落进正文
     const pp = parsePeopleFromOutput(String(text || ""));
@@ -6195,7 +6291,11 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
   const fullJoined = segments.map((s, i) => formatMergeSegmentForPrompt(s, i)).join("\n\n");
   const audited = appendEntityEvidenceWarning(bodyMd + machine, fullJoined);
   const chunkedNotice = `> [!info] 超长会议 · 已分段整理\n> 本次录音较长，已按时间自动分成 ${groups.length} 部分分别整理后拼接，确保不因单次输出长度上限而丢失后半段内容。`;
-  const topNotice = anyTruncated ? chunkedNotice + "\n\n" + BRIEFING_TRUNCATION_WARNING : chunkedNotice;
+  const rawFallbackNotice = rawFallbackFromPart
+    ? `> [!warning] 部分内容使用原始转写保底\n> 第 ${rawFallbackFromPart} 部分起的 AI 整理未完成。此前已完成的整理结果已保留，后续内容按时间顺序写入原始转写，避免重复计费或遗漏正文。`
+    : "";
+  const topNotices = [chunkedNotice, rawFallbackNotice, anyTruncated ? BRIEFING_TRUNCATION_WARNING : ""].filter(Boolean);
+  const topNotice = topNotices.join("\n\n");
   return postProcessBriefingOutput(audited, mode, computedMeta, originalFrontmatter, frontmatterBaseModeKey(plugin, mode), topNotice);
 }
 
@@ -6373,7 +6473,7 @@ class TaskQueue {
         task.retries = Math.max(0, Number(task.retries) || 0);
         task.createdAt = task.createdAt || new Date().toISOString();
         task.updatedAt = task.updatedAt || task.createdAt;
-        if (task.status === "running") {
+        if (task.status === "running" || task.status === "processing" || task.status === LIVE_ASR_TASK_STATUS) {
           task.status = "pending";
           task.lastError = task.lastError || "上次运行中断，已恢复为待处理";
         }
@@ -6472,15 +6572,33 @@ class TaskQueue {
     if (this.running) return;
     this.running = true;
     try {
-      const pending = this.tasks.filter(t => t.status !== "running" && t.status !== "missing" && t.status !== "blocked" && t.retries < (this.plugin.settings.maxRetries || 3));
+      const pending = this.tasks.filter(t => t.status !== "running" && t.status !== LIVE_ASR_TASK_STATUS && t.status !== "missing" && t.status !== "blocked" && t.retries < (this.plugin.settings.maxRetries || 3));
       // 批量进度游标：喂状态栏指示器，让"重试全部 / 多任务"跑到哪一目了然。
       this._batchTotal = pending.length;
       this._batchDone = 0;
       try { this.plugin.updateBusyStatus(); } catch { /* intentionally empty */ }
       for (const t of pending) {
-        await this.processOne(t).catch((e) => console.error("[LexVoice] queue task failed", e));
+        let transientAsrFailure = null;
+        await this.processOne(t).catch((e) => {
+          console.error("[LexVoice] queue task failed", e);
+          if (t && t.type === "transcribe" && isTransientAsrError(e)) transientAsrFailure = e;
+        });
         this._batchDone++;
         try { this.plugin.updateBusyStatus(); } catch { /* intentionally empty */ }
+        if (transientAsrFailure) {
+          // 服务仍在限流/超时，继续扫后续音频只会扩大请求风暴。暂停整批，冷却后从持久化队列续跑。
+          try {
+            await this.plugin.logDiagnostic("warn", "queue.asr_circuit_opened", "后台转写连续处理遇到瞬时故障，已暂停批次", {
+              remaining: Math.max(0, pending.length - this._batchDone),
+              cooldownMs: LIVE_ASR_CIRCUIT_COOLDOWN_MS,
+              error: diagnosticError(transientAsrFailure),
+            });
+          } catch { /* intentionally empty */ }
+          if (this.plugin && typeof this.plugin.scheduleTaskQueueRetry === "function") {
+            this.plugin.scheduleTaskQueueRetry(LIVE_ASR_CIRCUIT_COOLDOWN_MS, "transient-asr-failure");
+          }
+          break;
+        }
       }
     } finally {
       this.running = false;
@@ -12209,7 +12327,7 @@ class OutlineView extends obsidian.ItemView {
       if (ctx.seniority) chips.createSpan({ cls: "lexvoice-recruit-chip", text: ctx.seniority });
       if (ctx.interviewScene) chips.createSpan({ cls: "lexvoice-recruit-chip", text: ctx.interviewScene });
     } else {
-      chips.createSpan({ cls: "lexvoice-recruit-chip is-warn", text: "点铅笔注入 JD / 简历" });
+      chips.createSpan({ cls: "lexvoice-recruit-chip is-warn", text: "点击注入 JD / 简历" });
     }
   }
 
@@ -12875,6 +12993,9 @@ class LexVoicePlugin extends obsidian.Plugin {
 
   onunload() {
     try { if (this.outlineCoordinator) this.outlineCoordinator.dispose(); } catch { /* intentionally empty */ }
+    try { if (this._taskQueueRetryTimer) window.clearTimeout(this._taskQueueRetryTimer); } catch { /* intentionally empty */ }
+    this._taskQueueRetryTimer = null;
+    this._taskQueueRetryAt = 0;
     void (async () => {
       try { if (this.recorder && this.recorder.state !== "idle") await this.recorder.stop(); } catch { /* intentionally empty */ }
     })();
@@ -13025,6 +13146,20 @@ class LexVoicePlugin extends obsidian.Plugin {
     }
   }
   async saveAll() {
+    // 设置页、队列状态和后台任务都可能同时触发保存。直接并发 saveData 时，
+    // 较早创建的旧快照可能较晚落盘，覆盖刚加入的任务或新设置。
+    // 串行执行并在真正轮到写入时再取快照，保证磁盘最终状态与内存最新状态一致。
+    const previous = this._saveAllTail || Promise.resolve();
+    const current = previous.catch(() => undefined).then(() => this._saveAllSnapshot());
+    this._saveAllTail = current;
+    try {
+      return await current;
+    } finally {
+      if (this._saveAllTail === current) this._saveAllTail = null;
+    }
+  }
+
+  async _saveAllSnapshot() {
     const payload = {
       settings: serializeLexVoiceSettings(this.settings),
       backgroundJobs: {
@@ -13053,7 +13188,7 @@ class LexVoicePlugin extends obsidian.Plugin {
 
   async logDiagnostic(level, code, message, data) {
     if (this.settings.diagnosticsLogEnabled === false) return;
-    try {
+    const write = async () => {
       const folder = this.getDiagnosticsFolder();
       await this.ensureFolder(folder);
       const moment = window.moment;
@@ -13075,8 +13210,18 @@ class LexVoicePlugin extends obsidian.Plugin {
       } else {
         await this.app.vault.create(path, line);
       }
+    };
+    // 多个 ASR/LLM 任务会并发记录日志。串行化读改写，避免两个调用都读取旧内容后
+    // 后写者覆盖先写者，导致最关键的故障证据恰好丢失。
+    const previous = this._diagnosticWriteTail || Promise.resolve();
+    const current = previous.catch(() => undefined).then(write);
+    this._diagnosticWriteTail = current;
+    try {
+      await current;
     } catch (e) {
       console.warn("[LexVoice] diagnostic log failed", e);
+    } finally {
+      if (this._diagnosticWriteTail === current) this._diagnosticWriteTail = null;
     }
   }
 
@@ -13102,6 +13247,30 @@ class LexVoicePlugin extends obsidian.Plugin {
     }
   }
 
+  async getRuntimeMemorySummary() {
+    const result = {
+      jsHeapUsedBytes: 0,
+      jsHeapTotalBytes: 0,
+      rendererPrivateBytes: 0,
+      rendererResidentBytes: 0,
+    };
+    try {
+      const memory = globalThis.performance && globalThis.performance.memory;
+      result.jsHeapUsedBytes = Math.max(0, Number(memory && memory.usedJSHeapSize) || 0);
+      result.jsHeapTotalBytes = Math.max(0, Number(memory && memory.totalJSHeapSize) || 0);
+    } catch { /* unsupported runtime */ }
+    try {
+      const processApi = globalThis.process;
+      if (processApi && typeof processApi.getProcessMemoryInfo === "function") {
+        const info = await processApi.getProcessMemoryInfo();
+        // Electron 返回 KB；诊断统一换算为 bytes。
+        result.rendererPrivateBytes = Math.max(0, Number(info && info.private) || 0) * 1024;
+        result.rendererResidentBytes = Math.max(0, Number(info && info.residentSet) || 0) * 1024;
+      }
+    } catch { /* unsupported runtime */ }
+    return result;
+  }
+
   async buildDiagnosticReport() {
     const activeId = this.settings.activeTranscribeProvider || "";
     const provider = (this.settings.transcribeProviders || {})[activeId] || {};
@@ -13112,6 +13281,13 @@ class LexVoicePlugin extends obsidian.Plugin {
       return acc;
     }, {});
     const lines = await this.readRecentDiagnosticLines(100);
+    const activeSession = this.session;
+    const liveBacklog = activeSession ? this.getLiveAsrBacklogSummary(activeSession) : summarizeLiveAsrJobs([]);
+    const recorderBuffer = this.getRecorderBufferSummary();
+    const runtimeMemory = await this.getRuntimeMemorySummary();
+    const circuit = activeSession && activeSession.asrCircuitState ? activeSession.asrCircuitState : createLiveAsrCircuitState();
+    const outlineInput = activeSession && activeSession.realtimeOutlineInput || {};
+    const mib = (bytes) => (Math.max(0, Number(bytes) || 0) / (1024 * 1024)).toFixed(1);
     return [
       "# LexVoice 诊断报告",
       "",
@@ -13128,6 +13304,24 @@ class LexVoicePlugin extends obsidian.Plugin {
       `- 音频输入: ${audioInputModeLabel(this.settings.captureMode || "mic")}`,
       `- 分段间隔: ${this.settings.segmentIntervalMinutes} 分钟`,
       `- 队列: ${JSON.stringify(counts)}`,
+      "",
+      "## 录音与实时转写状态",
+      `- 录音状态: ${this.recorder && this.recorder.state || "idle"}`,
+      `- 完整录音内存块: ${recorderBuffer.masterChunkCount} 块 / ${mib(recorderBuffer.masterChunkBytes)} MiB`,
+      `- 当前分段内存块: ${recorderBuffer.currentSegmentChunkCount} 块 / ${mib(recorderBuffer.currentSegmentChunkBytes)} MiB`,
+      `- 等待实时转写: ${liveBacklog.count} 段 / ${(liveBacklog.totalDurationMs / 60000).toFixed(1)} 分钟 / ${mib(liveBacklog.totalBytes)} MiB`,
+      `- 最久等待: ${(liveBacklog.oldestAgeMs / 1000).toFixed(1)} 秒`,
+      `- 积压保护: ${activeSession && activeSession.asrDeferredMode ? "已转后台" : (activeSession && activeSession.asrBacklogLevel || "normal")}`,
+      `- 转写熔断: ${isLiveAsrCircuitOpen(circuit) ? "冷却中" : "关闭"} / 连续失败 ${circuit.consecutiveFailures || 0} 次`,
+      `- JS Heap: ${mib(runtimeMemory.jsHeapUsedBytes)} / ${mib(runtimeMemory.jsHeapTotalBytes)} MiB`,
+      `- Renderer 内存: private ${mib(runtimeMemory.rendererPrivateBytes)} MiB / resident ${mib(runtimeMemory.rendererResidentBytes)} MiB`,
+      "",
+      "## 最近一次实时大纲输入",
+      `- 输入模式: ${outlineInput.fullTranscript ? "整场转写" : "增量窗口"}`,
+      `- 总输入字符: ${Math.max(0, Number(outlineInput.totalChars) || 0)}`,
+      `- 新增转写字符: ${Math.max(0, Number(outlineInput.transcriptChars) || 0)}`,
+      `- 旧大纲字符: ${Math.max(0, Number(outlineInput.previousOutlineChars) || 0)}`,
+      `- 主题记忆字符: ${Math.max(0, Number(outlineInput.memoryChars) || 0)}`,
       "",
       "## 最近日志",
       lines.length ? lines.join("\n") : "暂无诊断日志。",
@@ -13724,7 +13918,11 @@ class LexVoicePlugin extends obsidian.Plugin {
   }
 
   // —— 单任务 token 计量 —— beginTaskMeter 开窗，期间所有 LLM 调用经 callLlmWithMeta→addTaskMeter 累计，endTaskMeter 结算。
-  beginTaskMeter() { this._taskMeter = { inChars: 0, outChars: 0, exactTokens: 0, calls: 0, hasExact: true, startedAt: Date.now() }; }
+  beginTaskMeter() {
+    const meter = { inChars: 0, outChars: 0, exactTokens: 0, calls: 0, hasExact: true, startedAt: Date.now() };
+    this._taskMeter = meter;
+    return meter;
+  }
   addTaskMeter(inChars, outChars, usage) {
     const m = this._taskMeter; if (!m) return;
     m.calls++;
@@ -13733,8 +13931,10 @@ class LexVoicePlugin extends obsidian.Plugin {
     const t = usage && Number(usage.total_tokens);
     if (t) m.exactTokens += t; else m.hasExact = false;
   }
-  endTaskMeter() {
-    const m = this._taskMeter; this._taskMeter = null;
+  endTaskMeter(expectedMeter = null) {
+    const m = expectedMeter || this._taskMeter;
+    if (expectedMeter && this._taskMeter !== expectedMeter) return null;
+    if (this._taskMeter === m) this._taskMeter = null;
     if (!m || !m.calls) return null;
     const exact = m.hasExact && m.exactTokens > 0;
     // 流式调用拿不到精确 usage 时按字符估算：中文为主的 MiMo 约 1.6 字/token（粗估、仅供心里有数，精确以模型控制台为准）。
@@ -14237,7 +14437,38 @@ class LexVoicePlugin extends obsidian.Plugin {
     const rollingContext = buildRollingOutlineContext(session.realtimeOutlineMemory, session.realtimeOutline, windowed);
     // 前缀缓存优化：语种指令前置进稳定块（不再追加到转写之后），转写严格放最后。
     const langInstruction = buildBriefingLanguageInstruction(this.settings);
-    const user = buildOutlinePrompt(meta.prefix, session.mode, rollingContext + transcript, session.captureMode, langInstruction);
+    const user = buildOutlinePrompt(
+      meta.prefix,
+      session.mode,
+      rollingContext + transcript,
+      session.captureMode,
+      langInstruction,
+      { incremental: windowed.isIncremental }
+    );
+    const inputMetrics = {
+      fullTranscript: false,
+      systemChars: sys.length,
+      userChars: user.length,
+      totalChars: sys.length + user.length,
+      rollingContextChars: rollingContext.length,
+      transcriptChars: transcript.length,
+      previousOutlineChars: clipRealtimeContextText(session.realtimeOutline, REALTIME_OUTLINE_MAX_PREVIOUS_CHARS).length,
+      memoryChars: clipRealtimeContextText(session.realtimeOutlineMemory, REALTIME_OUTLINE_MAX_MEMORY_CHARS).length,
+      maxTranscriptChars: REALTIME_OUTLINE_MAX_TRANSCRIPT_CHARS,
+    };
+    session.realtimeOutlineInput = inputMetrics;
+    session.realtimeOutlineWindow = {
+      usedCount: windowed.usedCount,
+      newUsedCount: windowed.newUsedCount,
+      omittedBeforeCount: windowed.omittedBeforeCount,
+      totalTextCount: windowed.totalTextCount,
+      approxChars: windowed.approxChars,
+      committedSegmentCount,
+      attemptedSegmentCount,
+      totalSegmentCount: processedSegmentCount,
+      input: inputMetrics,
+      preflight: true,
+    };
     // 本地档：未传 timeoutMs 时由 getRealtimeOutlineTimeoutMs 内部 ×2；
     // opts.local 由上层调用方根据 isLocalLlmEndpoint(settings.llmEndpoint) 透传进来
     const timeoutMs = Number(opts.timeoutMs) > 0
@@ -14275,7 +14506,51 @@ class LexVoicePlugin extends obsidian.Plugin {
       validation = validateRealtimeOutlineMarkdown(result, {
         previousOutline: session.realtimeOutline,
         allowUntimedTopLevel: true,
+        deltaOnly: windowed.isIncremental,
+        maxNewTopLevel: windowed.isIncremental ? 6 : 8,
       });
+    }
+    const existingOutlineState = normalizeRealtimeOutlineState(
+      session.realtimeOutlineState,
+      session.realtimeOutline,
+      session.realtimeOutlineMemory
+    );
+    const freshOutlineNodes = parseRealtimeOutlineStateFromMarkdown(result);
+    const mergedOutlineNodes = mergeStableRealtimeOutlineNodes(existingOutlineState.nodes, freshOutlineNodes);
+    const existingRenderedOutline = normalizeOutlineMarkdownForDisplay(
+      renderRealtimeOutlineStateMarkdown(existingOutlineState)
+    );
+    const mergedRenderedOutline = normalizeOutlineMarkdownForDisplay(
+      renderRealtimeOutlineStateMarkdown({ version: 1, nodes: mergedOutlineNodes })
+    );
+    const newTranscriptChars = (Array.isArray(windowed.newSegments) ? windowed.newSegments : [])
+      .reduce((sum, segment) => sum + String((segment && segment.text) || "").trim().length, 0);
+    const semanticChanged = existingRenderedOutline !== mergedRenderedOutline;
+    const requiresSemanticDelta = !opts.final
+      && !opts.force
+      && !!windowed.isIncremental
+      && windowed.newUsedCount >= REALTIME_OUTLINE_MIN_NEW_SEGMENTS
+      && newTranscriptChars >= REALTIME_OUTLINE_MIN_SEMANTIC_DELTA_CHARS;
+    let noChangeRetryCount = 0;
+    let noChangeAcknowledged = false;
+    if (validation.ok && requiresSemanticDelta && !semanticChanged) {
+      const sameCommittedCursor = Number(session.realtimeOutlineNoChangeCommittedCount) === committedSegmentCount;
+      noChangeRetryCount = sameCommittedCursor
+        ? Math.max(0, Number(session.realtimeOutlineNoChangeRetryCount) || 0) + 1
+        : 1;
+      session.realtimeOutlineNoChangeCommittedCount = committedSegmentCount;
+      session.realtimeOutlineNoChangeRetryCount = noChangeRetryCount;
+      if (noChangeRetryCount <= REALTIME_OUTLINE_MAX_NO_CHANGE_REJECTIONS) {
+        validation = { ok: false, reason: "no_incremental_outline_change" };
+      } else {
+        // One strict retry is enough. A genuinely repetitive discussion can
+        // produce no new structure; after that retry, acknowledge the batch so
+        // the ordered backlog cannot be blocked forever by this guard.
+        noChangeAcknowledged = true;
+      }
+    } else if (semanticChanged) {
+      session.realtimeOutlineNoChangeCommittedCount = -1;
+      session.realtimeOutlineNoChangeRetryCount = 0;
     }
     if (!validation.ok) {
       session.realtimeOutlineWindow = {
@@ -14293,6 +14568,12 @@ class LexVoicePlugin extends obsidian.Plugin {
         repairedAnchorCount: repaired.repairedCount,
         replacedModelAnchorCount: repaired.replacedCount,
         unresolvedAnchorCount: repaired.unresolvedCount,
+        freshNodeCount: freshOutlineNodes.length,
+        mergedNodeCount: mergedOutlineNodes.length,
+        newTranscriptChars,
+        semanticChanged,
+        noChangeRetryCount,
+        input: inputMetrics,
       };
       try {
         await this.logDiagnostic("warn", "outline.soft_rejected", "实时大纲本轮判废", {
@@ -14306,6 +14587,11 @@ class LexVoicePlugin extends obsidian.Plugin {
           repairedAnchorCount: repaired.repairedCount,
           replacedModelAnchorCount: repaired.replacedCount,
           unresolvedAnchorCount: repaired.unresolvedCount,
+          freshNodeCount: freshOutlineNodes.length,
+          mergedNodeCount: mergedOutlineNodes.length,
+          newTranscriptChars,
+          semanticChanged,
+          noChangeRetryCount,
           hasOld: !!(session.realtimeOutline && String(session.realtimeOutline).trim()),
         });
       } catch { /* intentionally empty */ }
@@ -14313,12 +14599,9 @@ class LexVoicePlugin extends obsidian.Plugin {
       // 外层统一进入退避重试；手动刷新也不能把不合格结果强行写进时间轴。
       throw new Error(`实时大纲输出格式不合格：${validation.reason}`);
     }
-    // 冻结合并：本轮通过验证的"新输出"（≤8 话题的近窗结果）并入已有状态——历史话题冻结、
-    // 只更新"进行中的最后一个话题" + 追加真正的新话题。大纲因此全部内容稳定存在、只在末尾增量生长；
+    // 冻结合并：本轮通过验证的增量节点并入已有状态——历史话题冻结、
+    // 只给同名历史话题补充子要点，并追加真正的新话题。大纲因此全部内容稳定存在、单调增量生长；
     // 单轮模型抽风（连排 / 漏拆 / 改写）最多影响末尾，碰不到已定稿的历史。
-    const existingOutlineState = normalizeRealtimeOutlineState(session.realtimeOutlineState, session.realtimeOutline, session.realtimeOutlineMemory);
-    const freshOutlineNodes = parseRealtimeOutlineStateFromMarkdown(result);
-    const mergedOutlineNodes = mergeStableRealtimeOutlineNodes(existingOutlineState.nodes, freshOutlineNodes);
     const mergedOutlineState = normalizeRealtimeOutlineState({
       version: 1,
       nodes: mergedOutlineNodes,
@@ -14346,8 +14629,29 @@ class LexVoicePlugin extends obsidian.Plugin {
       replacedModelAnchorCount: repaired.replacedCount,
       restoredAnchorCount: repaired.restoredCount,
       unresolvedAnchorCount: repaired.unresolvedCount,
+      freshNodeCount: freshOutlineNodes.length,
+      mergedNodeCount: mergedOutlineNodes.length,
+      newTranscriptChars,
+      semanticChanged,
+      noChangeAcknowledged,
+      noChangeRetryCount,
       workbenchChars: workbenchSignature.length,
+      input: inputMetrics,
     };
+    if (noChangeAcknowledged) {
+      try {
+        await this.logDiagnostic("warn", "outline.no_change_acknowledged", "实时大纲增量连续无结构变化，已确认该批次以避免队列停滞", {
+          mode: session.mode,
+          committedSegmentCount,
+          attemptedSegmentCount,
+          newUsedCount: windowed.newUsedCount,
+          newTranscriptChars,
+          noChangeRetryCount,
+        });
+      } catch { /* intentionally empty */ }
+    }
+    session.realtimeOutlineNoChangeCommittedCount = -1;
+    session.realtimeOutlineNoChangeRetryCount = 0;
     return session.realtimeOutline || result;
   }
 
@@ -14381,6 +14685,24 @@ class LexVoicePlugin extends obsidian.Plugin {
     // 兜到 2000 防尾部维度被截断（REALTIME_OUTLINE_SILENT_MAX_TOKENS 现为 1600）。
     const maxTokens = Math.max(2000, REALTIME_OUTLINE_SILENT_MAX_TOKENS);
     const user = buildCoverageScanPrompt(transcript, buildBriefingLanguageInstruction(this.settings));
+    const inputMetrics = {
+      fullTranscript: true,
+      systemChars: JOBPORTRAIT_SYSTEM_PROMPT.length,
+      userChars: user.length,
+      totalChars: JOBPORTRAIT_SYSTEM_PROMPT.length + user.length,
+      transcriptChars: transcript.length,
+      totalSegmentCount: session.segments.length,
+    };
+    session.realtimeOutlineInput = inputMetrics;
+    session.realtimeOutlineWindow = {
+      kind: "recruit-needs-full-coverage",
+      usedCount: session.segments.length,
+      newUsedCount: Math.max(0, session.segments.length - Math.max(0, Number(session.realtimeOutlineSegmentCount) || 0)),
+      totalSegmentCount: session.segments.length,
+      approxChars: transcript.length,
+      input: inputMetrics,
+      preflight: true,
+    };
     const raw = await callLlm(this, JOBPORTRAIT_SYSTEM_PROMPT, user, {
       timeoutMs,
       payload: { max_tokens: maxTokens },
@@ -14598,8 +14920,16 @@ class LexVoicePlugin extends obsidian.Plugin {
         realtimeOutlineWorkbenchSignature: "",
         realtimeOutlineFailureCount: 0,
         realtimeOutlineNextAllowedAt: 0,
+        realtimeOutlineNoChangeCommittedCount: -1,
+        realtimeOutlineNoChangeRetryCount: 0,
         interviewBrief: recordingInterviewBrief,
         writeQueue: Promise.resolve(),
+        segmentPersistQueue: Promise.resolve(),
+        liveAsrJobs: new Map(),
+        asrCircuitState: createLiveAsrCircuitState(),
+        asrBacklogLevel: "normal",
+        asrDeferredMode: false,
+        hasDeferredAsrJobs: false,
         activeSegmentJobs: 0,
         pendingMeetingWorkbenchInteractions: [],
         finalized: false,
@@ -14860,36 +15190,357 @@ class LexVoicePlugin extends obsidian.Plugin {
     })();
   }
 
+  getLiveAsrJobs(session) {
+    if (!session) return new Map();
+    if (!(session.liveAsrJobs instanceof Map)) session.liveAsrJobs = new Map();
+    return session.liveAsrJobs;
+  }
+
+  getRecorderBufferSummary() {
+    const sumBytes = (items) => (Array.isArray(items) ? items : []).reduce((total, item) => total + Math.max(0, Number(item && item.size) || 0), 0);
+    const masterChunks = this.recorder && Array.isArray(this.recorder.masterChunks) ? this.recorder.masterChunks : [];
+    const segmentChunks = this.recorder && Array.isArray(this.recorder.chunks) ? this.recorder.chunks : [];
+    return {
+      masterChunkCount: masterChunks.length,
+      masterChunkBytes: sumBytes(masterChunks),
+      currentSegmentChunkCount: segmentChunks.length,
+      currentSegmentChunkBytes: sumBytes(segmentChunks),
+    };
+  }
+
+  getLiveAsrBacklogSummary(session) {
+    return summarizeLiveAsrJobs(this.getLiveAsrJobs(session).values());
+  }
+
+  updateLiveAsrBacklogPolicy(session, reason = "update") {
+    if (!session) return null;
+    const summary = this.getLiveAsrBacklogSummary(session);
+    const nextLevel = classifyLiveAsrBacklog(summary);
+    const previousLevel = session.asrBacklogLevel || "normal";
+    session.asrBacklogLevel = nextLevel;
+    if (nextLevel === "critical") {
+      session.asrDeferredMode = true;
+      session.hasDeferredAsrJobs = true;
+    }
+    if (nextLevel !== previousLevel) {
+      const recorderBuffer = this.getRecorderBufferSummary();
+      void this.logDiagnostic(nextLevel === "normal" ? "info" : "warn", "asr.live_backlog_changed", "实时转写积压状态变化", {
+        reason,
+        previousLevel,
+        nextLevel,
+        ...summary,
+        ...recorderBuffer,
+      });
+      if (nextLevel === "warning" && !session._asrBacklogWarningNotified) {
+        session._asrBacklogWarningNotified = true;
+        new obsidian.Notice("转写速度暂时慢于录音，音频分段已安全写入缓存，LexVoice 会继续处理。", 8000);
+      }
+      if (nextLevel === "critical" && !session._asrBacklogCriticalNotified) {
+        session._asrBacklogCriticalNotified = true;
+        new obsidian.Notice("转写积压较多，后续分段已转入后台队列；录音不会中断。", 10000);
+      }
+    }
+    return summary;
+  }
+
+  prepareLiveSegmentDescriptor(session, seg) {
+    const continuationOffsetMs = Math.max(0, Number(session && session.continuationOffsetMs) || 0);
+    const baseSegmentCount = Array.isArray(session && session.continuationBaseSegments) ? session.continuationBaseSegments.length : 0;
+    const rawLocalIndex = Number(seg && seg.index);
+    const localIndex = Number.isFinite(rawLocalIndex)
+      ? Math.max(0, Math.floor(rawLocalIndex))
+      : Math.max(0, Number(session && session._nextLiveSegmentIndex) || 0);
+    session._nextLiveSegmentIndex = Math.max(Number(session._nextLiveSegmentIndex) || 0, localIndex + 1);
+    const segmentIndex = baseSegmentCount + localIndex;
+    const segNumber = segmentIndex + 1;
+    const startOffsetMs = Math.max(0, Number(seg && seg.startOffsetMs) || 0);
+    const endOffsetMs = Math.max(startOffsetMs, Number(seg && seg.endOffsetMs) || 0);
+    const displayStartOffsetMs = startOffsetMs + continuationOffsetMs;
+    const displayEndOffsetMs = endOffsetMs + continuationOffsetMs;
+    const blobType = String(seg && seg.blob && seg.blob.type || "");
+    const ext = String(seg && seg.ext || extFromMime(blobType) || "webm");
+    const segmentAudioName = `lex-${session.sessionStamp}-seg${pad(segNumber)}.${ext}`;
+    const segmentAudioPath = obsidian.normalizePath(`${this.getSegmentCacheFolder()}/${segmentAudioName}`);
+    return {
+      jobId: `${session.id}:${segmentIndex}`,
+      queueTaskId: genId(),
+      segmentIndex,
+      segNumber,
+      startOffsetMs,
+      endOffsetMs,
+      displayStartOffsetMs,
+      displayEndOffsetMs,
+      durationMs: Math.max(0, displayEndOffsetMs - displayStartOffsetMs),
+      segmentAudioName,
+      segmentAudioPath,
+      ext,
+      blobType,
+      blobSize: Math.max(0, Number(seg && seg.blob && seg.blob.size) || 0),
+      isFinal: !!(seg && seg.isFinal),
+      source: (seg && seg.source) || session.captureMode || "mic",
+    };
+  }
+
+  buildLiveSegmentQueueTask(session, descriptor, patch = {}) {
+    return Object.assign({
+      id: descriptor.queueTaskId || genId(),
+      type: "transcribe",
+      status: LIVE_ASR_TASK_STATUS,
+      retries: 0,
+      sessionId: session.id,
+      mdPath: session.mdPath,
+      audioPath: descriptor.segmentAudioPath,
+      audioName: descriptor.segmentAudioName,
+      segmentIndex: descriptor.segmentIndex,
+      sourceAudioPath: session.masterAudioPath || "",
+      sourceAudioName: session.masterAudioName || "",
+      masterAudioPath: session.masterAudioPath || "",
+      masterAudioName: session.masterAudioName || "",
+      startOffsetMs: descriptor.displayStartOffsetMs,
+      endOffsetMs: descriptor.displayEndOffsetMs,
+      audioStartOffsetMs: descriptor.startOffsetMs,
+      audioEndOffsetMs: descriptor.endOffsetMs,
+      mode: session.mode,
+      isFinal: !!descriptor.isFinal,
+      liveSegment: true,
+      lastError: "",
+    }, patch || {});
+  }
+
+  async registerLiveSegmentQueueTask(session, descriptor) {
+    const task = await this.queue.add(this.buildLiveSegmentQueueTask(session, descriptor));
+    descriptor.queueTaskId = task.id;
+    return task;
+  }
+
+  async keepLiveSegmentQueueTaskForRetry(session, descriptor, error) {
+    const message = getErrorMessage(error);
+    const task = await this.queue.add(this.buildLiveSegmentQueueTask(session, descriptor, {
+      status: "pending",
+      sourceAudioPath: session.masterAudioPath || "",
+      sourceAudioName: session.masterAudioName || "",
+      masterAudioPath: session.masterAudioPath || "",
+      masterAudioName: session.masterAudioName || "",
+      deferredReason: error && error.deferReason || "",
+      lastError: message,
+    }));
+    descriptor.queueTaskId = task.id;
+    return task;
+  }
+
+  async markLiveSegmentQueueTaskRunning(descriptor) {
+    const taskId = descriptor && descriptor.queueTaskId;
+    if (!taskId) return;
+    const task = this.queue.tasks.find((item) => item && item.id === taskId);
+    if (!task || task.status !== LIVE_ASR_TASK_STATUS) return;
+    await this.queue.update(taskId, { status: "running", lastError: "" });
+  }
+
+  async removeLiveSegmentQueueTask(descriptor) {
+    const taskId = descriptor && descriptor.queueTaskId;
+    if (!taskId || !this.queue.tasks.some((task) => task && task.id === taskId)) return;
+    await this.queue.remove(taskId);
+  }
+
+  queueLiveSegmentPersistence(session, descriptor, blob) {
+    const jobs = this.getLiveAsrJobs(session);
+    jobs.set(descriptor.jobId, {
+      id: descriptor.jobId,
+      queuedAtMs: Date.now(),
+      sizeBytes: descriptor.blobSize,
+      durationMs: descriptor.durationMs,
+      state: "spooling",
+    });
+    session.activeSegmentJobs = (Number(session.activeSegmentJobs) || 0) + 1;
+    const summary = this.updateLiveAsrBacklogPolicy(session, "enqueue");
+    void this.logDiagnostic("info", "asr.live_segment_enqueued", "录音分段已进入磁盘转写队列", {
+      segmentIndex: descriptor.segmentIndex,
+      durationMs: descriptor.durationMs,
+      sizeBytes: descriptor.blobSize,
+      pendingCount: summary && summary.count,
+      pendingDurationMs: summary && summary.totalDurationMs,
+      ...this.getRecorderBufferSummary(),
+    });
+
+    const previousPersist = session.segmentPersistQueue || Promise.resolve();
+    const persistTask = Promise.resolve(previousPersist).catch(() => undefined).then(async () => {
+      try {
+        await this.ensureSegmentCacheFolder();
+        const ab = await blob.arrayBuffer();
+        await this.app.vault.adapter.writeBinary(descriptor.segmentAudioPath, ab);
+      } catch (e) {
+        const job = jobs.get(descriptor.jobId);
+        if (job) job.state = "queued";
+        this.updateLiveAsrBacklogPolicy(session, "persist-failed");
+        await this.logDiagnostic("error", "asr.segment_cache_write_failed", "录音分段写入缓存失败，将临时保留该段内存兜底", {
+          segmentIndex: descriptor.segmentIndex,
+          durationMs: descriptor.durationMs,
+          sizeBytes: descriptor.blobSize,
+          error: diagnosticError(e),
+        });
+        if (!session._segmentCacheWriteFailureNotified) {
+          session._segmentCacheWriteFailureNotified = true;
+          new obsidian.Notice("录音分段缓存写入失败，本段将临时保留在内存中继续处理。请检查知识库磁盘空间。", 10000);
+        }
+        return { persisted: false, fallbackBlob: blob, error: e };
+      }
+      let queueTask = null;
+      try {
+        // 音频一旦安全落盘，就立即登记任务。即使 Obsidian 此后崩溃，重启时也能从路径恢复。
+        queueTask = await this.registerLiveSegmentQueueTask(session, descriptor);
+      } catch (e) {
+        await this.logDiagnostic("error", "asr.segment_task_persist_failed", "录音分段已落盘，但持久任务登记失败", {
+          segmentIndex: descriptor.segmentIndex,
+          audioPath: descriptor.segmentAudioPath,
+          error: diagnosticError(e),
+        });
+        if (!session._segmentTaskPersistFailureNotified) {
+          session._segmentTaskPersistFailureNotified = true;
+          new obsidian.Notice("录音分段已保存，但恢复任务登记失败；本场仍会继续转写，请不要强制关闭 Obsidian。", 10000);
+        }
+      }
+      const job = jobs.get(descriptor.jobId);
+      if (job) job.state = "queued";
+      this.updateLiveAsrBacklogPolicy(session, "persisted");
+      return { persisted: true, fallbackBlob: null, error: null, queueTaskId: queueTask && queueTask.id || "" };
+    });
+    session.segmentPersistQueue = persistTask.then(() => undefined, () => undefined);
+    return persistTask;
+  }
+
+  startMasterAudioSave(session, seg) {
+    if (!session || !seg || !seg.masterBlob) return Promise.resolve();
+    const masterInput = {
+      masterBlob: seg.masterBlob,
+      masterMime: seg.masterMime,
+      masterExt: seg.masterExt,
+      ext: seg.ext,
+    };
+    return this.saveMasterAudio(session, masterInput).finally(() => { masterInput.masterBlob = null; });
+  }
+
+  recordLiveAsrAttemptSuccess(session) {
+    if (!session) return;
+    const previousFailures = Math.max(0, Number(session.asrCircuitState && session.asrCircuitState.consecutiveFailures) || 0);
+    session.asrCircuitState = recordLiveAsrSuccess();
+    if (previousFailures > 0) {
+      void this.logDiagnostic("info", "asr.live_circuit_recovered", "实时转写服务已恢复", { previousFailures });
+    }
+  }
+
+  recordLiveAsrAttemptFailure(session, error, descriptor) {
+    if (!session || !isTransientAsrError(error)) return;
+    const beforeOpen = isLiveAsrCircuitOpen(session.asrCircuitState || createLiveAsrCircuitState());
+    session.asrCircuitState = recordLiveAsrFailure(
+      session.asrCircuitState || createLiveAsrCircuitState(),
+      getErrorMessage(error),
+      true,
+    );
+    const afterOpen = isLiveAsrCircuitOpen(session.asrCircuitState);
+    if (!beforeOpen && afterOpen) {
+      session.hasDeferredAsrJobs = true;
+      void this.logDiagnostic("warn", "asr.live_circuit_opened", "连续转写故障，实时请求已暂时熔断", {
+        segmentIndex: descriptor && descriptor.segmentIndex,
+        consecutiveFailures: session.asrCircuitState.consecutiveFailures,
+        openUntilMs: session.asrCircuitState.openUntilMs,
+        error: diagnosticError(error),
+      });
+      if (!session._asrCircuitOpenNotified) {
+        session._asrCircuitOpenNotified = true;
+        new obsidian.Notice("转写服务连续失败，后续分段会先安全排队，稍后自动重试；录音不受影响。", 10000);
+      }
+    }
+  }
+
   handleSegment(session, seg) {
     if (!session) return;
-    session.writeQueue = session.writeQueue.then(async () => {
+    const filteredShort = this.shouldFilterShortRecording(session, seg);
+    const masterAudioSavePromise = filteredShort ? Promise.resolve() : this.startMasterAudioSave(session, seg);
+    let preparedSeg;
+    if (seg && seg.masterOnly) {
+      preparedSeg = {
+        isFinal: !!seg.isFinal,
+        masterOnly: true,
+        endOffsetMs: Math.max(0, Number(seg.endOffsetMs) || 0),
+        masterAudioSavePromise,
+      };
       session.activeSegmentJobs = (Number(session.activeSegmentJobs) || 0) + 1;
+    } else if (filteredShort) {
+      preparedSeg = {
+        isFinal: !!seg.isFinal,
+        endOffsetMs: Math.max(0, Number(seg.endOffsetMs) || 0),
+        filteredShort: true,
+        masterAudioSavePromise,
+      };
+      session.activeSegmentJobs = (Number(session.activeSegmentJobs) || 0) + 1;
+    } else {
+      const descriptor = this.prepareLiveSegmentDescriptor(session, seg);
+      preparedSeg = {
+        ...descriptor,
+        masterAudioSavePromise,
+        spoolPromise: this.queueLiveSegmentPersistence(session, descriptor, seg.blob),
+      };
+    }
+
+    session.writeQueue = Promise.resolve(session.writeQueue).catch((e) => {
+      console.error("[LexVoice] recovered rejected write chain before next segment", e);
+    }).then(async () => {
       try {
-        await this.processSegment(session, seg);
+        await this.processSegment(session, preparedSeg);
       } catch (e) {
-        // 关键：吞掉本段异常，绝不让 writeQueue 链变成 rejected——否则下面的 .then(finalize) 会被跳过、
-        // 后续每段挂到 rejected 链上也全部静默丢失、笔记永远卡在"录音中…"。本段失败已在 processSegment 内入队重试。
+        // 本段异常不能毒化后续写入链；processSegment 已尽力保留缓存并加入后台重试。
         console.error("[LexVoice] processSegment failed (swallowed to protect write chain)", e);
-        try { await this.logDiagnostic("error", "segment.process_failed", "分段处理异常（已吞，避免毒化写入链）", { mode: session.mode, isFinal: !!seg.isFinal, error: diagnosticError(e) }); } catch { /* intentionally empty */ }
+        try {
+          const task = preparedSeg.queueTaskId && this.queue.tasks.find((item) => item && item.id === preparedSeg.queueTaskId);
+          if (preparedSeg.segmentAudioPath && (!task || task.status === LIVE_ASR_TASK_STATUS || task.status === "running")) {
+            await this.keepLiveSegmentQueueTaskForRetry(session, preparedSeg, e);
+            session.hasDeferredAsrJobs = true;
+          }
+        } catch (queueError) {
+          console.error("[LexVoice] preserve live segment task after processing failure failed", queueError);
+        }
+        try { await this.logDiagnostic("error", "segment.process_failed", "分段处理异常（已吞，避免毒化写入链）", { mode: session.mode, isFinal: !!preparedSeg.isFinal, error: diagnosticError(e) }); } catch { /* intentionally empty */ }
       } finally {
+        if (preparedSeg.jobId) this.getLiveAsrJobs(session).delete(preparedSeg.jobId);
         session.activeSegmentJobs = Math.max(0, (Number(session.activeSegmentJobs) || 1) - 1);
-        if (!seg.isFinal && session.pendingMeetingWorkbenchInteractions && session.pendingMeetingWorkbenchInteractions.length) {
+        this.updateLiveAsrBacklogPolicy(session, "completed");
+        if (!preparedSeg.isFinal && session.pendingMeetingWorkbenchInteractions && session.pendingMeetingWorkbenchInteractions.length) {
           this.scheduleMeetingWorkbenchInteraction(session, session.pendingMeetingWorkbenchInteractions[0]);
         }
       }
     });
-    if (seg.isFinal) {
-      // 双分支：无论前序链 fulfilled 还是 rejected，finalizeSession 都必须跑——杜绝"最终段异常→纪要永不收尾"。
+    if (preparedSeg.isFinal) {
+      // 双分支：无论前序链 fulfilled 还是 rejected，finalizeSession 都必须跑。
       session.writeQueue = session.writeQueue.then(
         () => this.finalizeSession(session),
         (e) => { console.error("[LexVoice] write chain rejected before finalize", e); return this.finalizeSession(session); }
       );
     }
+    // 录音中的普通切段只等音频安全落盘，不应继续 await 慢速 ASR 链。
+    // 否则每个 cutSegment 异步栈都会持有原 Blob，等于从队列外侧把内存积压重新引回来。
+    // 最终段仍等待完整收尾，保持“停止录音完成后才允许下一场”的既有会话语义。
+    if (preparedSeg.isFinal) return session.writeQueue;
+    const releasePromises = [];
+    if (preparedSeg.spoolPromise) releasePromises.push(preparedSeg.spoolPromise);
+    if (preparedSeg.masterAudioSavePromise) releasePromises.push(preparedSeg.masterAudioSavePromise);
+    if (releasePromises.length) return Promise.all(releasePromises).then(() => undefined);
     return session.writeQueue;
   }
 
   getSegmentCacheFolder() {
     return obsidian.normalizePath(this.settings.segmentCacheFolder || DEFAULT_SETTINGS.segmentCacheFolder);
+  }
+
+  async ensureSegmentCacheFolder() {
+    const folderPath = this.getSegmentCacheFolder();
+    const adapter = this.app.vault.adapter;
+    const parts = folderPath.split("/").filter(Boolean);
+    let current = "";
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      if (!(await adapter.exists(current))) await adapter.mkdir(current);
+    }
+    return folderPath;
   }
 
   isSegmentCachePath(path) {
@@ -14970,6 +15621,15 @@ class LexVoicePlugin extends obsidian.Plugin {
     if (file instanceof obsidian.TFile) {
       try { await this.app.fileManager.trashFile(file); }
       catch (e) { console.error("[LexVoice] segment cache cleanup failed", path, e); }
+      return;
+    }
+    // 点目录缓存可能不进入 TFile 索引；它属于可再生临时文件，直接通过 adapter 删除。
+    try {
+      const adapter = this.app.vault.adapter;
+      const norm = obsidian.normalizePath(path);
+      if (adapter && await adapter.exists(norm)) await adapter.remove(norm);
+    } catch (e) {
+      console.error("[LexVoice] segment cache adapter cleanup failed", path, e);
     }
   }
 
@@ -14987,29 +15647,43 @@ class LexVoicePlugin extends obsidian.Plugin {
     if (this.settings.keepSegmentAudioFiles === true) return { deleted: 0, skipped: 0, failed: 0 };
     const folderPath = this.getSegmentCacheFolder();
     const folder = this.app.vault.getAbstractFileByPath(folderPath);
-    if (!(folder instanceof obsidian.TFolder)) return { deleted: 0, skipped: 0, failed: 0 };
     const cutoff = Date.now() - Math.max(60 * 60 * 1000, Number(maxAgeMs) || SEGMENT_CACHE_RETENTION_MS);
     const files = [];
-    const walk = (node) => {
-      if (node instanceof obsidian.TFile) {
-        files.push(node);
-        return;
-      }
-      if (node instanceof obsidian.TFolder) {
-        for (const child of node.children || []) walk(child);
-      }
-    };
-    walk(folder);
+    if (folder instanceof obsidian.TFolder) {
+      const walk = (node) => {
+        if (node instanceof obsidian.TFile) {
+          files.push({ path: node.path, mtime: Number(node.stat && node.stat.mtime) || 0 });
+          return;
+        }
+        if (node instanceof obsidian.TFolder) {
+          for (const child of node.children || []) walk(child);
+        }
+      };
+      walk(folder);
+    } else {
+      // 默认缓存位于 .cache；点目录不会始终进入 Vault 文件索引，改用 adapter 递归盘点。
+      const adapter = this.app.vault.adapter;
+      if (!adapter || !(await adapter.exists(folderPath))) return { deleted: 0, skipped: 0, failed: 0 };
+      const walkAdapter = async (dir) => {
+        const listing = await adapter.list(dir);
+        for (const filePath of listing.files || []) {
+          const stat = await adapter.stat(filePath);
+          files.push({ path: filePath, mtime: Number(stat && stat.mtime) || 0 });
+        }
+        for (const childDir of listing.folders || []) await walkAdapter(childDir);
+      };
+      await walkAdapter(folderPath);
+    }
     let deleted = 0, skipped = 0, failed = 0;
     for (const file of files) {
       const path = obsidian.normalizePath(file.path || "");
-      const ext = String(file.extension || "").toLowerCase();
+      const ext = String(path.split(".").pop() || "").toLowerCase();
       if (!this.isSegmentCachePath(path) || (ext && !AUDIO_EXT.has(ext))) { skipped++; continue; }
-      const mtime = Number(file.stat && file.stat.mtime) || 0;
+      const mtime = Number(file.mtime) || 0;
       if (mtime > cutoff) { skipped++; continue; }
       if (this.isQueuedTranscribeAudioReferenced(path)) { skipped++; continue; }
       try {
-        await this.app.fileManager.trashFile(file);
+        await this.maybeDeleteSegmentCacheFile(path);
         deleted++;
       } catch (e) {
         failed++;
@@ -15024,7 +15698,29 @@ class LexVoicePlugin extends obsidian.Plugin {
 
   async processSegment(session, seg) {
     if (!session) return;
-    if (this.shouldFilterShortRecording(session, seg)) {
+    if (seg && seg.isFinal && seg.masterOnly) {
+      // 分段 recorder 已失效但独立 masterRecorder 仍拿到了完整录音。
+      // 这里只保存母带并推进最终整理，不能把整场母带再次当作最后一段转写，
+      // 否则前面已转写的内容会重复、并额外产生一次整场 ASR 费用。
+      if (seg.masterAudioSavePromise) await seg.masterAudioSavePromise;
+      else await this.saveMasterAudio(session, seg);
+      this.setSessionWorkProgress(session, {
+        stage: "transcribe-finalized",
+        label: "转写收尾",
+        percent: null,
+        detail: "分段录音已停止，完整录音已保留，正在整理已有转写",
+      });
+      try {
+        await this.logDiagnostic("warn", "recording.master_only_finalize", "最后分段不可用，已用完整录音完成保存并整理已有转写", {
+          mode: session.mode,
+          segmentCount: Array.isArray(session.segments) ? session.segments.length : 0,
+          endOffsetMs: Number(seg.endOffsetMs) || 0,
+        });
+      } catch { /* intentionally empty */ }
+      this.refreshOutlineView();
+      return;
+    }
+    if (seg && (seg.filteredShort || this.shouldFilterShortRecording(session, seg))) {
       session.filteredShortRecording = true;
       session.filteredDurationMs = Math.max(0, Number(seg.endOffsetMs) || 0);
       await this.closeStreamingForDiscard(session);
@@ -15032,24 +15728,46 @@ class LexVoicePlugin extends obsidian.Plugin {
     }
     const continuationOffsetMs = Math.max(0, Number(session.continuationOffsetMs) || 0);
     const baseSegmentCount = Array.isArray(session.continuationBaseSegments) ? session.continuationBaseSegments.length : 0;
-    const segmentIndex = baseSegmentCount + (Array.isArray(session.segments) ? session.segments.length : 0);
-    const segNumber = segmentIndex + 1;
-    const displayStartOffsetMs = Math.max(0, Number(seg.startOffsetMs) || 0) + continuationOffsetMs;
-    const displayEndOffsetMs = Math.max(displayStartOffsetMs, (Number(seg.endOffsetMs) || 0) + continuationOffsetMs);
-    const segmentAudioName = `lex-${session.sessionStamp}-seg${pad(segNumber)}.${seg.ext}`;
-    const segmentAudioPath = obsidian.normalizePath(`${this.getSegmentCacheFolder()}/${segmentAudioName}`);
+    const segmentIndex = Number.isFinite(Number(seg.segmentIndex))
+      ? Number(seg.segmentIndex)
+      : baseSegmentCount + (Array.isArray(session.segments) ? session.segments.length : 0);
+    const segNumber = Number.isFinite(Number(seg.segNumber)) ? Number(seg.segNumber) : segmentIndex + 1;
+    const displayStartOffsetMs = Number.isFinite(Number(seg.displayStartOffsetMs))
+      ? Number(seg.displayStartOffsetMs)
+      : Math.max(0, Number(seg.startOffsetMs) || 0) + continuationOffsetMs;
+    const displayEndOffsetMs = Number.isFinite(Number(seg.displayEndOffsetMs))
+      ? Number(seg.displayEndOffsetMs)
+      : Math.max(displayStartOffsetMs, (Number(seg.endOffsetMs) || 0) + continuationOffsetMs);
+    const segmentAudioName = seg.segmentAudioName || `lex-${session.sessionStamp}-seg${pad(segNumber)}.${seg.ext}`;
+    const segmentAudioPath = seg.segmentAudioPath || obsidian.normalizePath(`${this.getSegmentCacheFolder()}/${segmentAudioName}`);
+    const segmentDurationMs = Math.max(0, displayEndOffsetMs - displayStartOffsetMs);
 
-    try {
-      await this.ensureFolder(this.getSegmentCacheFolder());
-      const ab = await seg.blob.arrayBuffer();
-      await this.app.vault.createBinary(segmentAudioPath, ab);
-    } catch (e) {
-      console.error(e);
-      new obsidian.Notice(`段${segNumber} 音频写入失败：${(e && e.message) || e}`);
+    let spoolResult = null;
+    if (seg.spoolPromise) {
+      spoolResult = await seg.spoolPromise;
+    } else if (seg.blob) {
+      try {
+        await this.ensureSegmentCacheFolder();
+        await this.app.vault.adapter.writeBinary(segmentAudioPath, await seg.blob.arrayBuffer());
+        spoolResult = { persisted: true, fallbackBlob: null, error: null };
+      } catch (e) {
+        spoolResult = { persisted: false, fallbackBlob: seg.blob, error: e };
+        console.error(e);
+        new obsidian.Notice(`段${segNumber} 音频写入失败：${(e && e.message) || e}`);
+      }
     }
-    if (seg.isFinal) await this.saveMasterAudio(session, seg);
+    if (spoolResult && spoolResult.queueTaskId) seg.queueTaskId = spoolResult.queueTaskId;
+    await this.markLiveSegmentQueueTaskRunning(seg);
+    const liveJob = seg.jobId ? this.getLiveAsrJobs(session).get(seg.jobId) : null;
+    if (liveJob) liveJob.state = "transcribing";
+    this.updateLiveAsrBacklogPolicy(session, "transcribing");
+    if (seg.masterAudioSavePromise) await seg.masterAudioSavePromise;
+    else if (seg.isFinal) await this.saveMasterAudio(session, seg);
 
     let text = ""; let err = null;
+    let transcribeBlob = null;
+    let batchAsrAttempted = false;
+    let batchAsrFailureRecorded = false;
     const activeProfile = this.getActiveTranscribeProfile();
     const isStreamingProvider = activeProfile && activeProfile.transcribeMode === "streaming";
     this.setSessionWorkProgress(session, {
@@ -15078,31 +15796,88 @@ class LexVoicePlugin extends obsidian.Plugin {
       err = new Error("流式转写连接未建立，请检查 API Key 与网络后重新录音。");
       console.error("[LexVoice]", err.message);
     } else {
-      try {
-        text = await transcribeAudio(this, seg.blob, seg.blob.type);
-      } catch (e) { err = e; console.error(e); }
+      const circuitOpen = isLiveAsrCircuitOpen(session.asrCircuitState || createLiveAsrCircuitState());
+      if (session.asrDeferredMode || circuitOpen) {
+        err = new Error(session.asrDeferredMode
+          ? "实时转写积压超过保护阈值，已转入后台队列"
+          : "转写服务处于短暂冷却期，已转入后台队列");
+        err.asrDeferred = true;
+        err.deferReason = session.asrDeferredMode ? "backlog-critical" : "circuit-open";
+      } else {
+        transcribeBlob = spoolResult && spoolResult.fallbackBlob ? spoolResult.fallbackBlob : null;
+        if (!transcribeBlob && spoolResult && spoolResult.persisted) {
+          const cachedAudio = await this.readVaultAudioBlob(segmentAudioPath, segmentAudioName);
+          transcribeBlob = cachedAudio && cachedAudio.blob;
+        }
+        if (!transcribeBlob && seg.blob) transcribeBlob = seg.blob;
+        if (!transcribeBlob) {
+          err = new Error("录音分段缓存无法读取，已保留后台重试任务");
+        } else {
+          batchAsrAttempted = true;
+          try {
+            text = await transcribeAudio(this, transcribeBlob, transcribeBlob.type || seg.blobType || mimeFromExt(seg.ext));
+          } catch (e) {
+            err = e;
+            batchAsrFailureRecorded = true;
+            this.recordLiveAsrAttemptFailure(session, e, seg);
+            console.error(e);
+          }
+        }
+      }
     }
+    if (!err && !String(text || "").trim() && segmentDurationMs >= 30 * 1000) {
+      // HTTP 200 + 空正文并不等于成功。对长段按可重试软失败处理并保留切片，
+      // 与导入音频路径保持一致，避免服务偶发空结果被静默写成“无内容”。
+      err = new Error("转写返回空结果（服务已响应但没有文字）");
+      if (batchAsrAttempted && !batchAsrFailureRecorded) {
+        batchAsrFailureRecorded = true;
+        this.recordLiveAsrAttemptFailure(session, err, seg);
+      }
+      try {
+        await this.logDiagnostic("warn", "asr.segment_empty", "录音分段转写返回空结果，已按软失败保留并排队", {
+          segmentIndex,
+          startOffsetMs: displayStartOffsetMs,
+          endOffsetMs: displayEndOffsetMs,
+          durationMs: segmentDurationMs,
+          mode: session.mode,
+        });
+      } catch { /* intentionally empty */ }
+    }
+    if (!err && batchAsrAttempted) this.recordLiveAsrAttemptSuccess(session);
     if (err) {
-      const issueKind = classifyRecordingIssue(err);
-      this.setRecordingIssue(issueKind, {
-        source: "asr",
-        message: getErrorMessage(err),
-        startedAtMs: displayStartOffsetMs,
-      });
-      await this.logDiagnostic("error", "asr.segment_failed", "录音分段转写失败", {
-        provider: this.settings.activeTranscribeProvider,
-        model: this.getActiveTranscribeProfile() && this.getActiveTranscribeProfile().model,
-        mime: seg.blob && seg.blob.type,
-        size: seg.blob && seg.blob.size,
-        segmentIndex,
-        startOffsetMs: displayStartOffsetMs,
-        endOffsetMs: displayEndOffsetMs,
-        mode: session.mode,
-        error: diagnosticError(err),
-      });
-      new obsidian.Notice(isStreamingProvider
-        ? `段 ${segNumber} 流式转写失败，无法离线重试；录音仍在本地继续，可整篇结束后用「重新整理」或重录该段。`
-        : `段 ${segNumber} 转写失败，录音仍在本地继续，已加入重试队列。`, 7000);
+      if (err.asrDeferred) {
+        await this.logDiagnostic("warn", "asr.segment_deferred", "录音分段已跳过实时请求并转入后台队列", {
+          segmentIndex,
+          startOffsetMs: displayStartOffsetMs,
+          endOffsetMs: displayEndOffsetMs,
+          durationMs: segmentDurationMs,
+          reason: err.deferReason || "deferred",
+          pendingDurationMs: this.getLiveAsrBacklogSummary(session).totalDurationMs,
+        });
+      } else {
+        const issueKind = classifyRecordingIssue(err);
+        this.setRecordingIssue(issueKind, {
+          source: "asr",
+          message: getErrorMessage(err),
+          startedAtMs: displayStartOffsetMs,
+        });
+        await this.logDiagnostic("error", "asr.segment_failed", "录音分段转写失败", {
+          provider: this.settings.activeTranscribeProvider,
+          model: this.getActiveTranscribeProfile() && this.getActiveTranscribeProfile().model,
+          mime: (transcribeBlob && transcribeBlob.type) || seg.blobType || "",
+          size: (transcribeBlob && transcribeBlob.size) || seg.blobSize || 0,
+          segmentIndex,
+          startOffsetMs: displayStartOffsetMs,
+          endOffsetMs: displayEndOffsetMs,
+          mode: session.mode,
+          error: diagnosticError(err),
+        });
+        new obsidian.Notice(isStreamingProvider
+          ? `段 ${segNumber} 流式转写失败，无法离线重试；录音仍在本地继续，可整篇结束后用「重新整理」或重录该段。`
+          : (!String(text || "").trim()
+            ? `段 ${segNumber} 没有返回文字，录音切片已保留并加入重试队列。`
+            : `段 ${segNumber} 转写失败，录音仍在本地继续，已加入重试队列。`), 7000);
+      }
     } else if (!text || !String(text).trim()) {
       // 转写成功返回，但内容为空 → 可能音频设备没选对 / 没有声音。
       // 请求既然成功返回，网络/服务是通的，清掉遗留横幅。
@@ -15146,22 +15921,18 @@ class LexVoicePlugin extends obsidian.Plugin {
       source: (seg && seg.source) || session.captureMode || "mic",
     });
 
+    let retryTask = null;
     if (err && !isStreamingProvider) {
       // 流式 provider(endpoint 是 wss://)的失败段不入 transcribe 重试队列——重试走 HTTP 必然再失败、
       // 把任务卡在 failed 永远清不掉。流式无法离线重切重传，留在笔记里标失败即可。
-      await this.queue.add({
-        type: "transcribe",
-        sessionId: session.id,
-        mdPath: session.mdPath,
-        audioPath: segmentAudioPath, segmentIndex,
-        sourceAudioPath: session.masterAudioPath || "",
-        sourceAudioName: session.masterAudioName || "",
-        masterAudioPath: session.masterAudioPath || "",
-        masterAudioName: session.masterAudioName || "",
-        startOffsetMs: displayStartOffsetMs, endOffsetMs: displayEndOffsetMs,
-        audioName: segmentAudioName, mode: session.mode, isFinal: !!seg.isFinal,
-        lastError: err.message || String(err),
-      });
+      if (err.asrDeferred || isTransientAsrError(err)) session.hasDeferredAsrJobs = true;
+      retryTask = await this.keepLiveSegmentQueueTaskForRetry(session, Object.assign({}, seg, {
+        segmentAudioPath,
+        segmentAudioName,
+        segmentIndex,
+        displayStartOffsetMs,
+        displayEndOffsetMs,
+      }), err);
     }
 
     const segTitle = `### 段落 ${segNumber} (${formatElapsed(displayStartOffsetMs)}–${formatElapsed(displayEndOffsetMs)}) ${getAudioTimeLink(playbackAudioName, Math.max(0, Number(seg.startOffsetMs) || 0))}${seg.isFinal ? " · 结束" : ""}`;
@@ -15169,17 +15940,23 @@ class LexVoicePlugin extends obsidian.Plugin {
       "",
       segTitle,
       "",
-      err ? (isStreamingProvider ? `_[流式转写失败，需整篇结束后重整或重录：${err.message || err}]_` : `_[转写失败（已进入重试队列）：${err.message || err}]_`) : (text ? text : "_[此段无内容]_"),
+      seg.queueTaskId ? `<!-- lexvoice-transcribe-task:${seg.queueTaskId} -->` : "",
+      err ? (isStreamingProvider
+        ? `_[流式转写失败，需整篇结束后重整或重录：${err.message || err}]_`
+        : err.asrDeferred
+          ? `_[等待后台转写：${err.message || err}]_`
+          : `_[转写失败（已进入重试队列）：${err.message || err}]_`) : (text ? text : "_[此段无内容]_"),
       "",
     ].join("\n");
     await this.insertBeforeSegmentsEnd(session.mdPath, block, session.id);
+    if (!err || isStreamingProvider) await this.removeLiveSegmentQueueTask(seg);
 
     this.refreshOutlineView();
     this.setSessionWorkProgress(session, {
       stage: seg.isFinal ? "transcribe-finalized" : "transcribed",
-      label: seg.isFinal ? "转写收尾" : `已转写 ${session.segments.length} 段`,
+      label: seg.isFinal ? "转写收尾" : (err && err.asrDeferred ? `已缓存 ${session.segments.length} 段` : `已转写 ${session.segments.length} 段`),
       percent: null,
-      detail: seg.isFinal ? "正在进入 AI 整理" : "分段转写已写入纪要",
+      detail: seg.isFinal ? "正在进入 AI 整理" : (err && err.asrDeferred ? "音频已落盘，等待后台补转写" : "分段转写已写入纪要"),
     });
 
     if (!seg.isFinal && text && String(text).trim()) new obsidian.Notice(`段 ${segNumber} 已转写`);
@@ -15198,7 +15975,52 @@ class LexVoicePlugin extends obsidian.Plugin {
 
   async finalizeSession(session) {
     if (!session || session.finalized) return;
-    session.finalized = true;
+    if (session.finalizePromise) return session.finalizePromise;
+    const finalizePromise = (async () => {
+      try {
+        await this._finalizeSessionImpl(session);
+        // 只有完整收尾流程返回后才锁定。此前在函数入口置 true，任何意外写盘异常
+        // 都会把半成品会话永久标成已完成，后续无法再收尾。
+        session.finalized = true;
+        session.finalizationError = "";
+      } catch (e) {
+        session.finalizing = false;
+        session.finalizationError = getErrorMessage(e);
+        if (session._finalizeTaskMeter) {
+          this.endTaskMeter(session._finalizeTaskMeter);
+          session._finalizeTaskMeter = null;
+        }
+        try {
+          this.setSessionWorkProgress(session, {
+            stage: "finalize-failed",
+            label: "纪要收尾失败",
+            percent: null,
+            detail: "原始转写和录音已保留，可打开笔记后重新整理",
+          });
+        } catch { /* intentionally empty */ }
+        console.error("[LexVoice] finalize session failed", e);
+        try {
+          await this.logDiagnostic("error", "session.finalize_failed", "纪要最终收尾异常，原始材料已保留", {
+            mode: session.mode,
+            mdPath: session.mdPath,
+            segmentCount: Array.isArray(session.segments) ? session.segments.length : 0,
+            error: diagnosticError(e),
+          });
+        } catch { /* intentionally empty */ }
+        new obsidian.Notice("纪要收尾失败；原始转写和录音已保留，可在笔记中使用「重新整理」。", 10000);
+        if (this.session === session) this.session = null;
+        this.refreshOutlineView();
+      }
+    })();
+    session.finalizePromise = finalizePromise;
+    try {
+      return await finalizePromise;
+    } finally {
+      if (session.finalizePromise === finalizePromise) session.finalizePromise = null;
+    }
+  }
+
+  async _finalizeSessionImpl(session) {
 
     // 静音统计快照：此刻录音刚结束、recorder 计数尚未被下一场 start() 重置，同步读取避免异步窗口被污染。
     const _silVoiced = this.recorder ? (this.recorder._voicedTicks || 0) : 0;
@@ -15234,6 +16056,36 @@ class LexVoicePlugin extends obsidian.Plugin {
     const writeSession = segmentsForFinal === session.segments
       ? session
       : Object.assign({}, session, { segments: segmentsForFinal, multiSourceAudio: true });
+    const usableTranscriptSegments = segmentsForFinal.filter(s => s && String(s.text || "").trim());
+    if (!usableTranscriptSegments.length) {
+      const noTranscriptError = new Error("没有可用于整理的有效转写文本；录音和失败切片已保留");
+      this.setSessionWorkProgress(session, {
+        stage: "transcript-empty",
+        label: "没有获得有效转写",
+        percent: null,
+        detail: "已保留录音，可检查转写服务后从待处理队列重试",
+      });
+      try {
+        await this.logDiagnostic("error", "session.no_transcript", "整场没有有效转写，已跳过 LLM 整理以避免无效计费", {
+          mode: session.mode,
+          segmentCount: segmentsForFinal.length,
+          failedSegments: segmentsForFinal.filter(s => s && s.error).length,
+          mdPath: session.mdPath,
+        });
+      } catch { /* intentionally empty */ }
+      await this.appendPolishBlock(writeSession, "", noTranscriptError, true);
+      new obsidian.Notice("没有获得有效转写；录音和失败切片已保留，请检查转写服务后在待处理队列重试。", 10000);
+      if (this.settings.autoOpenNoteAfterFinish) {
+        const file = this.app.vault.getAbstractFileByPath(session.mdPath);
+        if (file instanceof obsidian.TFile) {
+          try { await this.app.workspace.getLeaf(false).openFile(file); } catch { /* intentionally empty */ }
+        }
+      }
+      this.scheduleDeferredAsrRetry(session);
+      if (this.session === session) this.session = null;
+      this.refreshOutlineView();
+      return;
+    }
     session.finalizing = true;
     this.setSessionWorkProgress(session, {
       stage: "finalize-start",
@@ -15245,6 +16097,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     new obsidian.Notice(textImportSession ? "文本已读取，AI 结构化整理中…" : "所有段已处理，AI 合并润色中…");
 
     let polished = ""; let mergeError = null; let nonRetryableMergeError = false;
+    let taskMeter = null;
     try {
       this.setSessionWorkProgress(session, {
         stage: "workbench",
@@ -15280,7 +16133,8 @@ class LexVoicePlugin extends obsidian.Plugin {
         session.recruitContext = await this.resolveRecruitProjectContext(session.recruitContext);
         writeSession.recruitContext = session.recruitContext;
       }
-      this.beginTaskMeter();
+      taskMeter = this.beginTaskMeter();
+      session._finalizeTaskMeter = taskMeter;
       polished = await mergeAndPolish(this, segmentsForFinal.map(s => ({
         index: s.index, startOffsetMs: s.startOffsetMs, endOffsetMs: s.endOffsetMs, text: s.text,
         audioName: s.audioName,
@@ -15300,6 +16154,11 @@ class LexVoicePlugin extends obsidian.Plugin {
     session.finalizing = false;
 
     if (mergeError) {
+      if (taskMeter) {
+        this.endTaskMeter(taskMeter);
+        taskMeter = null;
+        session._finalizeTaskMeter = null;
+      }
       nonRetryableMergeError = isLlmNonRetryableError(mergeError);
       await this.logDiagnostic("error", "llm.merge_failed", "LLM 合并整理失败", {
         mode: session.mode,
@@ -15387,10 +16246,13 @@ class LexVoicePlugin extends obsidian.Plugin {
 
     if (!mergeError) {
       await this.cleanupSuccessfulSegmentAudio(session);
+      const completedTaskMeter = taskMeter ? this.endTaskMeter(taskMeter) : null;
+      taskMeter = null;
+      session._finalizeTaskMeter = null;
       try {
         const doneLabel = isTextImportSession(session) ? "文本整理完成"
           : session.source === "import" ? "导入音频整理完成" : "录音纪要整理完成";
-        this.logCompletedWork(doneLabel, session.mdPath || "", this.endTaskMeter());
+        this.logCompletedWork(doneLabel, session.mdPath || "", completedTaskMeter);
       } catch { /* intentionally empty */ }
       // 沉淀开关默认关闭：开启后转写完成自动跑沉淀扫描并入库；关闭则照旧手动点「沉淀」。后台执行、失败静默。
       if (this.settings.sedimentAutoExtract) void this.autoExtractSedimentAfterFinalize(session.mdPath);
@@ -15408,6 +16270,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         try { await this.app.workspace.getLeaf(false).openFile(file); } catch { /* intentionally empty */ }
       }
     }
+    this.scheduleDeferredAsrRetry(session);
     if (this.session === session) this.session = null;
     this.refreshOutlineView();
   }
@@ -17796,7 +18659,9 @@ ${source}`;
     const id = normalizeLexVoiceVersionId(versionInput.idLabel || versionInput.label || versionInput.kind || "version");
     const fileStem = sanitizeFilename(`${id}`) || id;
     const fileName = `${fileStem}.md`;
-    const body = String(versionInput.body || "").trim() || "_[无输出]_";
+    const versionParts = splitLexVoiceVersionPayload(versionInput.body);
+    const body = versionParts.body.trim() || "_[无输出]_";
+    const frontmatter = versionParts.frontmatter;
     const meta = {
       id,
       kind: versionInput.kind || "",
@@ -17809,10 +18674,13 @@ ${source}`;
       fileName,
       createdAt,
       containsRaw: false,
+      containsFrontmatter: Boolean(frontmatter),
     };
+    const payload = buildLexVoiceVersionPayload(frontmatter, body);
     const versionFileBody = [
       "---",
       "类型: LexVoice版本缓存",
+      "payload_format: 2",
       `version_id: "${id}"`,
       `variant_kind: "${meta.kind}"`,
       `variant_label: "${meta.label}"`,
@@ -17822,10 +18690,11 @@ ${source}`;
       `source_id: "${sourceId}"`,
       `source_segments_hash: "${sourceHash}"`,
       "contains_raw: false",
+      `contains_frontmatter: ${frontmatter ? "true" : "false"}`,
       `created: ${createdAt}`,
       "---",
       "",
-      body,
+      payload,
       "",
     ].filter(v => v !== "").join("\n");
     await this.writeLexVoiceVersionFile(folder, fileName, versionFileBody);
@@ -17843,12 +18712,13 @@ ${source}`;
       versions,
     });
     await this.writeLexVoiceVersionManifest(folder, manifest);
-    return { folder, manifest, meta, body };
+    return { folder, manifest, meta, body, frontmatter };
   }
 
-  async applyLexVoiceVersionToSource(sourceFile, versionMeta, body) {
+  async applyLexVoiceVersionToSource(sourceFile, versionMeta, body, frontmatter = "") {
     const cur = await this.app.vault.read(sourceFile);
-    const next = replaceLexVoiceActiveVersionBlock(cur, versionMeta, body);
+    const withFrontmatter = replaceLeadingFrontmatter(cur, frontmatter);
+    const next = replaceLexVoiceActiveVersionBlock(withFrontmatter, versionMeta, body);
     if (next !== cur) await this.app.vault.modify(sourceFile, next);
   }
 
@@ -17863,7 +18733,8 @@ ${source}`;
       return;
     }
     const parts = splitLeadingFrontmatter(content);
-    const body = parts.body.trim() || "_[版本内容为空]_";
+    const versionParts = splitLexVoiceVersionPayload(parts.body);
+    const body = versionParts.body.trim() || "_[版本内容为空]_";
     const meta = {
       id: String(fm.version_id || versionFile.basename),
       kind: String(fm.variant_kind || ""),
@@ -17873,7 +18744,7 @@ ${source}`;
       sourceHash: String(fm.source_segments_hash || ""),
       createdAt: String(fm.created || ""),
     };
-    await this.applyLexVoiceVersionToSource(sourceFile, meta, body);
+    await this.applyLexVoiceVersionToSource(sourceFile, meta, body, versionParts.frontmatter);
     const sourceContent = await this.app.vault.read(sourceFile);
     const sourceId = getLexVoiceSourceIdFromMarkdown(sourceContent, sourceFile);
     const folder = getLexVoiceVersionStoreFolder(this.settings, sourceId);
@@ -17892,6 +18763,7 @@ ${source}`;
       return;
     }
     const meta = getModeMeta(this.settings, mode);
+    let taskMeter = null;
     try {
       const content = await this.app.vault.read(file);
       let segments = extractLexVoiceTranscriptSegments(content);
@@ -17969,7 +18841,7 @@ ${source}`;
       }
       this._busyLabel = `重新整理中（${meta.prefix}）…`;
       this.updateBusyStatus();
-      this.beginTaskMeter();
+      taskMeter = this.beginTaskMeter();
       const polished = await mergeAndPolish(this, segments, mode, recruitContext, sessionMeta, originalFmForRegen, repolishOptions);
 
       // 重整完成后，把 frontmatter 里的"代号 → 真名"项压平为"真名"，让 yaml 干净
@@ -17999,7 +18871,7 @@ ${source}`;
         idLabel: `${meta.prefix}${versionStyle ? "-" + versionStyle : ""}`,
         body: stripModeSuggestionBlocks(polished || "_[无输出]_").trim(),
       });
-      await this.applyLexVoiceVersionToSource(dailyTargetFile, version.meta, version.body);
+      await this.applyLexVoiceVersionToSource(dailyTargetFile, version.meta, version.body, version.frontmatter);
       try {
         const dailyContent = await this.app.vault.read(dailyTargetFile);
         await this.appendDailyMeetingOverviewForMarkdown(dailyTargetFile, dailyContent, polished, mode, segments, sessionMeta);
@@ -18007,11 +18879,14 @@ ${source}`;
         console.error("[LexVoice] daily overview after repolish failed", e);
       }
       new obsidian.Notice(`LexVoice：已生成${meta.prefix}版本${preferenceLabel}${roleMapping.length ? `（角色映射 ${roleMapping.length} 条已应用）` : ""}`);
-      try { this.logCompletedWork(`重新整理完成 · ${meta.prefix}`, (file && file.path) || "", this.endTaskMeter()); } catch { /* intentionally empty */ }
+      const completedTaskMeter = taskMeter ? this.endTaskMeter(taskMeter) : null;
+      taskMeter = null;
+      try { this.logCompletedWork(`重新整理完成 · ${meta.prefix}`, (file && file.path) || "", completedTaskMeter); } catch { /* intentionally empty */ }
     } catch (e) {
       console.error("[LexVoice] repolish markdown failed", e);
       new obsidian.Notice(`重新整理失败：${(e && e.message) || e}`, 8000);
     } finally {
+      if (taskMeter) this.endTaskMeter(taskMeter);
       this._busyLabel = null;
       this.updateBusyStatus();
     }
@@ -18072,6 +18947,7 @@ ${source}`;
   // 永远从母本 raw 读（在派生上触发会先跳回母本）；清稿不含 raw、不参与「重新整理」回写。
   async generateCleanScript(file) {
     if (!(file instanceof obsidian.TFile) || file.extension !== "md") return;
+    let taskMeter = null;
     try {
       // 在派生文件上触发 → 先跳回母本（派生 contains_raw:false，本身没有 raw 可读）。
       let sourceFile = file;
@@ -18097,7 +18973,7 @@ ${source}`;
       this._busyLabel = "清稿生成中…";
       this.updateBusyStatus();
       new obsidian.Notice("LexVoice：正在从母本逐字稿生成清稿…");
-      this.beginTaskMeter();
+      taskMeter = this.beginTaskMeter();
       const { text: cleaned, truncated } = await cleanTranscript(this, segments, getLlmOutputCeiling(this.settings));
       if (!cleaned) { new obsidian.Notice("清稿生成失败：模型无输出", 8000); return; }
       const warn = truncated
@@ -18112,14 +18988,17 @@ ${source}`;
         idLabel: "清稿",
         body: noteBody,
       });
-      await this.applyLexVoiceVersionToSource(sourceFile, version.meta, version.body);
+      await this.applyLexVoiceVersionToSource(sourceFile, version.meta, version.body, version.frontmatter);
       new obsidian.Notice("LexVoice：清稿已生成并设为当前显示版本", 6000);
-      try { this.logCompletedWork("生成清稿", sourceFile.path || "", this.endTaskMeter()); } catch { /* intentionally empty */ }
+      const completedTaskMeter = taskMeter ? this.endTaskMeter(taskMeter) : null;
+      taskMeter = null;
+      try { this.logCompletedWork("生成清稿", sourceFile.path || "", completedTaskMeter); } catch { /* intentionally empty */ }
       try { await this.app.workspace.getLeaf(false).openFile(sourceFile); } catch { /* intentionally empty */ }
     } catch (e) {
       console.error("[LexVoice] generate clean script failed", e);
       new obsidian.Notice(`清稿生成失败：${(e && e.message) || e}`, 8000);
     } finally {
+      if (taskMeter) this.endTaskMeter(taskMeter);
       this._busyLabel = null;
       this.updateBusyStatus();
     }
@@ -18682,6 +19561,37 @@ ${source}`;
     await this.app.workspace.getLeaf(false).openFile(files[0]);
   }
 
+  scheduleTaskQueueRetry(delayMs = 1500, reason = "scheduled") {
+    const delay = Math.max(1000, Number(delayMs) || 0);
+    const runAt = Date.now() + delay;
+    if (this._taskQueueRetryTimer && Number(this._taskQueueRetryAt) <= runAt) return;
+    if (this._taskQueueRetryTimer) window.clearTimeout(this._taskQueueRetryTimer);
+    this._taskQueueRetryAt = runAt;
+    this._taskQueueRetryTimer = window.setTimeout(() => {
+      this._taskQueueRetryTimer = null;
+      this._taskQueueRetryAt = 0;
+      const recorderBusy = this.recorder && this.recorder.state !== "idle";
+      const segmentBusy = this.session && Number(this.session.activeSegmentJobs || 0) > 0;
+      const queueBusy = this.queue && this.queue.running;
+      if (recorderBusy || segmentBusy || queueBusy) {
+        this.scheduleTaskQueueRetry(30 * 1000, "activity-still-busy");
+        return;
+      }
+      void this.logDiagnostic("info", "queue.scheduled_retry_started", "开始执行计划中的后台重试", {
+        reason,
+        taskCount: this.queue && Array.isArray(this.queue.tasks) ? this.queue.tasks.length : 0,
+      });
+      void this.queue.processAll().catch((e) => console.error("[LexVoice] scheduled queue retry failed", e));
+    }, delay);
+  }
+
+  scheduleDeferredAsrRetry(session) {
+    if (!session || !session.hasDeferredAsrJobs) return;
+    const openUntilMs = Math.max(0, Number(session.asrCircuitState && session.asrCircuitState.openUntilMs) || 0);
+    const delayMs = Math.max(1500, openUntilMs > Date.now() ? openUntilMs - Date.now() + 1000 : 0);
+    this.scheduleTaskQueueRetry(delayMs, "session-deferred-asr");
+  }
+
   async retryQueue() {
     if (!this.queue.tasks.length) { new obsidian.Notice("队列为空"); return; }
     const blockedMergeTasks = this.queue.tasks.filter((task) => task && task.type === "merge" && task.status === "blocked");
@@ -18706,7 +19616,7 @@ ${source}`;
     // missing 任务(临时切片丢失)不在自动批量里，仍可在队列面板逐条重试触发切片恢复。
     const maxR = this.settings.maxRetries || 3;
     const runnable = this.queue.tasks.filter((task) => task
-      && task.status !== "blocked" && task.status !== "missing" && task.status !== "running"
+      && task.status !== "blocked" && task.status !== "missing" && task.status !== "running" && task.status !== LIVE_ASR_TASK_STATUS
       && (Number(task.retries) || 0) < maxR);
     if (!runnable.length) {
       const missingN = this.queue.tasks.filter((t) => t && t.status === "missing").length;
@@ -18781,13 +19691,25 @@ ${source}`;
     const norm = obsidian.normalizePath(String(path || ""));
     if (!norm) return null;
     const file = this.app.vault.getAbstractFileByPath(norm);
-    if (!(file instanceof obsidian.TFile)) return null;
-    const ab = await this.app.vault.readBinary(file);
-    const ext = (file.extension || String(fallbackName || "").split(".").pop() || "").toLowerCase();
+    let ab = null;
+    let sourceName = String(fallbackName || norm.split("/").pop() || "");
+    let sourcePath = norm;
+    let ext = String(sourceName.split(".").pop() || "").toLowerCase();
+    if (file instanceof obsidian.TFile) {
+      ab = await this.app.vault.readBinary(file);
+      sourceName = file.name;
+      sourcePath = file.path;
+      ext = (file.extension || ext).toLowerCase();
+    } else {
+      // .cache 等点目录可能不会进入 Vault 的 TFile 索引，但 adapter 仍可稳定读写。
+      const adapter = this.app.vault.adapter;
+      if (!adapter || !(await adapter.exists(norm))) return null;
+      ab = await adapter.readBinary(norm);
+    }
     return {
       blob: new Blob([ab], { type: mimeFromExt(ext) }),
-      sourcePath: file.path,
-      sourceName: file.name,
+      sourcePath,
+      sourceName,
       recovered: false,
     };
   }
@@ -18832,8 +19754,8 @@ ${source}`;
   }
 
   async recoverTranscribeTaskAudioBlob(task) {
-    const start = Number(task.startOffsetMs);
-    const end = Number(task.endOffsetMs);
+    const start = Number.isFinite(Number(task.audioStartOffsetMs)) ? Number(task.audioStartOffsetMs) : Number(task.startOffsetMs);
+    const end = Number.isFinite(Number(task.audioEndOffsetMs)) ? Number(task.audioEndOffsetMs) : Number(task.endOffsetMs);
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
 
     const sourceFile = this.resolveTranscribeRetrySourceFile(task);
@@ -18856,6 +19778,21 @@ ${source}`;
   }
 
   async retryTranscribeTask(task) {
+    const mdFile = this.app.vault.getAbstractFileByPath(task.mdPath);
+    const failMark = /_\[等待后台转写：[^\]]*\]_|_\[转写失败（空结果，已进入重试队列）\]_|_\[转写失败(?:（已进入重试队列）)?：[^\]]*\]_/;
+    const taskMarker = task.id ? `<!-- lexvoice-transcribe-task:${task.id} -->` : "";
+    const taskPattern = taskMarker
+      ? new RegExp(`${escapeRegExp(taskMarker)}\\s*(?:${failMark.source})`)
+      : null;
+    let currentMarkdown = "";
+    if (mdFile instanceof obsidian.TFile && taskMarker) {
+      currentMarkdown = await this.app.vault.read(mdFile);
+      if (currentMarkdown.includes(taskMarker) && !(taskPattern && taskPattern.test(currentMarkdown))) {
+        // 正文已经写入，只是上次删除持久任务时中断。幂等收尾，不能再次调用 ASR 或重复插段。
+        await this.maybeDeleteSegmentCacheFile(task.audioPath, task.id);
+        return;
+      }
+    }
     const audio = await this.readTranscribeTaskAudioBlob(task);
     const text = await transcribeAudio(this, audio.blob, audio.blob.type || "audio/wav");
     if (!String(text || "").trim()) {
@@ -18870,15 +19807,36 @@ ${source}`;
       throw new Error("转写重试返回空结果（服务 HTTP 200 但无文字）");
     }
     let replaced = false;
-    const mdFile = this.app.vault.getAbstractFileByPath(task.mdPath);
     if (mdFile instanceof obsidian.TFile) {
-      const cur = await this.app.vault.read(mdFile);
-      const failMark = /_\[转写失败（空结果，已进入重试队列）\]_|_\[转写失败(?:（已进入重试队列）)?：[^\]]*\]_/;
-      const next = cur.replace(failMark, text);
+      const cur = currentMarkdown || await this.app.vault.read(mdFile);
+      const next = taskPattern && taskPattern.test(cur)
+        ? cur.replace(taskPattern, `${taskMarker}\n${text}`)
+        : cur.replace(failMark, text);
       if (next !== cur) {
         await this.app.vault.modify(mdFile, next);
         replaced = true;
       }
+    }
+    if (!replaced) {
+      // 崩溃可能发生在“切片和任务已落盘、占位段尚未写入纪要”之间。
+      // 重启补转成功时主动恢复该段，而不是静默删掉任务和音频。
+      const segNumber = Math.max(0, Number(task.segmentIndex) || 0) + 1;
+      const startOffsetMs = Math.max(0, Number(task.startOffsetMs) || 0);
+      const endOffsetMs = Math.max(startOffsetMs, Number(task.endOffsetMs) || startOffsetMs);
+      const sourceAudioName = String(task.sourceAudioName || task.masterAudioName || task.audioName || "");
+      const linkOffsetMs = (task.sourceAudioName || task.masterAudioName)
+        ? Math.max(0, Number(task.audioStartOffsetMs) || 0)
+        : 0;
+      const recoveredBlock = [
+        "",
+        `### 段落 ${segNumber} (${formatElapsed(startOffsetMs)}–${formatElapsed(endOffsetMs)}) ${getAudioTimeLink(sourceAudioName, linkOffsetMs)}`,
+        "",
+        taskMarker,
+        text,
+        "",
+      ].join("\n");
+      await this.insertBeforeSegmentsEnd(task.mdPath, recoveredBlock, task.sessionId);
+      replaced = true;
     }
     if (!audio.recovered) await this.maybeDeleteSegmentCacheFile(task.audioPath, task.id);
     if (replaced) this.maybeAutoRepolishAfterTranscribeRetry(task, mdFile);

@@ -406,8 +406,8 @@ export class QueueModal extends obsidian.Modal {
     try { if (this.modalEl) this.modalEl.addClass("lexvoice-progress-modal"); } catch { /* intentionally empty */ }
 
     const allTasks = (this.plugin.queue && Array.isArray(this.plugin.queue.tasks)) ? this.plugin.queue.tasks : [];
-    const running = allTasks.filter((t) => t && t.status === "running");
-    const pending = allTasks.filter((t) => t && t.status !== "running");
+    const running = allTasks.filter((t) => t && (t.status === "running" || t.status === "live"));
+    const pending = allTasks.filter((t) => t && t.status !== "running" && t.status !== "live");
     const completed = Array.isArray(this.plugin.completedWorkLog) ? this.plugin.completedWorkLog : [];
     const detail = this.plugin.getCurrentActivityDetail ? this.plugin.getCurrentActivityDetail() : null;
     const activityLabel = this.plugin.getCurrentActivityLabel ? this.plugin.getCurrentActivityLabel() : null;
@@ -416,7 +416,7 @@ export class QueueModal extends obsidian.Modal {
     const fmtDur = (ms) => { const s = Math.max(0, Math.round(Number(ms) / 1000)); if (s < 60) return `${s}秒`; const m = Math.floor(s / 60), r = s % 60; if (m < 60) return r ? `${m}分${r}秒` : `${m}分`; const h = Math.floor(m / 60), rm = m % 60; return rm ? `${h}时${rm}分` : `${h}时`; };
     const fmtTime = (ms) => { try { return window.moment ? window.moment(ms).format("HH:mm:ss") : new Date(ms).toLocaleTimeString(); } catch { return ""; } };
     const tokenLabel = (n, exact) => { const v = Number(n) || 0; if (v <= 0) return ""; const num = v >= 10000 ? (v / 10000).toFixed(1).replace(/\.0$/, "") + "万" : String(v); return `${exact ? "" : "≈"}${num}`; };
-    const taskTitle = (t) => t.type === "transcribe" ? `转写重试 · 段${(t.segmentIndex || 0) + 1}`
+    const taskTitle = (t) => t.type === "transcribe" ? `${t.status === "live" ? "实时转写" : "转写重试"} · 段${(t.segmentIndex || 0) + 1}`
       : t.type === "merge" ? `合并重试 · ${(t.segments || []).length} 段`
       : t.type === "generate-prompt" ? "提示词生成" : (t.type || "任务");
 
@@ -491,7 +491,7 @@ export class QueueModal extends obsidian.Modal {
       const { ico, body } = makeRow("running");
       ico.createSpan({ cls: "lexvoice-progress-spinner" });
       titleLine(body, taskTitle(t), "", false);
-      subLine(body, t.mdPath || "");
+      subLine(body, t.status === "live" ? `切片已落盘 · ${t.mdPath || "等待本场转写"}` : (t.mdPath || ""));
     }
 
     for (const t of pending) {
@@ -502,10 +502,10 @@ export class QueueModal extends obsidian.Modal {
       const acts = body.createDiv({ cls: "lexvoice-progress-rowacts" });
       const retryBtn = acts.createSpan({ cls: "lexvoice-progress-link", attr: { role: "button", tabindex: "0" }, text: "重试" });
       retryBtn.onclick = async () => { try { await this.plugin.queue.processOne(t); } catch { /* intentionally empty */ } this.onOpen(); };
-      const delBtn = acts.createSpan({ cls: "lexvoice-progress-link", attr: { role: "button", tabindex: "0" }, text: "删除" });
+      const delBtn = acts.createSpan({ cls: "lexvoice-progress-link", attr: { role: "button", tabindex: "0" }, text: "取消重试" });
       delBtn.onclick = async () => {
         await this.plugin.queue.remove(t.id);
-        new obsidian.Notice("已删除任务：此分段不再自动重试，纪要中对应位置保持现状（可在纪要中右键重新发起）。", 6000);
+        new obsidian.Notice("已取消自动重试。缓存音频会暂时保留，之后仍可从纪要右键重新发起。", 6000);
         this.onOpen();
       };
     }
@@ -515,14 +515,14 @@ export class QueueModal extends obsidian.Modal {
       const foot = contentEl.createDiv({ cls: "lexvoice-progress-foot" });
       const retryAllBtn = foot.createEl("button", { cls: "lexvoice-progress-btn mod-cta", text: `重试全部 (${pending.length})`, attr: { type: "button" } });
       retryAllBtn.onclick = async () => { await this.plugin.retryQueue(); this.onOpen(); };
-      const clearBtn = foot.createSpan({ cls: "lexvoice-progress-link", attr: { role: "button", tabindex: "0" }, text: "清空待处理" });
+      const clearBtn = foot.createSpan({ cls: "lexvoice-progress-link", attr: { role: "button", tabindex: "0" }, text: "取消全部重试" });
       clearBtn.onclick = async () => {
-        const n = this.plugin.queue.tasks.filter((t) => t && t.status !== "running").length;
-        const ok = await lexvoiceConfirm(this.app, "清空待处理任务？",
-          `清空后这 ${n} 个任务不再自动重试，对应纪要将停留在当前状态（之后可在纪要中右键重新发起转写/整理）。处理中的任务不受影响。`,
-          "清空");
+        const n = this.plugin.queue.tasks.filter((t) => t && t.status !== "running" && t.status !== "live").length;
+        const ok = await lexvoiceConfirm(this.app, "取消全部自动重试？",
+          `取消后这 ${n} 个任务不再自动重试，对应纪要将停留在当前状态。缓存音频会暂时保留，处理中的任务不受影响。`,
+          "取消重试");
         if (!ok) return;
-        this.plugin.queue.tasks = this.plugin.queue.tasks.filter((t) => t && t.status === "running");
+        this.plugin.queue.tasks = this.plugin.queue.tasks.filter((t) => t && (t.status === "running" || t.status === "live"));
         await this.plugin.saveAll();
         this.plugin.renderStatusBar();
         this.onOpen();

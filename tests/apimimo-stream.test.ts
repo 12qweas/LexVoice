@@ -6,7 +6,14 @@ vi.mock("obsidian", () => ({
   TFolder: class TFolder {},
 }));
 
-import { applyApimimoSseData, pickAsrRetryDelayMs, estimateApimimoAudioSeconds } from "../src/asr/transcribe";
+import {
+  APIMIMO_ASR_CHUNK_MS,
+  applyApimimoSseData,
+  estimateApimimoAudioSeconds,
+  getApimimoNativeAudioPlan,
+  pickAsrRetryDelayMs,
+  requestApimimoAsrChunkWithEmptyRetry,
+} from "../src/asr/transcribe";
 
 function makeAcc() {
   return { text: "", finishReason: null, done: false };
@@ -154,5 +161,51 @@ describe("estimateApimimoAudioSeconds", () => {
     expect(estimateApimimoAudioSeconds({ size: 32000, type: "audio/wav" }, "")).toBe(1);
     expect(estimateApimimoAudioSeconds({ size: -5 }, "audio/wav")).toBe(0);
     expect(estimateApimimoAudioSeconds(null, "audio/wav")).toBe(0);
+  });
+});
+
+describe("getApimimoNativeAudioPlan", () => {
+  it("原生 wav/mp3 在未知真实时长时都先检查，不再仅按体积直发", () => {
+    expect(getApimimoNativeAudioPlan({ size: 32000, type: "audio/wav" }, "audio/wav").action).toBe("inspect");
+    expect(getApimimoNativeAudioPlan({ size: 16000, type: "audio/mpeg" }, "audio/mpeg").action).toBe("inspect");
+  });
+
+  it("解码后不超过 2 分钟才直发，超过则切块", () => {
+    const wav = { size: 1024, type: "audio/wav" };
+    expect(getApimimoNativeAudioPlan(wav, "audio/wav", APIMIMO_ASR_CHUNK_MS).action).toBe("direct");
+    expect(getApimimoNativeAudioPlan(wav, "audio/wav", APIMIMO_ASR_CHUNK_MS + 1).action).toBe("split");
+  });
+
+  it("非原生格式走转码", () => {
+    expect(getApimimoNativeAudioPlan({ size: 1024, type: "audio/webm" }, "audio/webm")).toEqual({
+      nativeMime: "",
+      action: "transcode",
+    });
+  });
+});
+
+describe("requestApimimoAsrChunkWithEmptyRetry", () => {
+  it("首轮空结果时只重试当前块一次", async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce("")
+      .mockResolvedValueOnce("恢复后的正文");
+    const wait = vi.fn().mockResolvedValue(undefined);
+    const logDiagnostic = vi.fn().mockResolvedValue(undefined);
+    const text = await requestApimimoAsrChunkWithEmptyRetry(
+      { logDiagnostic }, {}, { blob: { size: 123 }, mime: "audio/wav" }, "https://example.test", 1, 3, request, wait,
+    );
+
+    expect(text).toBe("恢复后的正文");
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(wait).toHaveBeenCalledTimes(1);
+    expect(logDiagnostic).toHaveBeenCalledWith("warn", "asr.apimimo_empty_chunk", "APIMiMo 单块转写为空", expect.objectContaining({ attempt: 1 }));
+  });
+
+  it("连续空结果必须失败，不能把缺块拼成成功转写", async () => {
+    const request = vi.fn().mockResolvedValue("");
+    await expect(requestApimimoAsrChunkWithEmptyRetry(
+      null, {}, { blob: { size: 123 }, mime: "audio/wav" }, "https://example.test", 0, 2, request, async () => {},
+    )).rejects.toThrow("连续返回空结果");
+    expect(request).toHaveBeenCalledTimes(2);
   });
 });

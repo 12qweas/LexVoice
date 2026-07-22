@@ -1006,22 +1006,6 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
           .onChange(v => writeProvider("language", v.trim())));
     }
 
-    if (activeId !== "custom") {
-      new obsidian.Setting(c).setName("推荐连接信息")
-        .setDesc("如果误改了服务地址、模型名称或识别语言，可恢复当前服务的推荐值；不会覆盖访问密钥。")
-        .addButton(b => b.setButtonText("恢复推荐值").onClick(async () => {
-          const ok = await this.restoreTranscribeProviderDefaults(activeId);
-          new obsidian.Notice(ok ? "已恢复当前转写服务的推荐连接信息，不会覆盖访问密钥。" : "当前服务没有内置推荐值。", 6000);
-          this.renderSettings();
-        }));
-    }
-
-    // MiMo 一把 Key 同时配转写 + AI 整理，请用「设置首页 → 快速配置」（避免在此处误触）。
-    if (activeId === "apimimo") {
-      const tip = c.createDiv({ cls: "lexvoice-provider-streaming-tip" });
-      tip.setText("提示：MiMo 同一把 Key 也能做 AI 整理。在「设置首页 → 快速配置」里选 MiMo、填一次 Key，即可同时配好转写和 AI 整理，并存成可切换的方案。");
-    }
-
     if (profile.showTargetLanguage) {
       const targetLanguages = [
         ["en", "英语 English"],

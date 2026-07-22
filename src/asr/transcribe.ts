@@ -261,27 +261,50 @@ export function apimimoPermanentError(message) {
   return err;
 }
 
-export async function buildApimimoAsrChunks(blob, mime) {
+// MiMo 的单次 2K 输出上限不仅受上传体积影响，也受音频时长影响。
+// WAV/MP3 都可能来自不同采样率或码率，仅凭文件体积无法可靠判断时长，因此原生格式也先解码核实。
+// decodedDurationMs 传入后给出最终 direct/split 决策，未传时给出 inspect 预判。
+export function getApimimoNativeAudioPlan(blob, mime, decodedDurationMs?) {
   const inputMime = String(mime || (blob && blob.type) || "").toLowerCase();
   const ext = extFromMime(inputMime);
   const nativeMime = APIMIMO_ASR_NATIVE_EXTS.has(ext) ? apimimoNativeAudioMime(ext) : "";
+  if (!nativeMime) return { nativeMime: "", action: "transcode" };
+  const overSize = approxBase64Bytes(blob && blob.size) > APIMIMO_ASR_MAX_BASE64_BYTES;
+  if (Number.isFinite(Number(decodedDurationMs))) {
+    const tooLong = Math.max(0, Number(decodedDurationMs) || 0) > APIMIMO_ASR_CHUNK_MS;
+    return { nativeMime, action: (!overSize && !tooLong) ? "direct" : "split" };
+  }
+  return { nativeMime, action: "inspect" };
+}
 
-  // 原生格式且 base64 未超限：原样直发（1 分钟 mp3 ≈ 1-2MB，低于 10MB）。
-  if (nativeMime && approxBase64Bytes(blob.size) <= APIMIMO_ASR_MAX_BASE64_BYTES) {
+export async function buildApimimoAsrChunks(blob, mime) {
+  const inputMime = String(mime || (blob && blob.type) || "").toLowerCase();
+  const initialPlan = getApimimoNativeAudioPlan(blob, inputMime);
+  const nativeMime = initialPlan.nativeMime;
+
+  // 只有拿到解码后的真实时长才允许原样直发，避免低码率长音频绕过 2 分钟切块。
+  if (initialPlan.action === "direct") {
     return [{ blob, mime: nativeMime }];
   }
 
-  // 走到这里：非 wav/mp3 格式，或原生但 base64 超 10MB（如几十分钟的恢复切片）。
+  // 走到这里：非 wav/mp3、原生音频可能超过 2 分钟，或 base64 超过 10MB。
   let audioBuffer;
   try {
     audioBuffer = await decodeAudioBlob(blob);
   } catch (e) {
+    // 原生格式本身能被服务端接收。仅在本机无法核实时长、且上传体积仍合法时保留兼容直发；
+    // 非原生格式或超体积音频仍必须报错，不能把服务端必拒的请求发出去。
+    if (nativeMime && approxBase64Bytes(blob.size) <= APIMIMO_ASR_MAX_BASE64_BYTES) {
+      return [{ blob, mime: nativeMime }];
+    }
     const hint = nativeMime
       ? `该音频 base64 超 10MB 需切块，但本机无法解码它（${e && e.message ? e.message : e}）`
       : `格式 ${inputMime || "unknown"} 不被 MiMo 服务端接受（仅 wav/mp3），需转码但本机无法解码（${e && e.message ? e.message : e}）`;
     throw apimimoPermanentError(`APIMiMo-V2.5-ASR：${hint}。请改用 SiliconFlow 转写此段，或缩短分段间隔后重录。`);
   }
   const totalMs = Math.max(1, Math.round((audioBuffer.duration || 0) * 1000));
+  const decodedPlan = getApimimoNativeAudioPlan(blob, inputMime, totalMs);
+  if (decodedPlan.action === "direct") return [{ blob, mime: decodedPlan.nativeMime }];
   const chunkCount = Math.ceil(totalMs / APIMIMO_ASR_CHUNK_MS);
   if (chunkCount > APIMIMO_ASR_MAX_CHUNKS) {
     throw apimimoPermanentError(`APIMiMo-V2.5-ASR 单次最多自动切 ${APIMIMO_ASR_MAX_CHUNKS} 块（约 ${Math.round(APIMIMO_ASR_MAX_CHUNKS * APIMIMO_ASR_CHUNK_MS / 60000)} 分钟）；当前约 ${Math.round(totalMs / 60000)} 分钟过长。请缩短分段间隔，或对超长录音改用支持大文件的 ASR 服务。`);
@@ -499,22 +522,42 @@ export async function requestApimimoAsrChunk(provider, prepared, endpoint) {
   }
 }
 
+export async function requestApimimoAsrChunkWithEmptyRetry(
+  plugin,
+  provider,
+  prepared,
+  endpoint,
+  chunkIndex,
+  chunkCount,
+  requestChunk = requestApimimoAsrChunk,
+  wait = delayMs,
+) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const part = String(await requestChunk(provider, prepared, endpoint) || "").trim();
+    if (part) return part;
+    try {
+      if (plugin && typeof plugin.logDiagnostic === "function") {
+        await plugin.logDiagnostic("warn", "asr.apimimo_empty_chunk", "APIMiMo 单块转写为空", {
+          chunkIndex,
+          chunkCount,
+          chunkBytes: prepared && prepared.blob && prepared.blob.size,
+          attempt,
+        });
+      }
+    } catch { /* intentionally empty */ }
+    if (attempt < 2) await wait(pickAsrRetryDelayMs("empty result", attempt));
+  }
+  throw new Error(`APIMiMo 第 ${chunkIndex + 1}/${chunkCount} 块连续返回空结果；音频已保留，可稍后重试`);
+}
+
 export async function transcribeAudioWithApimimo(plugin, provider, blob, mime, vocabularyGroups) {
   const chunks = await buildApimimoAsrChunks(blob, mime);
   const endpoint = normalizeApimimoAsrEndpoint(provider.endpoint);
   // 顺序转写各块（保留时序，避免并发触发限流），拼接后对全文统一做热词修正。
   const parts = [];
   for (let i = 0; i < chunks.length; i++) {
-    const part = await requestApimimoAsrChunk(provider, chunks[i], endpoint);
-    if (part) parts.push(part);
-    else if (chunks.length > 1) {
-      // 多块场景中间缺块=正文无感缺一段，必须留痕（单块为空走上层"本段无转写内容"提示，不重复记）。
-      try {
-        await plugin.logDiagnostic("warn", "asr.apimimo_empty_chunk", "APIMiMo 单块转写为空", {
-          chunkIndex: i, chunkCount: chunks.length, chunkBytes: chunks[i].blob && chunks[i].blob.size,
-        });
-      } catch { /* intentionally empty */ }
-    }
+    // HTTP 200 但空文本通常是服务端瞬时异常。只重试当前块一次，避免重跑此前已成功的块并重复计费。
+    parts.push(await requestApimimoAsrChunkWithEmptyRetry(plugin, provider, chunks[i], endpoint, i, chunks.length));
   }
   const rawText = parts.join(" ").replace(/\s+/g, " ").trim();
   const cleaned = cleanApimimoAsrRepeatedLoops(rawText);

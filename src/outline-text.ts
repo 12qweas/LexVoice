@@ -590,7 +590,14 @@ export function validateRealtimeOutlineMarkdown(outline, opts = {}) {
   const prevTopCount = previousOutline
     ? previousOutline.split(/\r?\n/).filter((l) => /^ {0,1}[-*+]\s+/.test(String(l || ""))).length
     : 0;
-  if (topBullets.length - prevTopCount > 8) {
+  const maxNewTopLevel = Math.max(1, Number(opts.maxNewTopLevel) || 8);
+  // Incremental LLM responses contain delta nodes only. Subtracting the
+  // historical count in that mode would make the limit ineffective as soon
+  // as the accumulated outline became longer than the current response.
+  const newTopLevelCount = opts.deltaOnly
+    ? topBullets.length
+    : Math.max(0, topBullets.length - prevTopCount);
+  if (newTopLevelCount > maxNewTopLevel) {
     return { ok: false, reason: "too_many_top_level_bullets" };
   }
   if (!opts.allowUntimedTopLevel) {

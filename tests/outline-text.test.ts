@@ -72,6 +72,16 @@ describe("validateRealtimeOutlineMarkdown —— 富大纲不被误杀", () => {
     const md = Array.from({ length: 11 }, (_, i) => `- [[r|0${i}:00]] T${i}`).join("\n");
     expect(validateRealtimeOutlineMarkdown(md).reason).toBe("too_many_top_level_bullets");
   });
+  it("增量响应按本轮节点计数，不再减去历史节点数", () => {
+    const previous = Array.from({ length: 12 }, (_, i) => `- [[r|${i}:00]] 旧${i}`).join("\n");
+    const delta = Array.from({ length: 7 }, (_, i) => `- 新${i}`).join("\n");
+    expect(validateRealtimeOutlineMarkdown(delta, {
+      previousOutline: previous,
+      allowUntimedTopLevel: true,
+      deltaOnly: true,
+      maxNewTopLevel: 6,
+    }).reason).toBe("too_many_top_level_bullets");
+  });
   it("有历史锚点但本轮全丢锚点 → lost_all_time_anchors", () => {
     expect(
       validateRealtimeOutlineMarkdown("- 无锚点A\n- 无锚点B", { previousOutline: "- [[r|00:30]] 旧" }).reason
@@ -278,6 +288,13 @@ describe("mergeStableRealtimeOutlineNodes —— 历史冻结 + 末尾增量 + �
     );
     expect(state[0].children).toEqual(["甲旧", "甲新"]);
     expect(state[1].children).toEqual(["乙旧", "乙新"]);
+  });
+  it("历史达到 8 个节点后仍可继续追加，不把 8 当整场上限", () => {
+    const history = Array.from({ length: 8 }, (_, i) => node(`a${i}`, `历史${i}`));
+    const delta = Array.from({ length: 4 }, (_, i) => node(`b${i}`, `新增${i}`, [`要点${i}`]));
+    const state = mergeStableRealtimeOutlineNodes(history, delta);
+    expect(state).toHaveLength(12);
+    expect(state.slice(-4).map((item) => item.title)).toEqual(["新增0", "新增1", "新增2", "新增3"]);
   });
   it("历史非末尾节点被新话题挤下后，后续同锚点轮仍能补子要点（单调、title 冻结）", () => {
     // A 在轮 k 只有 1 个子要点，随后 B 追加把 A 挤下末尾

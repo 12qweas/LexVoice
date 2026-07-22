@@ -192,7 +192,12 @@ export async function readLlmSseStream(res, onActivity) {
       accumulateLlmSseDataLine(line, state);
       if (state.done) break;
     }
-    return finalizeLlmSseContent(state, raw);
+    const finalized = finalizeLlmSseContent(state, raw);
+    if (!state.done && !finalized.finishReason) {
+      if (finalized.content) finalized.finishReason = "aborted";
+      else throw new Error("LLM 响应流中断：未收到正文或结束标记");
+    }
+    return finalized;
   }
   const reader = res.body.getReader();
   const decoder = new TextDecoder("utf-8");
@@ -223,7 +228,14 @@ export async function readLlmSseStream(res, onActivity) {
     // 释放 reader：abort / 提前 return / 异常时若不释放，底层流锁与句柄会泄漏（依赖 GC 不确定回收）。
     try { reader.cancel().catch(() => { /* intentionally empty */ }); } catch { /* intentionally empty */ }
   }
-  return finalizeLlmSseContent(state, raw);
+  const finalized = finalizeLlmSseContent(state, raw);
+  // 网络流自然关闭但既没有 [DONE]、也没有 finish_reason，同样属于不完整响应。
+  // 有正文时保住已计费内容并标记 aborted，供最终纪要续写；完全为空时显式失败并进入重试。
+  if (!state.done && !finalized.finishReason) {
+    if (finalized.content) finalized.finishReason = "aborted";
+    else throw new Error("LLM 响应流中断：未收到正文或结束标记");
+  }
+  return finalized;
 }
 
 export function finalizeLlmSseContent(state, raw) {
@@ -410,6 +422,41 @@ export async function requestLlmChatCompletion(plugin, messages, options) {
         return { choices: [{ message: { role: "assistant", content }, finish_reason: finishReason || null }] };
       }
       return await res.json();
+    } catch (e) {
+      // HTTP 状态错误已在上方完整记录并带 status/nonRetryable 语义，不能再误记成响应读取错误。
+      if (e && e.status) throw e;
+      const cancelled = !!(externalSignal && externalSignal.aborted);
+      if (controller && controller.signal && controller.signal.aborted) {
+        const err = new Error(cancelled
+          ? "LLM 调用已取消"
+          : `LLM 调用超时：${Math.round(timeoutMs / 1000)} 秒内没有新数据`);
+        if (cancelled) err.name = "AbortError";
+        await logLlmRequestDiagnostic(
+          plugin,
+          cancelled ? "info" : "error",
+          cancelled ? "llm.request_cancelled" : "llm.response_timeout",
+          cancelled ? "LLM 请求已取消" : "LLM 响应读取超时",
+          {
+            endpoint,
+            model: llmModel ? "<set>" : "",
+            messageChars,
+            payloadChars,
+            timeoutMs,
+            cancelled,
+            error: diagnosticError(err),
+          }
+        );
+        throw err;
+      }
+      await logLlmRequestDiagnostic(plugin, "error", "llm.response_read_failed", "LLM 响应读取失败", {
+        endpoint,
+        model: llmModel ? "<set>" : "",
+        messageChars,
+        payloadChars,
+        timeoutMs,
+        error: diagnosticError(e),
+      });
+      throw e;
     } finally {
       if (timer) window.clearTimeout(timer);
       detachExternalAbort();
@@ -431,8 +478,9 @@ export async function testLlmConnection(plugin) {
 
 export function isTransientLlmError(error) {
   if (isLlmNonRetryableError(error)) return false;
+  if (error && error.name === "AbortError") return false;
   const msg = String((error && error.message) || error || "");
-  return /Failed to fetch|network|ECONNRESET|ETIMEDOUT|\b(429|500|502|503|504|529)\b|rate\s*limit|temporarily|service unavailable|overloaded/i.test(msg);
+  return /Failed to fetch|network|ECONNRESET|ETIMEDOUT|timeout|timed?\s*out|\b(429|500|502|503|504|529)\b|rate\s*limit|temporarily|service unavailable|overloaded|超时|响应流中断/i.test(msg);
 }
 
 export function getLlmRetryDelayMs(error, attemptIndex) {
