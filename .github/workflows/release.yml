@@ -79,5 +79,10 @@ jobs:
           TAG: ${{ steps.release_ref.outputs.tag }}
         shell: bash
         run: |
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "LexVoice $TAG" --notes "Automated LexVoice release."
+          NOTES_FILE=".github/release-notes/$TAG.md"
+          if [ -f "$NOTES_FILE" ]; then
+            gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "LexVoice $TAG" --notes-file "$NOTES_FILE"
+          else
+            gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "LexVoice $TAG" --notes "Automated LexVoice release."
+          fi
           gh release upload "$TAG" main.js manifest.json styles.css --clobber
