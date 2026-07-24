@@ -44,16 +44,23 @@ export function normalizeRealtimeOutlineList(outline) {
   const lines = src.replace(/\r\n/g, "\n").split("\n");
   const out = [];
   for (const rawLine of lines) {
-    const line = rawLine;
-    // 只处理"列表行"（以 - / * / • 开头，允许前导缩进）
-    const m = line.match(/^(\s*)([-*•])\s+(.*)$/);
+    let line = rawLine;
+    // 模型偶尔会把协议里的 Markdown 列表改成标题、编号或 Unicode
+    // 圆点。这里仅做确定性的语法归一，不改写任何内容。
+    const heading = line.match(/^ {0,1}#{1,6}\s+(.+)$/);
+    if (heading) line = `- ${String(heading[1] || "").trim()}`;
+    const numbered = line.match(/^(\s*)\d{1,2}[.)、．]\s*(.+)$/);
+    if (numbered) line = `${numbered[1] || ""}- ${String(numbered[2] || "").trim()}`;
+    // 只处理"列表行"（允许前导缩进）。统一成 ASCII "-"，使验证、
+    // 解析和渲染共用同一套稳定语法。
+    const m = line.match(/^(\s*)([-*+•·▪◦])\s+(.*)$/);
     if (!m) { out.push(line); continue; }
     const indent = m[1] || "";
     const body = m[3] || "";
     const anchorCount = (body.match(REALTIME_OUTLINE_ANCHOR_GLOBAL_RE) || []).length;
     const hasDash = REALTIME_OUTLINE_INLINE_SEP_RE.test(body);
     // 既没破折号分隔、锚点也不超过 1 个 → 不是连排，原样保留。
-    if (!hasDash && anchorCount <= 1) { out.push(line); continue; }
+    if (!hasDash && anchorCount <= 1) { out.push(`${indent}- ${body}`); continue; }
     let parts = hasDash ? body.split(REALTIME_OUTLINE_INLINE_SEP_SPLIT_RE) : [body];
     parts = parts.flatMap(splitRealtimeOutlineAtEmbeddedAnchors).map(s => s.trim()).filter(Boolean);
     if (parts.length <= 1) { out.push(line); continue; }

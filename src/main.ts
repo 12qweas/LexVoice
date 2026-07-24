@@ -4,6 +4,7 @@ import * as obsidian from "obsidian";
 // 实时大纲"文本/状态纯函数层"已抽到独立模块并由 vitest 回归测试覆盖（src/outline-text.test.ts）。
 // 这里 import 回来，保持原有调用点用裸名引用不变。
 import { REALTIME_OUTLINE_STATE_MAX_NODES, normalizeRealtimeOutlineList, hashRealtimeOutlineText, getRealtimeOutlineAnchorTime, cleanRealtimeOutlineItemText, makeRealtimeOutlineNode, parseRealtimeOutlineStateFromMarkdown, selectIncrementalRealtimeOutlineSegments, repairRealtimeOutlineAnchors, mergeStableRealtimeOutlineNodes, normalizeOutlineMarkdownForDisplay, validateRealtimeOutlineMarkdown, mergeCoverageNoRegress, deriveFollowupCards, findLowEvidenceEntities, sanitizeProjectFolderName, recolorReportHtml, desensitizeResumeText } from "./outline-text";
+import { drainRealtimeOutlineBacklog } from "./outline-finalizer";
 import { LexVoiceSettingTab } from "./ui/settings-tab";
 import { pickReportAccentColor, AudioTimeModal, PeopleDirectorySuggestionModal, QueueModal, VirtualCableSetupModal, RecruitContextModal, ImportTextModal, ImportAudioModal, BubbleWidget } from "./ui/modals";
 import { resolveUpdateRawBase, resolveUpdateRawBases, resolveUpdateVersionedBases, stripLexVoiceFrontmatterSimple, getRecentNoteProcessingState, lexvoiceConfirm, enumerateAudioDevices, trashLexVoiceFile, pluginBasePath, normalizeAudioInputMode, audioInputModeLabel } from "./ui/helpers";
@@ -969,6 +970,8 @@ const REALTIME_OUTLINE_MIN_SILENT_INTERVAL_MS = 30000;
 const REALTIME_OUTLINE_SILENT_TIMEOUT_MS = 35000;
 const REALTIME_OUTLINE_MANUAL_TIMEOUT_MS = 45000;
 const REALTIME_OUTLINE_FINAL_TIMEOUT_MS = 45000;
+const REALTIME_OUTLINE_FINAL_BATCH_MAX_ATTEMPTS = 2;
+const REALTIME_OUTLINE_FINAL_MAX_BATCHES = 16;
 const REALTIME_OUTLINE_RETRY_GUARD_MS = 300;
 const REALTIME_OUTLINE_BUSY_RETRY_MS = 2000;
 // 大纲 max_tokens 分档（按总纲："最终那次该说完不为省钱截断"）：
@@ -1471,11 +1474,21 @@ ${transcript}`;
 function buildRealtimeOutlineDetails(session) {
   const outline = String(session && session.realtimeOutline ? session.realtimeOutline : "").trim();
   if (!outline) return "";
+  const coverage = session && session.realtimeOutlineCoverage;
+  const totalSegmentCount = Math.max(0, Number(coverage && coverage.totalSegmentCount) || 0);
+  const committedSegmentCount = Math.min(
+    totalSegmentCount,
+    Math.max(0, Number(coverage && coverage.committedSegmentCount) || 0)
+  );
+  const coverageNotice = totalSegmentCount > 0 && committedSegmentCount < totalSegmentCount
+    ? `> 大纲仅覆盖 ${committedSegmentCount}/${totalSegmentCount} 个转写分段，未覆盖部分仍已用于正文纪要。可在侧边栏刷新大纲后补齐。`
+    : "";
   return [
     "<details>",
     "<summary>录音中实时大纲（草稿）</summary>",
     "",
     "> 基于录音过程中已完成的分段自动生成，正文纪要以最终整理为准。时间标记可用于快速回听对应片段。",
+    ...(coverageNotice ? ["", coverageNotice] : []),
     "",
     outline,
     "",
@@ -1593,6 +1606,32 @@ function getRealtimeOutlineNewSegmentCount(session) {
   const segmentCount = Array.isArray(session.segments) ? session.segments.length : 0;
   const processedCount = Number(session.realtimeOutlineSegmentCount) || 0;
   return Math.max(0, segmentCount - processedCount);
+}
+
+function updateRealtimeOutlineCoverage(session, status, extra = {}) {
+  if (!session) return null;
+  const totalSegmentCount = Array.isArray(session.segments) ? session.segments.length : 0;
+  const committedSegmentCount = Math.min(
+    totalSegmentCount,
+    Math.max(0, Number(session.realtimeOutlineSegmentCount) || 0)
+  );
+  const attemptedSegmentCount = Math.min(
+    totalSegmentCount,
+    Math.max(committedSegmentCount, Number(session.realtimeOutlineAttemptedSegmentCount) || 0)
+  );
+  const complete = totalSegmentCount > 0 && committedSegmentCount >= totalSegmentCount;
+  session.realtimeOutlineCoverage = Object.assign({}, session.realtimeOutlineCoverage || {}, extra || {}, {
+    status: complete ? "complete" : String(status || "partial"),
+    complete,
+    totalSegmentCount,
+    committedSegmentCount,
+    attemptedSegmentCount,
+    coveragePercent: totalSegmentCount
+      ? Math.round((committedSegmentCount / totalSegmentCount) * 100)
+      : 0,
+    updatedAt: new Date().toISOString(),
+  });
+  return session.realtimeOutlineCoverage;
 }
 
 function getRealtimeOutlineNewTextChars(session) {
@@ -11013,7 +11052,19 @@ class OutlineView extends obsidian.ItemView {
     const aiIcon = aiTitle.createSpan({ cls: "lexvoice-outline-source-icon" });
     try { obsidian.setIcon(aiIcon, session && session.mode === "recruit" ? "user-check" : "sparkles"); } catch { /* intentionally empty */ }
     aiTitle.createSpan({ text: session && session.mode === "recruit" ? "AI 面试大纲" : "AI 整理大纲" });
-    aiHead.createDiv({ cls: "lexvoice-outline-source-badge", text: session && session.mode === "recruit" ? "转写 + AI 判断" : "由转写整理" });
+    const outlineCoverage = session && session.realtimeOutlineCoverage;
+    const coverageTotal = Math.max(0, Number(outlineCoverage && outlineCoverage.totalSegmentCount) || 0);
+    const coverageCommitted = Math.min(
+      coverageTotal,
+      Math.max(0, Number(outlineCoverage && outlineCoverage.committedSegmentCount) || 0)
+    );
+    const coverageIncomplete = coverageTotal > 0 && coverageCommitted < coverageTotal;
+    aiHead.createDiv({
+      cls: `lexvoice-outline-source-badge${coverageIncomplete ? " is-partial" : ""}`,
+      text: coverageIncomplete
+        ? `覆盖 ${coverageCommitted}/${coverageTotal} 段`
+        : (session && session.mode === "recruit" ? "转写 + AI 判断" : "由转写整理"),
+    });
     const refreshBtn = aiHead.createEl("button", { text: outlineRunning ? "停止等待" : "刷新" });
     refreshBtn.disabled = !session || session.segments.length === 0;
     refreshBtn.onclick = () => {
@@ -14408,6 +14459,10 @@ class LexVoicePlugin extends obsidian.Plugin {
     const attemptedSegmentCount = windowed.commitThroughCount;
     session.realtimeOutlineAttemptedSegmentCount = attemptedSegmentCount;
     session.realtimeOutlineAttemptedAt = new Date().toISOString();
+    updateRealtimeOutlineCoverage(session, "processing", {
+      attemptedSegmentCount,
+      rejectedReason: "",
+    });
     const workbenchSignature = "";
     const transcript = buildRealtimeOutlineTranscript(windowed.segments);
     if (windowed.newUsedCount === 0 || !transcript.trim()) {
@@ -14427,6 +14482,10 @@ class LexVoicePlugin extends obsidian.Plugin {
         workbenchChars: 0,
         acknowledgedWithoutLlm: true,
       };
+      updateRealtimeOutlineCoverage(session, "processing", {
+        attemptedSegmentCount,
+        acknowledgedWithoutLlm: true,
+      });
       return session.realtimeOutline || "";
     }
     const meta = getModeMeta(this.settings, session.mode);
@@ -14437,7 +14496,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     const rollingContext = buildRollingOutlineContext(session.realtimeOutlineMemory, session.realtimeOutline, windowed);
     // 前缀缓存优化：语种指令前置进稳定块（不再追加到转写之后），转写严格放最后。
     const langInstruction = buildBriefingLanguageInstruction(this.settings);
-    const user = buildOutlinePrompt(
+    let user = buildOutlinePrompt(
       meta.prefix,
       session.mode,
       rollingContext + transcript,
@@ -14445,6 +14504,15 @@ class LexVoicePlugin extends obsidian.Plugin {
       langInstruction,
       { incremental: windowed.isIncremental }
     );
+    if (opts.formatRetry) {
+      user += [
+        "",
+        "【格式修复重试】",
+        "上一次同一批内容因输出结构不合格被程序拒绝。请重新整理本批内容；不要解释原因。",
+        "必须保留 <lexvoice-memory> 与 <lexvoice-outline> 两个完整标签。",
+        "<lexvoice-outline> 内每个一级条目必须以 `- ` 开头，每个子要点必须以两个空格加 `- ` 开头。",
+      ].join("\n");
+    }
     const inputMetrics = {
       fullTranscript: false,
       systemChars: sys.length,
@@ -14595,6 +14663,10 @@ class LexVoicePlugin extends obsidian.Plugin {
           hasOld: !!(session.realtimeOutline && String(session.realtimeOutline).trim()),
         });
       } catch { /* intentionally empty */ }
+      updateRealtimeOutlineCoverage(session, "partial", {
+        attemptedSegmentCount,
+        rejectedReason: validation.reason,
+      });
       // 判废只记录“尝试到哪里”，绝不推进已提交游标，也不污染主题记忆。
       // 外层统一进入退避重试；手动刷新也不能把不合格结果强行写进时间轴。
       throw new Error(`实时大纲输出格式不合格：${validation.reason}`);
@@ -14614,6 +14686,10 @@ class LexVoicePlugin extends obsidian.Plugin {
     session.realtimeOutlineAttemptedSegmentCount = attemptedSegmentCount;
     session.realtimeOutlineWorkbenchSignature = workbenchSignature;
     session.realtimeOutlineUpdatedAt = new Date().toISOString();
+    updateRealtimeOutlineCoverage(session, "processing", {
+      attemptedSegmentCount,
+      rejectedReason: "",
+    });
     session.realtimeOutlineWindow = {
       usedCount: windowed.usedCount,
       newUsedCount: windowed.newUsedCount,
@@ -14728,15 +14804,14 @@ class LexVoicePlugin extends obsidian.Plugin {
     if (!session || !session.segments || !session.segments.length) return;
     const hasTranscript = session.segments.some(s => s && s.text && String(s.text).trim());
     if (!hasTranscript) return;
-    if (isRealtimeOutlineCurrent(session)) return;
-    try {
-      // 招聘需求挖掘使用独立的整场 coverage 扫描，不参与普通时间轴的分批追赶。
-      const maxBatches = session.mode === "recruit-needs"
-        ? 1
-        : Math.min(8, Math.max(1, getRealtimeOutlineNewSegmentCount(session)));
-      for (let batch = 0; batch < maxBatches; batch++) {
-        if (session.mode !== "recruit-needs" && isRealtimeOutlineCurrent(session)) break;
-        const before = Math.max(0, Number(session.realtimeOutlineSegmentCount) || 0);
+    if (isRealtimeOutlineCurrent(session)) {
+      updateRealtimeOutlineCoverage(session, "complete");
+      return;
+    }
+
+    // 招聘需求挖掘使用独立的整场 coverage 扫描，不参与普通时间轴的分批追赶。
+    if (session.mode === "recruit-needs") {
+      try {
         await this.generateRealtimeOutlineForSession(session, {
           timeoutMs: REALTIME_OUTLINE_FINAL_TIMEOUT_MS,
           force: true,
@@ -14744,19 +14819,124 @@ class LexVoicePlugin extends obsidian.Plugin {
           maxTokens: REALTIME_OUTLINE_FINAL_MAX_TOKENS,
         });
         markRealtimeOutlineSuccess(session);
-        const after = Math.max(0, Number(session.realtimeOutlineSegmentCount) || 0);
-        if (session.mode === "recruit-needs" || after <= before) break;
+      } catch (error) {
+        markRealtimeOutlineFailure(session);
+        console.error("[LexVoice] final recruit-needs coverage failed", error);
+        await this.logDiagnostic("warn", "outline.final_generate_failed", "最终纪要写入前生成岗位画像覆盖失败", {
+          segmentCount: session.segments.length,
+          mode: session.mode,
+          captureMode: session.captureMode,
+          error: diagnosticError(error),
+        });
       }
-    } catch (e) {
-      markRealtimeOutlineFailure(session);
-      console.error("[LexVoice] final realtime outline failed", e);
-      await this.logDiagnostic("warn", "outline.final_generate_failed", "最终纪要写入前生成实时大纲失败", {
-        segmentCount: session.segments.length,
-        mode: session.mode,
-        captureMode: session.captureMode,
-        error: diagnosticError(e),
-      });
+      return;
     }
+
+    const totalSegmentCount = session.segments.length;
+    const initialCommittedCount = Math.max(0, Number(session.realtimeOutlineSegmentCount) || 0);
+    const remainingSegmentCount = Math.max(0, totalSegmentCount - initialCommittedCount);
+    // 正常一批最多消费 9 个新分段（另留 1 个回看段）。按每批至少 4
+    // 个新分段保守估算，再加两批余量；同时硬封顶 16，避免异常模型放大费用。
+    const maxBatches = Math.min(
+      REALTIME_OUTLINE_FINAL_MAX_BATCHES,
+      Math.max(1, Math.ceil(remainingSegmentCount / 4) + 2)
+    );
+    updateRealtimeOutlineCoverage(session, "processing");
+
+    const drainResult = await drainRealtimeOutlineBacklog({
+      totalSegmentCount,
+      getCommittedCount: () => Math.max(0, Number(session.realtimeOutlineSegmentCount) || 0),
+      isComplete: () => isRealtimeOutlineCurrent(session),
+      maxAttemptsPerBatch: REALTIME_OUTLINE_FINAL_BATCH_MAX_ATTEMPTS,
+      maxBatches,
+      shouldRetryAttempt: ({ error }) => /实时大纲输出格式不合格/.test(
+        String(error && error.message ? error.message : error || "")
+      ),
+      runBatch: async ({ attemptIndex }) => {
+        await this.generateRealtimeOutlineForSession(session, {
+          timeoutMs: REALTIME_OUTLINE_FINAL_TIMEOUT_MS,
+          force: true,
+          final: true,
+          formatRetry: attemptIndex > 0,
+          maxTokens: REALTIME_OUTLINE_FINAL_MAX_TOKENS,
+        });
+      },
+      onAttemptFailed: async ({ batchIndex, attemptIndex, beforeCommittedCount, error }) => {
+        try {
+          await this.logDiagnostic("warn", "outline.final_batch_retry", "最终大纲批次失败", {
+            batchIndex,
+            attempt: attemptIndex + 1,
+            maxAttempts: REALTIME_OUTLINE_FINAL_BATCH_MAX_ATTEMPTS,
+            segmentCount: totalSegmentCount,
+            committedSegmentCount: beforeCommittedCount,
+            willRetry: attemptIndex + 1 < REALTIME_OUTLINE_FINAL_BATCH_MAX_ATTEMPTS
+              && /实时大纲输出格式不合格/.test(String(error && error.message ? error.message : error || "")),
+            mode: session.mode,
+            error: diagnosticError(error),
+          });
+        } catch { /* diagnostics must never interrupt finalization */ }
+      },
+      onBatchCompleted: async ({ committedSegmentCount }) => {
+        const coveragePercent = totalSegmentCount
+          ? Math.round((committedSegmentCount / totalSegmentCount) * 100)
+          : 0;
+        updateRealtimeOutlineCoverage(session, "processing");
+        this.setSessionWorkProgress(session, {
+          stage: "outline",
+          label: `补齐大纲 ${committedSegmentCount}/${totalSegmentCount} 段`,
+          percent: Math.min(58, 32 + Math.round(coveragePercent * 0.26)),
+          detail: `已覆盖 ${coveragePercent}% 的转写内容`,
+        });
+        this.refreshOutlineView();
+      },
+    });
+
+    if (drainResult.complete) {
+      markRealtimeOutlineSuccess(session);
+      updateRealtimeOutlineCoverage(session, "complete", {
+        completedBatches: drainResult.completedBatches,
+        retryCount: drainResult.retryCount,
+      });
+      await this.logDiagnostic("info", "outline.final_completed", "最终大纲已覆盖全部转写", {
+        segmentCount: totalSegmentCount,
+        committedSegmentCount: drainResult.committedSegmentCount,
+        completedBatches: drainResult.completedBatches,
+        attemptCount: drainResult.attemptCount,
+        retryCount: drainResult.retryCount,
+        mode: session.mode,
+      });
+      return drainResult;
+    }
+
+    markRealtimeOutlineFailure(session);
+    updateRealtimeOutlineCoverage(session, "partial", {
+      stopReason: drainResult.reason,
+      completedBatches: drainResult.completedBatches,
+      retryCount: drainResult.retryCount,
+      error: drainResult.lastError ? diagnosticError(drainResult.lastError) : null,
+    });
+    this.setSessionWorkProgress(session, {
+      stage: "outline",
+      label: "大纲未完全补齐",
+      percent: 58,
+      detail: `已覆盖 ${drainResult.committedSegmentCount}/${totalSegmentCount} 段；最终纪要仍会使用全部转写`,
+    });
+    new obsidian.Notice(
+      `大纲仅覆盖 ${drainResult.committedSegmentCount}/${totalSegmentCount} 段，最终纪要将继续基于完整转写生成。`
+    );
+    console.error("[LexVoice] final realtime outline incomplete", drainResult.lastError);
+    await this.logDiagnostic("warn", "outline.final_incomplete", "最终大纲未覆盖全部转写", {
+      segmentCount: totalSegmentCount,
+      committedSegmentCount: drainResult.committedSegmentCount,
+      mode: session.mode,
+      captureMode: session.captureMode,
+      stopReason: drainResult.reason,
+      completedBatches: drainResult.completedBatches,
+      attemptCount: drainResult.attemptCount,
+      retryCount: drainResult.retryCount,
+      error: drainResult.lastError ? diagnosticError(drainResult.lastError) : null,
+    });
+    return drainResult;
   }
 
   async openOutlineView() {
