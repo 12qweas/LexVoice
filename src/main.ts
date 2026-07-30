@@ -3,7 +3,7 @@
 import * as obsidian from "obsidian";
 // 实时大纲"文本/状态纯函数层"已抽到独立模块并由 vitest 回归测试覆盖（src/outline-text.test.ts）。
 // 这里 import 回来，保持原有调用点用裸名引用不变。
-import { REALTIME_OUTLINE_STATE_MAX_NODES, normalizeRealtimeOutlineList, hashRealtimeOutlineText, getRealtimeOutlineAnchorTime, cleanRealtimeOutlineItemText, makeRealtimeOutlineNode, parseRealtimeOutlineStateFromMarkdown, selectIncrementalRealtimeOutlineSegments, repairRealtimeOutlineAnchors, mergeStableRealtimeOutlineNodes, normalizeOutlineMarkdownForDisplay, validateRealtimeOutlineMarkdown, mergeCoverageNoRegress, deriveFollowupCards, findLowEvidenceEntities, sanitizeProjectFolderName, recolorReportHtml, desensitizeResumeText } from "./outline-text";
+import { normalizeRealtimeOutlineList, parseRecruitRealtimeOutlineProtocol, buildRecruitRealtimeOutlineFallback, buildRecruitRealtimeOutlineMemory, advanceRealtimeOutlineCursor, hashRealtimeOutlineText, getRealtimeOutlineAnchorTime, cleanRealtimeOutlineItemText, makeRealtimeOutlineNode, parseRealtimeOutlineStateFromMarkdown, selectIncrementalRealtimeOutlineSegments, repairRealtimeOutlineAnchors, mergeStableRealtimeOutlineNodes, normalizeOutlineMarkdownForDisplay, validateRealtimeOutlineMarkdown, mergeCoverageNoRegress, deriveFollowupCards, findLowEvidenceEntities, sanitizeProjectFolderName, recolorReportHtml, desensitizeResumeText } from "./outline-text";
 import { drainRealtimeOutlineBacklog } from "./outline-finalizer";
 import { LexVoiceSettingTab } from "./ui/settings-tab";
 import { pickReportAccentColor, AudioTimeModal, PeopleDirectorySuggestionModal, QueueModal, VirtualCableSetupModal, RecruitContextModal, ImportTextModal, ImportAudioModal, BubbleWidget } from "./ui/modals";
@@ -47,6 +47,7 @@ import { JOBPORTRAIT_SYSTEM_PROMPT, JOBPORTRAIT_FOLLOWUP_RULES } from "./prompts
 import { CLEAN_TRANSCRIPT_SYSTEM, buildCleanTranscriptChunkPrompt, QUICK_DICTATION_SYSTEM, buildQuickDictationCleanupPrompt } from "./prompts/clean-transcript";
 import { RealtimeOutlineCoordinator, runInOutlineSessionTail } from "./outline-coordinator";
 import { buildLexVoiceVersionPayload, replaceExistingLexVoiceActiveVersionBlock, replaceLeadingFrontmatter, sanitizeLexVoiceActiveVersionBody, splitLeadingFrontmatter, splitLexVoiceVersionPayload } from "./version-content";
+import { normalizeRecentNoteRoots, isPathUnderRecentNoteRoots } from "./recent-note-paths";
 
 
 
@@ -955,7 +956,7 @@ const MERGE_PROMPTS = {
 const REALTIME_OUTLINE_MAX_SEGMENTS = 10;
 const REALTIME_OUTLINE_MAX_TRANSCRIPT_CHARS = 6000;
 const REALTIME_OUTLINE_MAX_PREVIOUS_CHARS = 1200;
-const REALTIME_OUTLINE_MAX_MEMORY_CHARS = 800; // 与 prompt 的"memory ≤600字"对齐(留余量)，省 token、不稀释前缀缓存
+const REALTIME_OUTLINE_MAX_MEMORY_CHARS = 800; // 程序维护的长期记忆上限，避免长会上下文随轮次膨胀
 const REALTIME_OUTLINE_LOOKBACK_SEGMENTS = 1;
 const REALTIME_OUTLINE_MIN_NEW_SEGMENTS = 2;
 const REALTIME_OUTLINE_MIN_NEW_CHARS = 200;
@@ -1109,21 +1110,35 @@ function clipRealtimeContextText(text, maxChars) {
   return cleaned.slice(0, head).trimEnd() + marker + cleaned.slice(-tail).trimStart();
 }
 
-function buildRollingOutlineContext(previousMemory, previousOutline, windowed) {
+function buildRollingOutlineContext(previousMemory, previousOutline, windowed, opts = {}) {
   const memory = clipRealtimeContextText(previousMemory, REALTIME_OUTLINE_MAX_MEMORY_CHARS);
   const outline = clipRealtimeContextText(previousOutline, REALTIME_OUTLINE_MAX_PREVIOUS_CHARS);
   const omittedBeforeCount = Math.max(0, Number(windowed && windowed.omittedBeforeCount) || 0);
   const isIncremental = !!(windowed && windowed.isIncremental);
+  const programOwnedMemory = !!(opts && opts.programOwnedMemory);
   const lines = [];
-  lines.push("【主题记忆 / 滚动摘要】");
-  if (memory) {
-    lines.push(
-      "下面是此前较早内容压缩后的长期记忆。它用于承接主线，不直接面向用户展示；请在本轮处理后更新它。",
-      "",
-      memory
-    );
+  if (programOwnedMemory) {
+    lines.push("【已提交大纲记忆 / 程序维护】");
+    if (memory) {
+      lines.push(
+        "下面是 LexVoice 根据已提交大纲确定性压缩的长期状态，只用于避免重复和保持连续性。不要复述、改写或输出这段记忆；本轮只处理新增转写。",
+        "",
+        memory
+      );
+    } else {
+      lines.push("当前还没有已提交的大纲记忆。无需创建或输出记忆字段。");
+    }
   } else {
-    lines.push("暂无主题记忆。请根据本轮转写建立第一版主题记忆。");
+    lines.push("【主题记忆 / 滚动摘要】");
+    if (memory) {
+      lines.push(
+        "下面是此前较早内容压缩后的长期记忆。它用于承接主线，不直接面向用户展示；请在本轮处理后更新它。",
+        "",
+        memory
+      );
+    } else {
+      lines.push("暂无主题记忆。请根据本轮转写建立第一版主题记忆。");
+    }
   }
   if (outline) {
     lines.push(
@@ -1279,14 +1294,29 @@ function normalizeRealtimeOutlineState(value, fallbackMarkdown, fallbackMemory) 
       node.id = String((item && item.id) || node.id);
       nodes.push(node);
     }
-    if (nodes.length >= REALTIME_OUTLINE_STATE_MAX_NODES) break;
   }
   if (!nodes.length) nodes.push(...parseRealtimeOutlineStateFromMarkdown(fallbackMarkdown));
   return {
     version: 1,
-    nodes: nodes.slice(-REALTIME_OUTLINE_STATE_MAX_NODES),
+    nodes,
     memory: clipRealtimeContextText(raw.memory || fallbackMemory || "", REALTIME_OUTLINE_MAX_MEMORY_CHARS),
   };
+}
+
+function refreshProgramOwnedRecruitOutlineMemory(session) {
+  if (!session || session.mode !== "recruit") return String(session && session.realtimeOutlineMemory || "");
+  const state = normalizeRealtimeOutlineState(
+    session.realtimeOutlineState,
+    session.realtimeOutline,
+    ""
+  );
+  const memory = buildRecruitRealtimeOutlineMemory(state.nodes, {
+    maxChars: REALTIME_OUTLINE_MAX_MEMORY_CHARS,
+  });
+  state.memory = memory;
+  session.realtimeOutlineState = state;
+  session.realtimeOutlineMemory = memory;
+  return memory;
 }
 
 function renderRealtimeOutlineStateMarkdown(state) {
@@ -1381,56 +1411,67 @@ ${transcript}`;
 // 只对变化的转写部分重新计算 —— 纯降本提速，不改输出质量。
 // languageInstruction 由调用方传入并前置（不要再用 applyBriefingLanguageInstruction 追加到末尾，
 // 否则语种指令会落在变化内容之后、进入不可缓存的尾巴）。
+function buildRecruitRealtimeOutlineProtocolInstruction(opts = {}) {
+  const maxTopics = opts && opts.incremental ? 6 : 8;
+  return `【逐行输出协议】
+不要输出 XML、JSON、Markdown、图标、编号、代码围栏、前言或结语。
+只使用下面五种行前缀；每行表达一件事，内容里不要换行：
+
+主题：本轮问答的主题，4-8 字
+问题：面试官的核心提问
+回答：候选人的一个回答要点（可以重复多行）
+评价：基于已出现证据的具体观察（没有足够证据就省略）
+追问：下一步可直接提出的事实型追问（没有必要就省略）
+
+每个新主题必须从“主题：”开始，其后的问题、回答、评价和追问归属于该主题。
+本批最多输出 ${maxTopics} 个主题。即使转写不完整，也要输出“主题：转写不清，待复核”，并用“回答：”保留听清的原话。
+时间、层级、图标、长期记忆和最终 Markdown 均由 LexVoice 生成。不要输出“记忆：”或改写历史大纲。`;
+}
+
 function buildOutlinePrompt(modeLabel, modeKey, transcript, captureMode, languageInstruction, opts = {}) {
   const langBlock = languageInstruction ? `\n\n${String(languageInstruction).trim()}` : "";
   // 招聘面试模式：大纲严格按"问题 → 回答 → AI 评价"组织
   if (modeKey === "recruit") {
-    return `下面是一段${modeLabel}录音的实时整理上下文。请更新结构化的面试实时大纲和主题记忆。
+    return `下面是一段${modeLabel}录音的实时整理上下文。请只整理本批新增内容的面试实时大纲。
 
 ${buildSourceAwareOutlineInstruction(captureMode, modeKey)}
 
 ${buildProgramOwnedOutlineAnchorInstruction()}
 
-${buildRealtimeOutlineEnvelopeInstruction(opts)}
+${buildRecruitRealtimeOutlineProtocolInstruction(opts)}
 
 【结构 · 每个面试主题为一个节点】
-在 <lexvoice-outline> 内，把每一轮"面试官提问 → 候选人回答"归到一个**主题节点**下：节点标题是 4-8 字主题（概括这一轮在聊的能力/话题，不是原话问题），下挂这一轮的提问、回答要点、AI 评价、追问。
+把每一轮"面试官提问 → 候选人回答"归到一个主题下：主题是 4-8 字概括，不是原话问题；问题、回答要点、评价和追问各自独立成行。
 
-【可见大纲格式】
+【合格示例】
 \`\`\`
-- <主题，4-8 字>
-  - ❓ <面试官提问，精简成一句>
-  - 💬 <候选人回答的关键点 1>
-  - 💬 <候选人回答的关键点 2>
-  - 🤖 <AI 简评：质量定调 + 一句话评价>
-  - ⛏ <可继续追问的具体方向>
+主题：跨境项目经验
+问题：请介绍一次跨境劳动争议项目
+回答：候选人负责证据整理和外部律师协同
+回答：最终方案由集团法务负责人审批
+评价：有项目参与证据，但独立决策程度尚不明确
+追问：哪一个关键决定由你本人作出？
 \`\`\`
 
 【节点标题（主题）要求】
 - 4-8 字，概括这一轮聊的主题/能力项，如"社招体系搭建""跨部门协作""离职原因"
-- 不要把原话问题塞进标题——问题放到 ❓ 子行
+- 不要把原话问题塞进标题，问题另写“问题：”
 
-【提问行的要求】
-- 必须以 \`❓ \` 开头，是面试官这一轮的核心提问，精简成一句
-
-【AI 评价行的写作要求】
-- 必须以 \`🤖 \` 开头（让样式可识别为 AI 评价，与候选人内容做视觉区分）
+【评价行的写作要求】
 - 简评要"具体"——不要"回答得不错""逻辑清晰"这种空话
 - 必须能给面试官**实际启发**：例如"用了STAR结构但S和T一笔带过""数据来源未追问就接受""避谈失败案例"等
 
 【追问行的要求】
-- 必须以 \`⛏ \` 开头
 - 追问要"挖到事实层"，不要"能不能再说说"这种泛问
-- 例：候选人说"提升了 20%"，追问写成"⛏ 这 20% 的基线值是多少？参与人员只有他一个吗？"
+- 例：候选人说"提升了 20%"，追问写成"追问：这 20% 的基线值是多少？参与人员只有他一个吗？"
 
 【克制】
 - 候选人回答还没出现的问题，不要预生成评价
 - 转写不完整就只整理已出现的问答对
-- 没听清楚的，主题标题写成"（转写不清，待复核）"，不要硬猜
+- 没听清楚的，写"主题：转写不清，待复核"，不要硬猜
 
 【输出】
-- <lexvoice-outline> 内使用纯 Markdown 列表，每个主题独立成一级节点；提问/回答/评价/追问都是该节点的子项
-- 不要前言、不要总评（综合评价留给最终整合，不在大纲里出现）${langBlock}
+- 严格使用逐行协议；不要前言、不要总评（综合评价留给最终整合，不在大纲里出现）${langBlock}
 
 实时整理上下文：
 ${transcript}`;
@@ -2544,28 +2585,28 @@ function getRecentNoteQuickStatus(plugin, file, pendingPathSet) {
   return "done";
 }
 
-function getMarkdownFilesUnderFolder(app, folderPath) {
-  const norm = obsidian.normalizePath(String(folderPath || "").trim());
-  const folder = app && app.vault ? app.vault.getAbstractFileByPath(norm) : null;
-  if (!(folder instanceof obsidian.TFolder)) return [];
-  const prefix = norm ? norm + "/" : "";
-  return app.vault.getMarkdownFiles()
-    .filter((file) => {
-      const path = obsidian.normalizePath(file && file.path || "");
-      return path.startsWith(prefix);
-    });
+function getRecentNoteRoots(plugin) {
+  return normalizeRecentNoteRoots([
+    plugin && plugin.settings ? plugin.settings.mdFolder : "",
+    plugin && plugin.settings ? plugin.settings.recruitJdFolderPath : "",
+  ]);
+}
+
+function getMarkdownFilesUnderRecentRoots(plugin) {
+  if (!plugin || !plugin.app || !plugin.app.vault) return [];
+  const roots = getRecentNoteRoots(plugin);
+  return plugin.app.vault.getMarkdownFiles()
+    .filter((file) => file instanceof obsidian.TFile
+      && isPathUnderRecentNoteRoots(file.path, roots));
 }
 
 function getRecentNotes(plugin, limit) {
-  const norm = obsidian.normalizePath(plugin.settings.mdFolder);
-  const folder = plugin.app.vault.getAbstractFileByPath(norm);
-  if (!(folder instanceof obsidian.TFolder)) return [];
   const moment = window.moment;
   const currentYear = moment ? moment().year() : new Date().getFullYear();
   const items = [];
   const variantFiles = [];
   const pendingPathSet = getRecentPendingDepositPathSet(plugin);
-  for (const f of getMarkdownFilesUnderFolder(plugin.app, norm)) {
+  for (const f of getMarkdownFilesUnderRecentRoots(plugin)) {
     if (!(f instanceof obsidian.TFile) || f.extension !== "md") continue;
     const frontmatter = ((plugin.app.metadataCache.getFileCache(f) || {}).frontmatter) || {};
     // 派生版本（清稿/另存版本等）不当独立会议罗列——收集起来，稍后按 source_path 挂到母本下。
@@ -7331,6 +7372,7 @@ class OutlineView extends obsidian.ItemView {
       } catch { /* intentionally empty */ }
     } finally {
       state.running = false;
+      this.plugin.ensureRealtimeOutlineProgress(this.plugin.session, "note-ask-finished");
       this.render();
     }
   }
@@ -7389,7 +7431,9 @@ class OutlineView extends obsidian.ItemView {
       const raw = await callLlm(this.plugin, system, user, {
         timeoutMs: 45 * 1000,
         payload: { max_tokens: 240 },
-        priority: "user",
+        // Suggested follow-ups are optional polish. They must never jump ahead
+        // of a live recruitment outline that still has transcript backlog.
+        priority: "idle",
         noRetry: true,
       });
       const qs = String(raw || "")
@@ -11059,11 +11103,18 @@ class OutlineView extends obsidian.ItemView {
       Math.max(0, Number(outlineCoverage && outlineCoverage.committedSegmentCount) || 0)
     );
     const coverageIncomplete = coverageTotal > 0 && coverageCommitted < coverageTotal;
+    const degradedBatchCount = Math.max(
+      0,
+      Number(outlineCoverage && outlineCoverage.degradedBatchCount) || 0
+    );
+    const coverageLabel = coverageIncomplete
+      ? `覆盖 ${coverageCommitted}/${coverageTotal} 段`
+      : (coverageTotal > 0
+          ? `已覆盖 ${coverageCommitted}/${coverageTotal} 段`
+          : (session && session.mode === "recruit" ? "转写 + AI 判断" : "由转写整理"));
     aiHead.createDiv({
-      cls: `lexvoice-outline-source-badge${coverageIncomplete ? " is-partial" : ""}`,
-      text: coverageIncomplete
-        ? `覆盖 ${coverageCommitted}/${coverageTotal} 段`
-        : (session && session.mode === "recruit" ? "转写 + AI 判断" : "由转写整理"),
+      cls: `lexvoice-outline-source-badge${coverageIncomplete || degradedBatchCount ? " is-partial" : ""}`,
+      text: `${coverageLabel}${degradedBatchCount ? ` · ${degradedBatchCount} 批待复核` : ""}`,
     });
     const refreshBtn = aiHead.createEl("button", { text: outlineRunning ? "停止等待" : "刷新" });
     refreshBtn.disabled = !session || session.segments.length === 0;
@@ -12073,15 +12124,12 @@ class OutlineView extends obsidian.ItemView {
     this.render();
   }
 
-  // 判断某路径是否属于"最近纪要面板"的范畴（mdFolder 下的 .md），用于决定要不要刷新面板。
+  // 判断某路径是否属于"最近纪要面板"的范畴，用于决定要不要刷新面板。
+  // 招聘纪要完成后会迁移到招聘项目目录，因此这里必须同时覆盖普通纪要目录和招聘项目目录。
   isRecentNotePath(path) {
     const p = obsidian.normalizePath(String(path || ""));
     if (!p || !/\.md$/i.test(p)) return false;
-    const folder = obsidian.normalizePath(String(this.plugin.settings.mdFolder || ""));
-    // 空/根 mdFolder 时最近列表本就扫全库（getRecentNotes 同样行为），任何 .md 变动都算相关。
-    if (!folder || folder === "/" || folder === ".") return true;
-    // 只认 folder 之下的文件；不认与文件夹同名的兄弟文件（如 docs.md 之于 docs/）。
-    return p.startsWith(`${folder}/`);
+    return isPathUnderRecentNoteRoots(p, getRecentNoteRoots(this.plugin));
   }
 
   // 强制重渲染最近面板：computeSignature 不含最近笔记文件名，必须清掉 _lastSig 才会真重建 DOM
@@ -14095,6 +14143,18 @@ class LexVoicePlugin extends obsidian.Plugin {
     });
   }
 
+  ensureRealtimeOutlineProgress(session = this.session, reason = "progress-check") {
+    if (!session || session !== this.session || !session.id) return false;
+    if (!this.settings.enableRealtimeOutline && session.mode !== "recruit-needs") return false;
+    if (!hasRealtimeOutlineRunnableBacklog(session)) return false;
+    const local = isLocalLlmEndpoint(this.settings.llmEndpoint);
+    this.scheduleRealtimeOutline({
+      delayMs: getRealtimeOutlineQueuedDelayMs(session, { local }),
+      reason,
+    });
+    return true;
+  }
+
   async refreshRealtimeOutlineInBackground(opts = {}) {
     const session = this.session;
     if (!session || !session.id || !session.segments || !session.segments.length) return "";
@@ -14293,7 +14353,12 @@ class LexVoicePlugin extends obsidian.Plugin {
     if (!session) return false;
     if (opts.force) return true;
     if (this.hasActiveRecordingOrTranscription(session)) return false;
-    if (this.isRealtimeOutlineRunning(session)) return false;
+    const outlineState = this.getRealtimeOutlineCoordinatorState();
+    if (
+      outlineState.sessionId === session.id
+      && (outlineState.phase === "running" || outlineState.phase === "scheduled")
+      && hasRealtimeOutlineRunnableBacklog(session)
+    ) return false;
     const rec = this.recorder;
     if (rec && rec.state === "recording") {
       const info = rec.getInfo ? rec.getInfo() : {};
@@ -14359,6 +14424,9 @@ class LexVoicePlugin extends obsidian.Plugin {
       }
     } finally {
       this._meetingWorkbenchInteractionRunning = false;
+      // User annotations and instant answers have their own state. Whether they
+      // succeed or fail, they cannot own or strand the outline cursor.
+      this.ensureRealtimeOutlineProgress(session, "workbench-finished");
     }
   }
 
@@ -14443,6 +14511,9 @@ class LexVoicePlugin extends obsidian.Plugin {
     // 招聘需求挖掘：会中走"画像字段树覆盖扫描"，早 return，绝不进入下方 time-based 后处理
     // （parse / normalize / validate / 冻结合并对 14 维 JSON 全程有害；其它 5 个模式公共路径零改动）。
     if (session.mode === "recruit-needs") return await this.generateRecruitNeedsCoverageForSession(session, opts);
+    // 招聘长期记忆只由已经提交的大纲派生。旧会话里由模型写入的 memory
+    // 会在下一轮请求前被确定性重建，避免脏状态继续回喂。
+    refreshProgramOwnedRecruitOutlineMemory(session);
     const processedSegmentCount = session.segments.length;
     const committedSegmentCount = Math.min(
       processedSegmentCount,
@@ -14468,7 +14539,11 @@ class LexVoicePlugin extends obsidian.Plugin {
     if (windowed.newUsedCount === 0 || !transcript.trim()) {
       // 没有未提交正文时绝不调用 LLM。回看段只负责给真正的新段落补上下文，不能单独触发重复计费。
       // 失败/静音段不改变大纲，但可以安全确认，避免同一批空段反复触发。
-      session.realtimeOutlineSegmentCount = attemptedSegmentCount;
+      session.realtimeOutlineSegmentCount = advanceRealtimeOutlineCursor(
+        committedSegmentCount,
+        attemptedSegmentCount,
+        processedSegmentCount
+      );
       session.realtimeOutlineWindow = {
         usedCount: windowed.usedCount,
         newUsedCount: 0,
@@ -14493,7 +14568,12 @@ class LexVoicePlugin extends obsidian.Plugin {
     const local = !!opts.local || isLocalLlmEndpoint(this.settings && this.settings.llmEndpoint);
     // 每轮只把“旧大纲 + 最早未提交转写批次”交给模型，输出仍走冻结合并。
     // 这保留了富子要点，同时不再重复付费处理整段近期窗口。
-    const rollingContext = buildRollingOutlineContext(session.realtimeOutlineMemory, session.realtimeOutline, windowed);
+    const rollingContext = buildRollingOutlineContext(
+      session.realtimeOutlineMemory,
+      session.realtimeOutline,
+      windowed,
+      { programOwnedMemory: session.mode === "recruit" }
+    );
     // 前缀缓存优化：语种指令前置进稳定块（不再追加到转写之后），转写严格放最后。
     const langInstruction = buildBriefingLanguageInstruction(this.settings);
     let user = buildOutlinePrompt(
@@ -14505,13 +14585,20 @@ class LexVoicePlugin extends obsidian.Plugin {
       { incremental: windowed.isIncremental }
     );
     if (opts.formatRetry) {
-      user += [
-        "",
-        "【格式修复重试】",
-        "上一次同一批内容因输出结构不合格被程序拒绝。请重新整理本批内容；不要解释原因。",
-        "必须保留 <lexvoice-memory> 与 <lexvoice-outline> 两个完整标签。",
-        "<lexvoice-outline> 内每个一级条目必须以 `- ` 开头，每个子要点必须以两个空格加 `- ` 开头。",
-      ].join("\n");
+      user += session.mode === "recruit"
+        ? [
+            "",
+            "【格式修复重试】",
+            "上一次同一批内容因输出结构不合格被程序拒绝。请重新整理本批内容；不要解释原因。",
+            "只输出“主题 / 问题 / 回答 / 评价 / 追问”逐行协议，不要输出记忆、XML、Markdown 或编号。",
+          ].join("\n")
+        : [
+            "",
+            "【格式修复重试】",
+            "上一次同一批内容因输出结构不合格被程序拒绝。请重新整理本批内容；不要解释原因。",
+            "必须保留 <lexvoice-memory> 与 <lexvoice-outline> 两个完整标签。",
+            "<lexvoice-outline> 内每个一级条目必须以 `- ` 开头，每个子要点必须以两个空格加 `- ` 开头。",
+          ].join("\n");
     }
     const inputMetrics = {
       fullTranscript: false,
@@ -14543,28 +14630,61 @@ class LexVoicePlugin extends obsidian.Plugin {
       ? Math.round(Number(opts.timeoutMs))
       : getRealtimeOutlineTimeoutMs(windowed, { local });
     const maxTokens = Math.max(600, Math.round(Number(opts.maxTokens) || (opts.final ? REALTIME_OUTLINE_FINAL_MAX_TOKENS : REALTIME_OUTLINE_SILENT_MAX_TOKENS)));
-    const raw = await callLlm(this, sys, user, {
-      timeoutMs,
-      payload: { max_tokens: maxTokens },
-      priority: opts.final ? "normal" : "background",
-      noRetry: !opts.final,
-      signal: opts.signal,
-      // 实时大纲是"快速结构化抽取"，强制关思维链（无视全局思考档）：更快、更省，且避免推理内容/前言污染输出踩软失败。
-      thinkingMode: "fast",
-    });
+    let raw = "";
+    let recruitTransportFallbackError = null;
+    try {
+      raw = await callLlm(this, sys, user, {
+        timeoutMs,
+        payload: { max_tokens: maxTokens },
+        priority: opts.final ? "normal" : "background",
+        noRetry: !opts.final,
+        signal: opts.signal,
+        // 实时大纲是"快速结构化抽取"，强制关思维链（无视全局思考档）：更快、更省，且避免推理内容/前言污染输出踩软失败。
+        thinkingMode: "fast",
+      });
+    } catch (error) {
+      if ((opts.signal && opts.signal.aborted) || (error && error.name === "AbortError") || session.mode !== "recruit") {
+        throw error;
+      }
+      // Recruitment must keep moving even when the model endpoint times out.
+      // The deterministic fallback below uses only this batch's source
+      // transcript, so it is honest, reviewable, and cannot block later audio.
+      recruitTransportFallbackError = error;
+      try {
+        await this.logDiagnostic("warn", "outline.recruit_transport_fallback", "招聘大纲调用失败，已改用本批原始转写继续推进", {
+          segmentCount: session.segments.length,
+          committedSegmentCount,
+          attemptedSegmentCount,
+          newUsedCount: windowed.newUsedCount,
+          error: diagnosticError(error),
+        });
+      } catch { /* diagnostics must not block the source-transcript fallback */ }
+    }
     if (opts.signal && opts.signal.aborted) {
       const error = new Error("实时大纲生成已取消");
       error.name = "AbortError";
       throw error;
     }
     const parsed = parseRealtimeOutlineResponse(raw, session.realtimeOutline, session.realtimeOutlineMemory);
-    const repaired = repairRealtimeOutlineAnchors(parsed.outline, {
+    let recruitFormatRecovered = false;
+    if (session.mode === "recruit") {
+      const recruitProtocol = parseRecruitRealtimeOutlineProtocol(raw);
+      const recoveredOutline = recruitProtocol.outline;
+      const parsedNodeCount = parseRealtimeOutlineStateFromMarkdown(parsed.outline).length;
+      if (recoveredOutline) {
+        recruitFormatRecovered = !recruitProtocol.protocolMatched
+          && (parsed.outlineWasFallback || parsedNodeCount === 0);
+        parsed.outline = recoveredOutline;
+        parsed.outlineWasFallback = false;
+      }
+    }
+    let repaired = repairRealtimeOutlineAnchors(parsed.outline, {
       previousOutline: session.realtimeOutline,
       anchorSources: buildRealtimeOutlineAnchorSources(windowed.newSegments),
     });
     // 时间是程序拥有的近似导航元数据，不是 LLM 输出协议。若某轮没有可用音频锚点，
     // 仍保留无时间的顶层结构，不能因时间缺失把话题降级或整轮判废。
-    const result = normalizeOutlineMarkdownForDisplay(repaired.outline, { preserveUntimedTopLevel: true });
+    let result = normalizeOutlineMarkdownForDisplay(repaired.outline, { preserveUntimedTopLevel: true });
     let validation;
     if (parsed.outlineWasFallback && windowed.newUsedCount > 0) {
       validation = { ok: false, reason: "fallback_outline_only" };
@@ -14578,23 +14698,123 @@ class LexVoicePlugin extends obsidian.Plugin {
         maxNewTopLevel: windowed.isIncremental ? 6 : 8,
       });
     }
+    let recruitFallbackUsed = false;
+    let recruitFallbackReason = "";
+    if (!validation.ok && session.mode === "recruit" && windowed.newUsedCount > 0) {
+      const fallbackOutline = buildRecruitRealtimeOutlineFallback(windowed.newSegments);
+      const fallbackRepaired = repairRealtimeOutlineAnchors(fallbackOutline, {
+        previousOutline: session.realtimeOutline,
+        anchorSources: buildRealtimeOutlineAnchorSources(windowed.newSegments),
+      });
+      const fallbackResult = normalizeOutlineMarkdownForDisplay(
+        fallbackRepaired.outline,
+        { preserveUntimedTopLevel: true }
+      );
+      const fallbackValidation = validateRealtimeOutlineMarkdown(fallbackResult, {
+        previousOutline: session.realtimeOutline,
+        allowUntimedTopLevel: true,
+        deltaOnly: windowed.isIncremental,
+        maxNewTopLevel: windowed.isIncremental ? 6 : 8,
+      });
+      if (fallbackValidation.ok && fallbackResult.trim()) {
+        recruitFallbackUsed = true;
+        recruitFallbackReason = recruitTransportFallbackError
+          ? "llm_transport_failure"
+          : validation.reason;
+        repaired = fallbackRepaired;
+        result = fallbackResult;
+        validation = fallbackValidation;
+      }
+    }
+    if (recruitFormatRecovered || recruitFallbackUsed) {
+      try {
+        await this.logDiagnostic(
+          recruitFallbackUsed ? "warn" : "info",
+          recruitFallbackUsed ? "outline.recruit_fallback_committed" : "outline.recruit_format_recovered",
+          recruitFallbackUsed
+            ? "招聘大纲格式异常，已用本批原始转写生成待复核节点并继续处理"
+            : "招聘大纲已从非标准问答结构恢复",
+          {
+            segmentCount: session.segments.length,
+            committedSegmentCount,
+            attemptedSegmentCount,
+            newUsedCount: windowed.newUsedCount,
+            fallbackReason: recruitFallbackReason,
+          }
+        );
+      } catch { /* intentionally empty */ }
+    }
     const existingOutlineState = normalizeRealtimeOutlineState(
       session.realtimeOutlineState,
       session.realtimeOutline,
       session.realtimeOutlineMemory
     );
-    const freshOutlineNodes = parseRealtimeOutlineStateFromMarkdown(result);
-    const mergedOutlineNodes = mergeStableRealtimeOutlineNodes(existingOutlineState.nodes, freshOutlineNodes);
+    let freshOutlineNodes = parseRealtimeOutlineStateFromMarkdown(result);
+    let mergedOutlineNodes = mergeStableRealtimeOutlineNodes(existingOutlineState.nodes, freshOutlineNodes);
     const existingRenderedOutline = normalizeOutlineMarkdownForDisplay(
       renderRealtimeOutlineStateMarkdown(existingOutlineState)
     );
-    const mergedRenderedOutline = normalizeOutlineMarkdownForDisplay(
+    let mergedRenderedOutline = normalizeOutlineMarkdownForDisplay(
       renderRealtimeOutlineStateMarkdown({ version: 1, nodes: mergedOutlineNodes })
     );
     const newTranscriptChars = (Array.isArray(windowed.newSegments) ? windowed.newSegments : [])
       .reduce((sum, segment) => sum + String((segment && segment.text) || "").trim().length, 0);
-    const semanticChanged = existingRenderedOutline !== mergedRenderedOutline;
-    const requiresSemanticDelta = !opts.final
+    let semanticChanged = existingRenderedOutline !== mergedRenderedOutline;
+    if (
+      validation.ok
+      && session.mode === "recruit"
+      && windowed.newUsedCount > 0
+      && !semanticChanged
+      && !recruitFallbackUsed
+    ) {
+      // A syntactically valid model response can still repeat only old topics.
+      // Do not retry and later acknowledge the batch invisibly: append a
+      // source-only review node so every substantive interview batch remains
+      // visible and the ordered cursor can progress.
+      const fallbackOutline = buildRecruitRealtimeOutlineFallback(windowed.newSegments);
+      const fallbackRepaired = repairRealtimeOutlineAnchors(fallbackOutline, {
+        previousOutline: session.realtimeOutline,
+        anchorSources: buildRealtimeOutlineAnchorSources(windowed.newSegments),
+      });
+      const fallbackResult = normalizeOutlineMarkdownForDisplay(
+        fallbackRepaired.outline,
+        { preserveUntimedTopLevel: true }
+      );
+      const fallbackValidation = validateRealtimeOutlineMarkdown(fallbackResult, {
+        previousOutline: session.realtimeOutline,
+        allowUntimedTopLevel: true,
+        deltaOnly: windowed.isIncremental,
+        maxNewTopLevel: windowed.isIncremental ? 6 : 8,
+      });
+      if (fallbackValidation.ok && fallbackResult.trim()) {
+        const fallbackNodes = parseRealtimeOutlineStateFromMarkdown(fallbackResult);
+        const fallbackMergedNodes = mergeStableRealtimeOutlineNodes(existingOutlineState.nodes, fallbackNodes);
+        const fallbackMergedRendered = normalizeOutlineMarkdownForDisplay(
+          renderRealtimeOutlineStateMarkdown({ version: 1, nodes: fallbackMergedNodes })
+        );
+        if (fallbackMergedRendered !== existingRenderedOutline) {
+          recruitFallbackUsed = true;
+          recruitFallbackReason = "no_incremental_outline_change";
+          repaired = fallbackRepaired;
+          result = fallbackResult;
+          validation = fallbackValidation;
+          freshOutlineNodes = fallbackNodes;
+          mergedOutlineNodes = fallbackMergedNodes;
+          mergedRenderedOutline = fallbackMergedRendered;
+          semanticChanged = true;
+          try {
+            await this.logDiagnostic("warn", "outline.recruit_no_change_fallback", "招聘大纲未体现本批新内容，已追加原始转写待复核节点", {
+              segmentCount: session.segments.length,
+              committedSegmentCount,
+              attemptedSegmentCount,
+              newUsedCount: windowed.newUsedCount,
+            });
+          } catch { /* diagnostics must not block the fallback commit */ }
+        }
+      }
+    }
+    const requiresSemanticDelta = !recruitFallbackUsed
+      && !opts.final
       && !opts.force
       && !!windowed.isIncremental
       && windowed.newUsedCount >= REALTIME_OUTLINE_MIN_NEW_SEGMENTS
@@ -14641,6 +14861,9 @@ class LexVoicePlugin extends obsidian.Plugin {
         newTranscriptChars,
         semanticChanged,
         noChangeRetryCount,
+        recruitFormatRecovered,
+        recruitFallbackUsed,
+        recruitFallbackReason,
         input: inputMetrics,
       };
       try {
@@ -14677,19 +14900,35 @@ class LexVoicePlugin extends obsidian.Plugin {
     const mergedOutlineState = normalizeRealtimeOutlineState({
       version: 1,
       nodes: mergedOutlineNodes,
-      memory: parsed.memory || existingOutlineState.memory || "",
+      memory: session.mode === "recruit"
+        ? buildRecruitRealtimeOutlineMemory(mergedOutlineNodes, {
+            maxChars: REALTIME_OUTLINE_MAX_MEMORY_CHARS,
+          })
+        : parsed.memory || existingOutlineState.memory || "",
     });
     session.realtimeOutline = normalizeOutlineMarkdownForDisplay(renderRealtimeOutlineStateMarkdown(mergedOutlineState));
     session.realtimeOutlineMemory = mergedOutlineState.memory;
     session.realtimeOutlineState = mergedOutlineState;
-    session.realtimeOutlineSegmentCount = attemptedSegmentCount;
+    session.realtimeOutlineSegmentCount = advanceRealtimeOutlineCursor(
+      committedSegmentCount,
+      attemptedSegmentCount,
+      processedSegmentCount
+    );
     session.realtimeOutlineAttemptedSegmentCount = attemptedSegmentCount;
     session.realtimeOutlineWorkbenchSignature = workbenchSignature;
     session.realtimeOutlineUpdatedAt = new Date().toISOString();
     updateRealtimeOutlineCoverage(session, "processing", {
       attemptedSegmentCount,
       rejectedReason: "",
+      degradedBatchCount: Math.max(0, Number(session.realtimeOutlineDegradedBatchCount) || 0)
+        + (recruitFallbackUsed ? 1 : 0),
     });
+    if (recruitFallbackUsed) {
+      session.realtimeOutlineDegradedBatchCount = Math.max(
+        0,
+        Number(session.realtimeOutlineDegradedBatchCount) || 0
+      ) + 1;
+    }
     session.realtimeOutlineWindow = {
       usedCount: windowed.usedCount,
       newUsedCount: windowed.newUsedCount,
@@ -14711,6 +14950,9 @@ class LexVoicePlugin extends obsidian.Plugin {
       semanticChanged,
       noChangeAcknowledged,
       noChangeRetryCount,
+      recruitFormatRecovered,
+      recruitFallbackUsed,
+      recruitFallbackReason,
       workbenchChars: workbenchSignature.length,
       input: inputMetrics,
     };
@@ -14749,7 +14991,11 @@ class LexVoicePlugin extends obsidian.Plugin {
     const transcript = buildRealtimeOutlineTranscript(session.segments);
     // 即使空转写也推进节流游标，避免 shouldRunRealtimeOutline 读旧值反复触发。
     const advanceThrottleCursors = () => {
-      session.realtimeOutlineSegmentCount = session.segments.length;
+      session.realtimeOutlineSegmentCount = advanceRealtimeOutlineCursor(
+        session.realtimeOutlineSegmentCount,
+        session.segments.length,
+        session.segments.length
+      );
       session.realtimeOutlineUpdatedAt = new Date().toISOString();
     };
     if (!transcript.trim()) { advanceThrottleCursors(); return ""; }
@@ -19733,12 +19979,12 @@ ${source}`;
   }
 
   async openRecentNote() {
-    const folder = this.app.vault.getAbstractFileByPath(obsidian.normalizePath(this.settings.mdFolder));
-    if (!(folder instanceof obsidian.TFolder)) { new obsidian.Notice("Markdown 文件夹不存在"); return; }
-    const files = getMarkdownFilesUnderFolder(this.app, this.settings.mdFolder);
-    if (!files.length) { new obsidian.Notice("最近没有录音笔记"); return; }
-    files.sort((a, b) => b.stat.mtime - a.stat.mtime);
-    await this.app.workspace.getLeaf(false).openFile(files[0]);
+    const recent = getRecentNotes(this, 1);
+    if (!recent.length || !(recent[0].file instanceof obsidian.TFile)) {
+      new obsidian.Notice("最近没有录音笔记");
+      return;
+    }
+    await this.app.workspace.getLeaf(false).openFile(recent[0].file);
   }
 
   scheduleTaskQueueRetry(delayMs = 1500, reason = "scheduled") {

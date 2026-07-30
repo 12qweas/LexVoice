@@ -86,6 +86,184 @@ export function normalizeRealtimeOutlineList(outline) {
   return out.join("\n");
 }
 
+const RECRUIT_OUTLINE_CHILD_LABELS = [
+  { pattern: /^(?:Q|问题|面试官提问|提问|主问)\s*[：:]\s*(.+)$/i, prefix: "❓" },
+  { pattern: /^(?:A|回答|候选人回答|回答要点)\s*[：:]\s*(.+)$/i, prefix: "💬" },
+  { pattern: /^(?:E|AI\s*评价|AI\s*简评|评价|观察|判断)\s*[：:]\s*(.+)$/i, prefix: "🤖" },
+  { pattern: /^(?:F|建议追问|追问|待追问)\s*[：:]\s*(.+)$/i, prefix: "⛏" },
+];
+
+function normalizeRecruitOutlineBody(raw) {
+  return String(raw || "")
+    .replace(/\*\*/g, "")
+    .replace(/^>\s*/, "")
+    .trim();
+}
+
+function matchRecruitOutlineChild(raw) {
+  const body = normalizeRecruitOutlineBody(raw);
+  const explicitIcon = /^([❓💬🤖⛏])\s*(.+)$/.exec(body);
+  if (explicitIcon) {
+    const text = cleanRealtimeOutlineItemText(explicitIcon[2], 120);
+    return text ? `${explicitIcon[1]} ${text}` : "";
+  }
+  for (const rule of RECRUIT_OUTLINE_CHILD_LABELS) {
+    const match = rule.pattern.exec(body);
+    if (!match) continue;
+    const text = cleanRealtimeOutlineItemText(match[1], 120);
+    return text ? `${rule.prefix} ${text}` : "";
+  }
+  return "";
+}
+
+// Recruitment models often return a semantically useful answer in headings,
+// labelled paragraphs, or an unindented Q/A list even when they miss the
+// realtime-outline Markdown contract. Recover only explicit structural signals;
+// arbitrary prose is deliberately ignored so a preamble cannot masquerade as
+// a valid outline.
+export function parseRecruitRealtimeOutlineProtocol(input) {
+  let source = String(input || "").replace(/\r\n/g, "\n").trim();
+  if (!source) return { outline: "", memory: "", protocolMatched: false };
+
+  const taggedOutline = source.match(/<lexvoice-outline\b[^>]*>([\s\S]*?)(?:<\/lexvoice-outline>|$)/i);
+  const taggedMemory = source.match(/<lexvoice-memory\b[^>]*>([\s\S]*?)(?:<\/lexvoice-memory>|$)/i);
+  const memoryLines = [];
+  if (taggedMemory && String(taggedMemory[1] || "").trim()) {
+    memoryLines.push(String(taggedMemory[1] || "").trim().replace(/\s+/g, " "));
+  }
+  if (taggedOutline) {
+    source = taggedOutline[1] || "";
+  } else {
+    source = source.replace(/<lexvoice-memory\b[^>]*>[\s\S]*?(?:<\/lexvoice-memory>|$)/gi, "");
+  }
+  source = source
+    .replace(/<\/?lexvoice-(?:outline|memory)\b[^>]*>/gi, "")
+    .replace(/```(?:markdown|md)?/gi, "")
+    .replace(/```/g, "")
+    .replace(/\s+(?=(?:记忆|面试主题|主题|能力项|考察项|话题|问题|面试官提问|提问|主问|回答|候选人回答|回答要点|AI\s*评价|AI\s*简评|评价|观察|判断|建议追问|追问|待追问)\s*[：:])/gi, "\n");
+
+  const lines = source.split("\n");
+  const out = [];
+  let hasTopic = false;
+  let protocolMatched = false;
+  const ensureTopic = () => {
+    if (hasTopic) return;
+    out.push("- 面试问答（待复核）");
+    hasTopic = true;
+  };
+
+  for (const rawLine of lines) {
+    const raw = String(rawLine || "");
+    if (!raw.trim()) continue;
+    const heading = /^ {0,3}#{1,6}\s+(.+)$/.exec(raw);
+    const numbered = /^ {0,3}\d{1,2}[.)、．]\s*(.+)$/.exec(raw);
+    const bullet = /^(\s*)[-*+•·]\s+(.+)$/.exec(raw);
+    let body = heading
+      ? heading[1]
+      : numbered
+        ? numbered[1]
+        : bullet
+          ? bullet[2]
+          : raw;
+    body = normalizeRecruitOutlineBody(body);
+    if (!body) continue;
+
+    const memory = /^(?:M|记忆)\s*[：:]\s*(.+)$/i.exec(body);
+    if (memory) {
+      const text = cleanRealtimeOutlineItemText(memory[1], 600);
+      if (text) memoryLines.push(text);
+      protocolMatched = true;
+      continue;
+    }
+
+    const topic = /^(?:T|面试主题|主题|能力项|考察项|话题)\s*[：:]\s*(.+)$/i.exec(body);
+    if (topic) {
+      const title = cleanRealtimeOutlineItemText(topic[1], 90);
+      if (title) {
+        out.push(`- ${title}`);
+        hasTopic = true;
+      }
+      protocolMatched = true;
+      continue;
+    }
+
+    const child = matchRecruitOutlineChild(body);
+    if (child) {
+      ensureTopic();
+      out.push(`  - ${child}`);
+      protocolMatched = true;
+      continue;
+    }
+
+    const isNestedBullet = !!(bullet && String(bullet[1] || "").length >= 2);
+    if (isNestedBullet && hasTopic) {
+      const text = cleanRealtimeOutlineItemText(body, 120);
+      if (text) out.push(`  - ${text}`);
+      continue;
+    }
+
+    if (heading || numbered || (bullet && !isNestedBullet)) {
+      const title = cleanRealtimeOutlineItemText(body, 90);
+      if (title) {
+        out.push(`- ${title}`);
+        hasTopic = true;
+      }
+    }
+  }
+
+  const normalized = normalizeRealtimeOutlineList(out.join("\n")).trim();
+  return {
+    outline: parseRealtimeOutlineStateFromMarkdown(normalized).length ? normalized : "",
+    memory: memoryLines.join("；"),
+    protocolMatched,
+  };
+}
+
+export function normalizeRecruitRealtimeOutline(input) {
+  return parseRecruitRealtimeOutlineProtocol(input).outline;
+}
+
+// Last-resort recruitment outline for a malformed model response. It contains
+// only clipped source transcript and a neutral review label, so it can advance
+// the ordered cursor without inventing an evaluation or losing later batches.
+export function buildRecruitRealtimeOutlineFallback(segments, opts = {}) {
+  const source = (Array.isArray(segments) ? segments : [])
+    .filter((segment) => segment && String(segment.text || "").trim());
+  const maxNodes = Math.max(1, Math.min(6, Math.floor(Number(opts.maxNodes) || 6)));
+  const groupSize = Math.max(1, Math.ceil(source.length / maxNodes));
+  const lines = [];
+  for (let offset = 0; offset < source.length; offset += groupSize) {
+    const group = source.slice(offset, offset + groupSize);
+    const displayIndexes = group.map((segment, innerIndex) => (
+      Number.isFinite(Number(segment.index))
+        ? Math.max(0, Math.floor(Number(segment.index))) + 1
+        : offset + innerIndex + 1
+    ));
+    const rangeLabel = displayIndexes.length > 1
+      ? `${displayIndexes[0]}-${displayIndexes[displayIndexes.length - 1]}`
+      : String(displayIndexes[0]);
+    lines.push(`- 面试片段 ${rangeLabel}（待复核）`);
+    for (const segment of group) {
+      const excerpt = cleanRealtimeOutlineItemText(
+        String(segment.text || "").replace(/\s+/g, " "),
+        110
+      );
+      if (excerpt) lines.push(`  - 💬 ${excerpt}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+// The committed cursor is program-owned monotonic state. A stale async result
+// can acknowledge no more than the current transcript length, and can never
+// move the cursor backwards.
+export function advanceRealtimeOutlineCursor(currentCount, attemptedCount, totalCount) {
+  const total = Math.max(0, Math.floor(Number(totalCount) || 0));
+  const current = Math.min(total, Math.max(0, Math.floor(Number(currentCount) || 0)));
+  const attempted = Math.min(total, Math.max(0, Math.floor(Number(attemptedCount) || 0)));
+  return Math.max(current, attempted);
+}
+
 export function hashRealtimeOutlineText(text) {
   const src = String(text || "");
   let h = 2166136261;
@@ -177,7 +355,94 @@ export function parseRealtimeOutlineStateFromMarkdown(markdown) {
       continue;
     }
   }
-  return nodes.slice(-REALTIME_OUTLINE_STATE_MAX_NODES);
+  // Persist every committed node. Prompt builders already clip the context
+  // handed back to the model; truncating state here would silently erase the
+  // beginning of long meetings from the user-visible outline.
+  return nodes;
+}
+
+function clipRecruitOutlineMemoryText(text, maxChars) {
+  const max = Math.max(1, Math.floor(Number(maxChars) || 0));
+  const cleaned = cleanRealtimeOutlineItemText(
+    String(text || "").replace(/^(?:❓|💬|🤖|⛏)\s*/u, ""),
+    max + 1
+  );
+  if (cleaned.length <= max) return cleaned;
+  if (max === 1) return "…";
+  return `${cleaned.slice(0, max - 1).trimEnd()}…`;
+}
+
+function buildRecruitOutlineMemoryNodeLine(node) {
+  const title = clipRecruitOutlineMemoryText(node && node.title, 36);
+  if (!title) return "";
+  const labelled = { question: "", answer: "", evaluation: "", followup: "", other: "" };
+  for (const rawChild of (Array.isArray(node && node.children) ? node.children : [])) {
+    const child = String(rawChild || "").trim();
+    if (!child) continue;
+    if (/^❓/.test(child) && !labelled.question) labelled.question = clipRecruitOutlineMemoryText(child, 64);
+    else if (/^💬/.test(child) && !labelled.answer) labelled.answer = clipRecruitOutlineMemoryText(child, 72);
+    else if (/^🤖/.test(child) && !labelled.evaluation) labelled.evaluation = clipRecruitOutlineMemoryText(child, 72);
+    else if (/^⛏/.test(child) && !labelled.followup) labelled.followup = clipRecruitOutlineMemoryText(child, 64);
+    else if (!labelled.other) labelled.other = clipRecruitOutlineMemoryText(child, 72);
+  }
+  const details = [];
+  if (labelled.answer) details.push(`答：${labelled.answer}`);
+  if (labelled.evaluation) details.push(`判：${labelled.evaluation}`);
+  if (labelled.followup) details.push(`待问：${labelled.followup}`);
+  if (!details.length && labelled.question) details.push(`问：${labelled.question}`);
+  if (!details.length && labelled.other) details.push(labelled.other);
+  return details.length ? `${title}｜${details.join("｜")}` : title;
+}
+
+// Recruitment memory is program-owned state derived only from already committed
+// outline nodes. The model never writes this field. Older topics are retained as
+// a compact index while recent topics keep answer/evaluation/follow-up evidence.
+export function buildRecruitRealtimeOutlineMemory(nodesOrMarkdown, opts = {}) {
+  const sourceNodes = Array.isArray(nodesOrMarkdown)
+    ? nodesOrMarkdown
+    : parseRealtimeOutlineStateFromMarkdown(nodesOrMarkdown);
+  const nodes = sourceNodes.filter((node) => node && cleanRealtimeOutlineItemText(node.title, 90));
+  if (!nodes.length) return "";
+
+  const maxChars = Math.max(80, Math.floor(Number(opts.maxChars) || 800));
+  const recentDetailCount = Math.max(2, Math.min(8, Math.floor(Number(opts.recentDetailCount) || 6)));
+  const splitAt = Math.max(0, nodes.length - recentDetailCount);
+  const olderNodes = nodes.slice(0, splitAt);
+  const recentLines = nodes.slice(splitAt)
+    .map(buildRecruitOutlineMemoryNodeLine)
+    .filter(Boolean)
+    .map((line) => `- ${line}`);
+
+  let history = "";
+  if (olderNodes.length) {
+    const historyBudget = Math.min(180, Math.max(60, Math.floor(maxChars * 0.24)));
+    history = clipRecruitOutlineMemoryText(
+      `较早已讨论：${olderNodes
+        .map((node) => clipRecruitOutlineMemoryText(node.title, 28))
+        .filter(Boolean)
+        .join("、")}`,
+      historyBudget
+    );
+  }
+
+  let remaining = maxChars - history.length - (history ? 1 : 0);
+  const selected = [];
+  for (let index = recentLines.length - 1; index >= 0 && remaining > 0; index -= 1) {
+    const separatorChars = selected.length ? 1 : 0;
+    const line = recentLines[index];
+    if (line.length + separatorChars <= remaining) {
+      selected.unshift(line);
+      remaining -= line.length + separatorChars;
+      continue;
+    }
+    if (!selected.length && remaining >= 24) {
+      selected.unshift(clipRecruitOutlineMemoryText(line, remaining));
+      remaining = 0;
+    }
+    break;
+  }
+
+  return [history, ...selected].filter(Boolean).join("\n").slice(0, maxChars).trim();
 }
 
 // Select the earliest uncommitted transcript segments, plus a small read-only
@@ -362,7 +627,7 @@ export function mergeOutlineChildrenMonotonic(existingChildren, freshChildren) {
 export function mergeStableRealtimeOutlineNodes(existingNodes, freshNodes) {
   const existing = (Array.isArray(existingNodes) ? existingNodes : []).filter(Boolean);
   const fresh = (Array.isArray(freshNodes) ? freshNodes : []).filter(Boolean);
-  if (!existing.length) return fresh.slice(-REALTIME_OUTLINE_STATE_MAX_NODES);
+  if (!existing.length) return fresh;
   const freshByTitle = new Map();
   const freshByAnchor = new Map();
   for (const node of fresh) {
@@ -420,7 +685,7 @@ export function mergeStableRealtimeOutlineNodes(existingNodes, freshNodes) {
     appendedCompositeKeys.add(compositeKey);
     result.push(node);
   }
-  return result.slice(-REALTIME_OUTLINE_STATE_MAX_NODES);
+  return result;
 }
 
 // opts.attachUntimed=true：把"首个带锚点 L1 之后"冒出的无锚点顶层行降级挂靠为上一带锚点节点的子项

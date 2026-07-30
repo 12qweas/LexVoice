@@ -3,12 +3,17 @@
 import { describe, it, expect } from "vitest";
 import {
   normalizeRealtimeOutlineList,
+  normalizeRecruitRealtimeOutline,
+  parseRecruitRealtimeOutlineProtocol,
+  buildRecruitRealtimeOutlineFallback,
+  buildRecruitRealtimeOutlineMemory,
   normalizeOutlineMarkdownForDisplay,
   validateRealtimeOutlineMarkdown,
   parseRealtimeOutlineStateFromMarkdown,
   selectIncrementalRealtimeOutlineSegments,
   repairRealtimeOutlineAnchors,
   mergeStableRealtimeOutlineNodes,
+  advanceRealtimeOutlineCursor,
   cleanRealtimeOutlineItemText,
   makeRealtimeOutlineNode,
   mergeCoverageNoRegress,
@@ -128,6 +133,148 @@ describe("selectIncrementalRealtimeOutlineSegments —— 已提交游标与 bac
     );
     expect(selected.newUsedCount).toBe(0);
     expect(selected.commitThroughCount).toBe(3);
+  });
+});
+
+describe("招聘实时大纲 —— 非标准问答恢复与游标兜底", () => {
+  it("逐行协议不依赖 XML、Markdown 层级、图标或记忆字段", () => {
+    const parsed = parseRecruitRealtimeOutlineProtocol([
+      "主题：跨境项目经验",
+      "问题：请介绍一次跨境劳动争议项目",
+      "回答：候选人负责证据整理和外部律师协同",
+      "评价：有项目参与证据，但独立决策程度尚不明确",
+      "追问：哪一个关键决定由你本人作出？",
+    ].join("\n"));
+    expect(parsed.protocolMatched).toBe(true);
+    expect(parsed.memory).toBe("");
+    expect(parsed.outline).toContain("- 跨境项目经验");
+    expect(parsed.outline).toContain("  - ❓ 请介绍一次跨境劳动争议项目");
+    expect(parsed.outline).toContain("  - 💬 候选人负责证据整理和外部律师协同");
+  });
+
+  it("仍能读取旧版记忆字段，但只作为兼容数据返回", () => {
+    const parsed = parseRecruitRealtimeOutlineProtocol([
+      "记忆：旧版模型生成的摘要",
+      "主题：岗位动机",
+      "回答：希望更贴近业务",
+    ].join("\n"));
+    expect(parsed.memory).toBe("旧版模型生成的摘要");
+    expect(parsed.outline).toContain("- 岗位动机");
+  });
+
+  it("响应中途截断时保留已经完成的逐行记录", () => {
+    const parsed = parseRecruitRealtimeOutlineProtocol([
+      "T: 团队管理",
+      "Q: 如何处理低绩效成员？",
+      "A: 候选人先明确目标并安排阶段复盘",
+      "E:",
+    ].join("\n"));
+    expect(parsed.protocolMatched).toBe(true);
+    expect(parsed.outline).toContain("- 团队管理");
+    expect(parsed.outline).toContain("  - 💬 候选人先明确目标并安排阶段复盘");
+    expect(parseRealtimeOutlineStateFromMarkdown(parsed.outline)).toHaveLength(1);
+  });
+
+  it("把标题和标签段落恢复为稳定的两级列表", () => {
+    const raw = [
+      "<lexvoice-memory>候选人有跨境法务经历</lexvoice-memory>",
+      "<lexvoice-outline>",
+      "### 面试主题：岗位动机与迁移",
+      "问题：为什么从集团岗位转向本岗位？",
+      "候选人回答：希望回到更贴近业务的一线岗位。",
+      "AI 评价：动机基本清楚，但稳定性证据不足。",
+      "建议追问：未来三年的职业计划是什么？",
+      "</lexvoice-outline>",
+    ].join("\n");
+    const outline = normalizeRecruitRealtimeOutline(raw);
+    expect(outline).toContain("- 岗位动机与迁移");
+    expect(outline).toContain("  - ❓ 为什么从集团岗位转向本岗位？");
+    expect(outline).toContain("  - 💬 希望回到更贴近业务的一线岗位。");
+    expect(outline).toContain("  - 🤖 动机基本清楚，但稳定性证据不足。");
+    expect(outline).toContain("  - ⛏ 未来三年的职业计划是什么？");
+    expect(parseRealtimeOutlineStateFromMarkdown(outline)).toHaveLength(1);
+  });
+
+  it("不把没有结构信号的解释性前言误当大纲", () => {
+    expect(normalizeRecruitRealtimeOutline(
+      "下面是我对这场面试的分析。由于信息不足，我暂时无法生成结构化大纲。"
+    )).toBe("");
+  });
+
+  it("模型持续输出坏格式时，用本批原始转写生成可提交的待复核节点", () => {
+    const segments = Array.from({ length: 8 }, (_, offset) => ({
+      index: offset + 7,
+      text: offset === 0
+        ? "候选人介绍了海外劳动争议项目，并说明自己负责证据整理和外部律师协同。"
+        : `面试问答原文 ${offset + 2}`,
+    }));
+    const fallback = buildRecruitRealtimeOutlineFallback(segments);
+    const repaired = repairRealtimeOutlineAnchors(fallback, {
+      anchorSources: segments.map((segment, offset) => ({
+        anchor: `[[interview.webm|${String(21 + offset * 3).padStart(2, "0")}:00]]`,
+        index: segment.index,
+      })),
+    });
+    expect(countTopBullets(fallback)).toBeLessThanOrEqual(6);
+    expect(fallback).toContain("面试片段 14-15（待复核）");
+    expect(repaired.outline).toContain("💬 候选人介绍了海外劳动争议项目");
+    expect(repaired.outline).toContain("💬 面试问答原文 8");
+    expect(validateRealtimeOutlineMarkdown(repaired.outline, {
+      allowUntimedTopLevel: true,
+      deltaOnly: true,
+      maxNewTopLevel: 6,
+    }).ok).toBe(true);
+  });
+});
+
+describe("buildRecruitRealtimeOutlineMemory —— 招聘记忆由已提交大纲确定性维护", () => {
+  const nodes = parseRealtimeOutlineStateFromMarkdown([
+    "- [[interview.webm|00:10]] 岗位动机",
+    "  - ❓ 为什么考虑这个岗位？",
+    "  - 💬 希望回到更贴近业务的一线岗位",
+    "  - 🤖 动机基本清楚，但稳定性证据不足",
+    "  - ⛏ 未来三年的职业计划是什么？",
+    "- [[interview.webm|03:00]] 团队管理",
+    "  - 💬 会先明确目标并安排阶段复盘",
+    "  - 🤖 有管理动作，结果指标尚未说明",
+  ].join("\n"));
+
+  it("只从提交节点提取主题、回答、判断和待追问，不带时间锚点", () => {
+    const memory = buildRecruitRealtimeOutlineMemory(nodes);
+    expect(memory).toContain("岗位动机");
+    expect(memory).toContain("答：希望回到更贴近业务的一线岗位");
+    expect(memory).toContain("判：动机基本清楚，但稳定性证据不足");
+    expect(memory).toContain("待问：未来三年的职业计划是什么？");
+    expect(memory).toContain("团队管理");
+    expect(memory).not.toContain("interview.webm");
+    expect(memory).not.toContain("[[");
+  });
+
+  it("相同已提交状态得到完全相同的记忆，并严格受长度上限约束", () => {
+    const first = buildRecruitRealtimeOutlineMemory(nodes, { maxChars: 180 });
+    const second = buildRecruitRealtimeOutlineMemory(nodes, { maxChars: 180 });
+    expect(first).toBe(second);
+    expect(first.length).toBeLessThanOrEqual(180);
+  });
+
+  it("长会把较早主题压成索引，把最近主题保留为证据摘要", () => {
+    const longNodes = Array.from({ length: 10 }, (_, index) => ({
+      title: `主题${index + 1}`,
+      children: [
+        `💬 回答${index + 1}`,
+        `🤖 判断${index + 1}`,
+        `⛏ 追问${index + 1}`,
+      ],
+    }));
+    const memory = buildRecruitRealtimeOutlineMemory(longNodes, {
+      maxChars: 260,
+      recentDetailCount: 3,
+    });
+    expect(memory).toContain("较早已讨论");
+    expect(memory).toContain("主题1");
+    expect(memory).toContain("主题10");
+    expect(memory).toContain("答：回答10");
+    expect(memory.length).toBeLessThanOrEqual(260);
   });
 });
 
@@ -296,6 +443,14 @@ describe("mergeStableRealtimeOutlineNodes —— 历史冻结 + 末尾增量 + �
     expect(state).toHaveLength(12);
     expect(state.slice(-4).map((item) => item.title)).toEqual(["新增0", "新增1", "新增2", "新增3"]);
   });
+  it("长会超过 60 个节点后仍保留最早内容并继续追加", () => {
+    const history = Array.from({ length: 70 }, (_, i) => node(`a${i}`, `历史${i}`, [`证据${i}`]));
+    const state = mergeStableRealtimeOutlineNodes(history, [node("a70", "新增70", ["证据70"])]);
+
+    expect(state).toHaveLength(71);
+    expect(state[0]).toEqual(node("a0", "历史0", ["证据0"]));
+    expect(state.at(-1)).toEqual(node("a70", "新增70", ["证据70"]));
+  });
   it("历史非末尾节点被新话题挤下后，后续同锚点轮仍能补子要点（单调、title 冻结）", () => {
     // A 在轮 k 只有 1 个子要点，随后 B 追加把 A 挤下末尾
     let state = mergeStableRealtimeOutlineNodes([], [node("a1", "A", ["a1"]), node("a2", "B")]);
@@ -315,6 +470,27 @@ describe("mergeStableRealtimeOutlineNodes —— 历史冻结 + 末尾增量 + �
     let state = mergeStableRealtimeOutlineNodes([], [node("a1", "A", ["商业化思路"]), node("a2", "B")]);
     state = mergeStableRealtimeOutlineNodes(state, [node("a1", "A", ["商业化，思路", "真新点"]), node("a2", "B")]);
     expect(state.find((n) => n.anchor === "a1").children.length).toBe(2); // 近义合一 + 真新点
+  });
+});
+
+describe("招聘实时大纲持久状态 —— 全程覆盖与游标单调", () => {
+  it("从 Markdown 恢复时不再丢弃 60 个节点以前的历史", () => {
+    const markdown = Array.from({ length: 75 }, (_, i) => {
+      const minute = String(i).padStart(2, "0");
+      return `- [[recording.webm|${minute}:00]] 主题${i}\n  - 证据${i}`;
+    }).join("\n");
+    const nodes = parseRealtimeOutlineStateFromMarkdown(markdown);
+
+    expect(nodes).toHaveLength(75);
+    expect(nodes[0].title).toBe("主题0");
+    expect(nodes.at(-1)?.title).toBe("主题74");
+  });
+
+  it("提交游标只前进不后退，并限制在实际分段总数内", () => {
+    expect(advanceRealtimeOutlineCursor(20, 18, 50)).toBe(20);
+    expect(advanceRealtimeOutlineCursor(20, 24, 50)).toBe(24);
+    expect(advanceRealtimeOutlineCursor(48, 80, 50)).toBe(50);
+    expect(advanceRealtimeOutlineCursor(-2, 3, 50)).toBe(3);
   });
 });
 

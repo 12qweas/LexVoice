@@ -33,4 +33,61 @@ describe("LlmRequestQueue", () => {
     expect(run).not.toHaveBeenCalled();
     expect(queue.items).toHaveLength(0);
   });
+
+  it("keeps interactive work ahead of a background outline before the wait limit", async () => {
+    let now = 0;
+    const queue = new LlmRequestQueue({
+      now: () => now,
+      backgroundMaxWaitMs: 15_000,
+    });
+    const order: string[] = [];
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const first = queue.enqueue(1, async () => {
+      await firstGate;
+      order.push("first");
+    });
+    const outline = queue.enqueue(2, async () => {
+      order.push("outline");
+    });
+    now = 10_000;
+    const question = queue.enqueue(0, async () => {
+      order.push("question");
+    });
+
+    releaseFirst();
+    await Promise.all([first, outline, question]);
+
+    expect(order).toEqual(["first", "question", "outline"]);
+  });
+
+  it("runs an overdue background outline before newer interactive work", async () => {
+    let now = 0;
+    const queue = new LlmRequestQueue({
+      now: () => now,
+      backgroundMaxWaitMs: 15_000,
+    });
+    const order: string[] = [];
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const first = queue.enqueue(1, async () => {
+      await firstGate;
+      order.push("first");
+    });
+    const outline = queue.enqueue(2, async () => {
+      order.push("outline");
+    });
+    now = 16_000;
+    const question = queue.enqueue(0, async () => {
+      order.push("question");
+    });
+    const suggestion = queue.enqueue(3, async () => {
+      order.push("suggestion");
+    });
+
+    releaseFirst();
+    await Promise.all([first, outline, question, suggestion]);
+
+    expect(order).toEqual(["first", "outline", "question", "suggestion"]);
+  });
 });

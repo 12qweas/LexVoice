@@ -159,6 +159,7 @@ export function getLlmRequestPriority(options) {
   const raw = String((options && (options.priority || options.llmPriority)) || "").toLowerCase();
   if (/^(user|interactive|high)$/.test(raw)) return 0;
   if (/^(background|silent|low)$/.test(raw)) return 2;
+  if (/^(idle|suggestion|optional)$/.test(raw)) return 3;
   return 1;
 }
 
