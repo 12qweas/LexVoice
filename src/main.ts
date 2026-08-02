@@ -1034,7 +1034,7 @@ function buildRealtimeOutlineTranscript(segments) {
       const n = Number.isFinite(s.index) ? s.index + 1 : (Number(s._validIndex) || 0) + 1;
       const start = formatElapsed(s.startOffsetMs || 0);
       const end = formatElapsed(s.endOffsetMs || 0);
-      const anchor = getSegmentTimeLink(s);
+      const anchor = getAudioTimeLink(s.audioName, getSegmentAudioLinkOffsetMs(s));
       const meta = anchor
         ? `【段落 ${n}｜${start}-${end}｜回听 ${anchor}】`
         : `【段落 ${n}｜${start}-${end}】`;
@@ -1046,7 +1046,7 @@ function buildRealtimeOutlineTranscript(segments) {
 function buildRealtimeOutlineAnchorSources(segments) {
   return (Array.isArray(segments) ? segments : [])
     .map((segment, index) => ({
-      anchor: getSegmentTimeLink(segment),
+      anchor: getAudioTimeLink(segment && segment.audioName, getSegmentAudioLinkOffsetMs(segment)),
       text: String((segment && segment.text) || "").trim(),
       // The source segment is the time interval. Several outline topics may
       // intentionally receive the same start anchor; exact seconds are not a
@@ -6022,7 +6022,9 @@ function formatMergeSegmentForPrompt(seg, fallbackIndex) {
   const safeIndex = Number.isFinite(Number(seg && seg.index)) ? Number(seg.index) : fallbackIndex;
   const start = Number(seg && seg.startOffsetMs) || 0;
   const end = Number(seg && seg.endOffsetMs) || 0;
-  const segmentAnchor = getSegmentTimeLink(seg);
+  const segmentAnchor = seg && seg.audioName
+    ? getAudioTimeLink(seg.audioName, getSegmentAudioLinkOffsetMs(seg))
+    : "";
   const anchor = segmentAnchor ? ` ${segmentAnchor}` : "";
   const tag = `===SEG ${safeIndex + 1} (${formatElapsed(start)}-${formatElapsed(end)})${anchor}===`;
   // 转写失败段：把失败原因带进 merge 输入并显式要求模型在纪要相应位置标注缺漏，
