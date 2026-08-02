@@ -1,7 +1,7 @@
 ﻿/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- LexVoice's settings/data layer is intentionally dynamically typed (files use @ts-nocheck and read untyped JSON from loadData); these type-only rules yield no actionable findings here and are tracked for incremental typing */
 // 由 main.ts 抽出（模块化拆解，提升工程稳定性；纯搬迁、零行为改动）。
 import * as obsidian from "obsidian";
-import { normalizeLlmEndpoint, isLocalLlmEndpoint, isPoeLlmEndpoint, isMoonshotKimiModel, buildLlmHeaders } from '../shared/util-llm-endpoint';
+import { normalizeLlmEndpoint, isLocalLlmEndpoint, isPoeLlmEndpoint, isMoonshotKimiModel, buildLlmHeaders, assertSafeServiceEndpoint, getServiceEndpointSecurityIssue } from '../shared/util-llm-endpoint';
 import { applyThinkingParam } from './thinking';
 import { delayMs } from '../shared/util-audio';
 import { extractLlmContent } from '../shared/util-json';
@@ -131,6 +131,7 @@ export async function logLlmRequestDiagnostic(plugin, level, code, message, data
 }
 
 export async function requestLlmChatCompletionViaObsidian(endpoint, headers, payloadText, timeoutMs) {
+  assertSafeServiceEndpoint(endpoint, "http", "大模型服务地址");
   if (!obsidian || typeof obsidian.requestUrl !== "function") {
     throw new Error("Obsidian requestUrl 不可用");
   }
@@ -257,6 +258,7 @@ export async function requestLlmChatCompletion(plugin, messages, options) {
   const { llmEndpoint, llmApiKey, llmModel } = plugin.settings;
   const endpoint = normalizeLlmEndpoint(llmEndpoint);
   if (!endpoint) throw new Error("大模型服务地址未配置");
+  assertSafeServiceEndpoint(endpoint, "http", "大模型服务地址");
   if (!llmModel) throw new Error("大模型名称未配置");
   if (!llmApiKey && !isLocalLlmEndpoint(endpoint)) {
     throw new Error("大模型访问密钥未配置；只有本地 localhost 服务可以留空");
@@ -495,6 +497,7 @@ export function getLlmRetryDelayMs(error, attemptIndex) {
 export async function fetchLlmModelList(endpoint, apiKey) {
   const base = normalizeLlmEndpoint(endpoint);
   if (!base) throw new Error("服务地址未配置");
+  assertSafeServiceEndpoint(base, "http", "大模型服务地址");
   const modelsUrl = /\/chat\/completions$/i.test(base)
     ? base.replace(/\/chat\/completions$/i, "/models")
     : base.replace(/\/+$/, "") + "/models";
@@ -519,6 +522,8 @@ export function getLlmConfigIssue(settings) {
   const model = String((settings && settings.llmModel) || "").trim();
   const apiKey = String((settings && settings.llmApiKey) || "").trim();
   if (!endpoint) return "大模型服务地址未配置";
+  const endpointSecurityIssue = getServiceEndpointSecurityIssue(endpoint, "http", "大模型服务地址");
+  if (endpointSecurityIssue) return endpointSecurityIssue;
   if (!model) return "大模型名称未配置";
   if (!apiKey && !isLocalLlmEndpoint(endpoint)) return "大模型访问密钥未配置；只有本地 localhost 服务可以留空";
   return "";
@@ -526,7 +531,7 @@ export function getLlmConfigIssue(settings) {
 
 export function isLlmConfigError(error) {
   const msg = String((error && error.message) || error || "");
-  return /大模型(?:服务地址|名称|访问密钥)未配置|请先在 API 页配置大模型服务|LLM 配置/i.test(msg);
+  return /大模型(?:服务地址|名称|访问密钥)(?:未配置|不安全|格式无效|协议不受支持)|请先在 API 页配置大模型服务|LLM 配置/i.test(msg);
 }
 
 export function isLlmServiceBlockedError(error) {

@@ -3,11 +3,51 @@
 import { delayMs, extFromMime, isTransientAsrError } from '../shared/util-audio';
 import { extractLlmContent } from '../shared/util-json';
 import { isLocalServiceEndpoint } from '../shared/util-note';
+import { assertSafeServiceEndpoint } from '../shared/util-llm-endpoint';
 import { buildVocabularyPrompt, applyVocabularyCorrections, loadVocabularyGroups } from '../vocabulary';
 import { buildPeopleHotwordsForAsr } from '../people';
 import { lexvoiceArrayBufferToBase64 } from './clients';
 import { extractTranscriptText } from './speaker-labels';
 import { cleanApimimoAsrRepeatedLoops } from './apimimo-clean';
+
+export type AsrLifecycleSignalType =
+  | "attempt-start"
+  | "request-start"
+  | "response-start"
+  | "stream-progress"
+  | "retry-wait"
+  | "attempt-empty"
+  | "attempt-error"
+  | "attempt-complete";
+
+export interface AsrLifecycleSignal {
+  type: AsrLifecycleSignalType;
+  at: number;
+  attempt?: number;
+  maxAttempts?: number;
+  timeoutMs?: number;
+  deadlineAt?: number;
+  retryAt?: number;
+  retryDelayMs?: number;
+  receivedChars?: number;
+  providerChunkIndex?: number;
+  providerChunkCount?: number;
+  error?: string;
+}
+
+export type AsrLifecycleObserver = (signal: AsrLifecycleSignal) => void;
+
+function emitAsrLifecycle(
+  observer: AsrLifecycleObserver | undefined,
+  signal: Omit<AsrLifecycleSignal, "at"> & { at?: number },
+): void {
+  if (typeof observer !== "function") return;
+  try {
+    observer(Object.assign({ at: Date.now() }, signal));
+  } catch {
+    // Observability must never affect transcription.
+  }
+}
 
 export function normalizeAsrConcurrency(value) {
   const n = Number(value);
@@ -109,26 +149,57 @@ export function pickAsrRetryDelayMs(errorMessage, attempt?) {
   return 1200 + Math.floor(Math.random() * 800);
 }
 
-export async function transcribeImportAudioChunk(plugin, blob, mime, concurrency) {
+export async function transcribeImportAudioChunk(plugin, blob, mime, concurrency, observer?: AsrLifecycleObserver) {
   // concurrency 参数仅保留签名兼容：重试与并发档位解耦（并发=1 时同样享受瞬时错误就地重试）。
   void concurrency;
   const MAX_ATTEMPTS = 3; // 瞬时错误（限流/超时/5xx/网络）总计最多 3 次请求
   let emptyRetried = false;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let text;
+    emitAsrLifecycle(observer, { type: "attempt-start", attempt, maxAttempts: MAX_ATTEMPTS });
     try {
-      text = await transcribeAudio(plugin, blob, mime);
+      text = await transcribeAudio(
+        plugin,
+        blob,
+        mime,
+        undefined,
+        (signal) => emitAsrLifecycle(observer, Object.assign({}, signal, { attempt, maxAttempts: MAX_ATTEMPTS })),
+      );
     } catch (e) {
+      const error = String((e && e.message) || e || "转写请求失败");
+      emitAsrLifecycle(observer, { type: "attempt-error", attempt, maxAttempts: MAX_ATTEMPTS, error });
       if (attempt >= MAX_ATTEMPTS || !isTransientAsrError(e)) throw e;
       // 限流类错误按 Retry-After / 429 档拉长退避；普通瞬时错误维持短退避。
-      await delayMs(pickAsrRetryDelayMs((e && e.message) || e, attempt));
+      const retryDelayMs = pickAsrRetryDelayMs(error, attempt);
+      emitAsrLifecycle(observer, {
+        type: "retry-wait",
+        attempt,
+        maxAttempts: MAX_ATTEMPTS,
+        retryDelayMs,
+        retryAt: Date.now() + retryDelayMs,
+        error,
+      });
+      await delayMs(retryDelayMs);
       continue;
     }
-    if (String(text || "").trim()) return text;
+    if (String(text || "").trim()) {
+      emitAsrLifecycle(observer, { type: "attempt-complete", attempt, maxAttempts: MAX_ATTEMPTS });
+      return text;
+    }
+    emitAsrLifecycle(observer, { type: "attempt-empty", attempt, maxAttempts: MAX_ATTEMPTS });
     // 服务 HTTP 200 但无文字：多为服务端偶发抽风，就地再试一次；仍为空则返回 ""，由调用方按软失败处理。
     if (emptyRetried || attempt >= MAX_ATTEMPTS) return "";
     emptyRetried = true;
-    await delayMs(pickAsrRetryDelayMs("", attempt)); // 空消息 → 走短退避档
+    const retryDelayMs = pickAsrRetryDelayMs("", attempt);
+    emitAsrLifecycle(observer, {
+      type: "retry-wait",
+      attempt,
+      maxAttempts: MAX_ATTEMPTS,
+      retryDelayMs,
+      retryAt: Date.now() + retryDelayMs,
+      error: "服务返回空结果",
+    });
+    await delayMs(retryDelayMs); // 空消息 → 走短退避档
   }
   return "";
 }
@@ -375,8 +446,14 @@ export function applyApimimoSseData(acc, payloadStr) {
   return acc;
 }
 
-export async function requestApimimoAsrChunk(provider, prepared, endpoint) {
-  // TPM 配速必须最先执行（在读 arrayBuffer/编码 base64 之前），确保跨块、跨会话的请求间隔满足 10K TPM。
+export async function requestApimimoAsrChunk(
+  provider,
+  prepared,
+  endpoint,
+  observer?: AsrLifecycleObserver,
+) {
+  assertSafeServiceEndpoint(endpoint, "http", "转写服务地址");
+  // 安全校验后立即执行 TPM 配速（在读 arrayBuffer/编码 base64 之前），确保跨块、跨会话的请求间隔满足 10K TPM。
   await waitApimimoTpmSlot(prepared.blob, prepared.mime);
   const ab = await prepared.blob.arrayBuffer();
   const audioDataUrl = `data:${prepared.mime};base64,${lexvoiceArrayBufferToBase64(ab)}`;
@@ -387,6 +464,12 @@ export async function requestApimimoAsrChunk(provider, prepared, endpoint) {
   const firstByteTimeoutMs = getTranscribeRequestTimeoutMs(Object.assign({}, provider, { endpoint }), prepared.blob && prepared.blob.size);
   const APIMIMO_SSE_IDLE_TIMEOUT_MS = 60 * 1000;
   const APIMIMO_SSE_TOTAL_CAP_MS = 10 * 60 * 1000;
+  const requestStartedAt = Date.now();
+  emitAsrLifecycle(observer, {
+    type: "request-start",
+    timeoutMs: firstByteTimeoutMs,
+    deadlineAt: requestStartedAt + firstByteTimeoutMs,
+  });
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
   let abortHint = "";
   let phaseTimer = null; // 首字节 / 空闲计时器（可重置，同一时刻只有一个在跑）
@@ -443,6 +526,11 @@ export async function requestApimimoAsrChunk(provider, prepared, endpoint) {
       if ([400, 401, 402, 403, 404, 421].includes(res.status)) httpErr.nonRetryable = true;
       throw httpErr;
     }
+    emitAsrLifecycle(observer, {
+      type: "response-start",
+      timeoutMs: APIMIMO_SSE_IDLE_TIMEOUT_MS,
+      deadlineAt: Date.now() + APIMIMO_SSE_IDLE_TIMEOUT_MS,
+    });
     const contentType = res.headers && typeof res.headers.get === "function" ? String(res.headers.get("content-type") || "").toLowerCase() : "";
     const canReadStream = contentType.includes("text/event-stream") && res.body && typeof res.body.getReader === "function";
     if (!canReadStream) {
@@ -466,12 +554,20 @@ export async function requestApimimoAsrChunk(provider, prepared, endpoint) {
         if (/^4/.test(String(apiErr.code || ""))) bodyErr.nonRetryable = true;
         throw bodyErr;
       }
-      return extractApimimoAsrText(data);
+      const text = extractApimimoAsrText(data);
+      emitAsrLifecycle(observer, {
+        type: "stream-progress",
+        receivedChars: String(text || "").length,
+        timeoutMs: APIMIMO_SSE_IDLE_TIMEOUT_MS,
+        deadlineAt: Date.now() + APIMIMO_SSE_IDLE_TIMEOUT_MS,
+      });
+      return text;
     }
     // —— SSE 流式路径 ——：逐网络分片解码、按行切分，data: 事件交给纯累加器 applyApimimoSseData。
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     const acc = { text: "", finishReason: null, done: false };
+    let lastProgressSignalAt = 0;
     const feedLine = (line) => {
       const trimmed = String(line || "").trim();
       if (!trimmed.startsWith("data:")) return; // event:/id:/注释行等一律忽略
@@ -487,6 +583,16 @@ export async function requestApimimoAsrChunk(provider, prepared, endpoint) {
       const lines = lineBuffer.split(/\r?\n/);
       lineBuffer = lines.pop() || ""; // 最后一段可能是半行，留到下一分片
       for (const line of lines) feedLine(line);
+      const progressAt = Date.now();
+      if (lastProgressSignalAt === 0 || progressAt - lastProgressSignalAt >= 1500) {
+        lastProgressSignalAt = progressAt;
+        emitAsrLifecycle(observer, {
+          type: "stream-progress",
+          receivedChars: String(acc.text || "").length,
+          timeoutMs: APIMIMO_SSE_IDLE_TIMEOUT_MS,
+          deadlineAt: progressAt + APIMIMO_SSE_IDLE_TIMEOUT_MS,
+        });
+      }
       if (acc.done) break;
     }
     const tail = lineBuffer + decoder.decode();
@@ -531,9 +637,20 @@ export async function requestApimimoAsrChunkWithEmptyRetry(
   chunkCount,
   requestChunk = requestApimimoAsrChunk,
   wait = delayMs,
+  observer?: AsrLifecycleObserver,
 ) {
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const part = String(await requestChunk(provider, prepared, endpoint) || "").trim();
+    const part = String(await requestChunk(
+      provider,
+      prepared,
+      endpoint,
+      observer
+        ? (signal) => observer(Object.assign({}, signal, {
+          providerChunkIndex: chunkIndex,
+          providerChunkCount: chunkCount,
+        }))
+        : undefined,
+    ) || "").trim();
     if (part) return part;
     try {
       if (plugin && typeof plugin.logDiagnostic === "function") {
@@ -545,19 +662,47 @@ export async function requestApimimoAsrChunkWithEmptyRetry(
         });
       }
     } catch { /* intentionally empty */ }
-    if (attempt < 2) await wait(pickAsrRetryDelayMs("empty result", attempt));
+    if (attempt < 2) {
+      const retryDelayMs = pickAsrRetryDelayMs("empty result", attempt);
+      emitAsrLifecycle(observer, {
+        type: "retry-wait",
+        retryDelayMs,
+        retryAt: Date.now() + retryDelayMs,
+        error: `服务内部第 ${chunkIndex + 1}/${chunkCount} 块返回空结果`,
+        providerChunkIndex: chunkIndex,
+        providerChunkCount: chunkCount,
+      });
+      await wait(retryDelayMs);
+    }
   }
   throw new Error(`APIMiMo 第 ${chunkIndex + 1}/${chunkCount} 块连续返回空结果；音频已保留，可稍后重试`);
 }
 
-export async function transcribeAudioWithApimimo(plugin, provider, blob, mime, vocabularyGroups) {
+export async function transcribeAudioWithApimimo(
+  plugin,
+  provider,
+  blob,
+  mime,
+  vocabularyGroups,
+  observer?: AsrLifecycleObserver,
+) {
   const chunks = await buildApimimoAsrChunks(blob, mime);
   const endpoint = normalizeApimimoAsrEndpoint(provider.endpoint);
   // 顺序转写各块（保留时序，避免并发触发限流），拼接后对全文统一做热词修正。
   const parts = [];
   for (let i = 0; i < chunks.length; i++) {
     // HTTP 200 但空文本通常是服务端瞬时异常。只重试当前块一次，避免重跑此前已成功的块并重复计费。
-    parts.push(await requestApimimoAsrChunkWithEmptyRetry(plugin, provider, chunks[i], endpoint, i, chunks.length));
+    parts.push(await requestApimimoAsrChunkWithEmptyRetry(
+      plugin,
+      provider,
+      chunks[i],
+      endpoint,
+      i,
+      chunks.length,
+      requestApimimoAsrChunk,
+      delayMs,
+      observer,
+    ));
   }
   const rawText = parts.join(" ").replace(/\s+/g, " ").trim();
   const cleaned = cleanApimimoAsrRepeatedLoops(rawText);
@@ -573,17 +718,24 @@ export async function transcribeAudioWithApimimo(plugin, provider, blob, mime, v
   return applyVocabularyCorrections(rawText, vocabularyGroups).trim();
 }
 
-export async function transcribeAudio(plugin, blob, mime, providerOverride?) {
+export async function transcribeAudio(
+  plugin,
+  blob,
+  mime,
+  providerOverride?,
+  observer?: AsrLifecycleObserver,
+) {
   // providerOverride 可为：provider id 字符串（走注册表解析）或完整 provider 对象（快速口述专用服务直传）。
   const p = (providerOverride && typeof providerOverride === "object")
     ? providerOverride
     : resolveTranscribeProvider(plugin, providerOverride);
   if (!p.endpoint) throw new Error(`转写服务地址未配置（当前服务：${p.name || p.id}）`);
+  assertSafeServiceEndpoint(p.endpoint, "http", "转写服务地址");
   if (!p.apiKey && !isLocalServiceEndpoint(p.endpoint)) throw new Error(`转写访问密钥未配置（当前服务：${p.name || p.id}）`);
   if (!p.model)    throw new Error(`转写模型名称未配置（当前服务：${p.name || p.id}）`);
   const vocabularyGroups = await loadVocabularyGroups(plugin);
   if (isApimimoAsrProvider(p)) {
-    return await transcribeAudioWithApimimo(plugin, p, blob, mime, vocabularyGroups);
+    return await transcribeAudioWithApimimo(plugin, p, blob, mime, vocabularyGroups, observer);
   }
   const form = new FormData();
   const ext = extFromMime(mime);
@@ -595,6 +747,12 @@ export async function transcribeAudio(plugin, blob, mime, providerOverride?) {
   const promptText = buildVocabularyPrompt(vocabularyGroups, peopleHotwords);
   if (promptText) form.append("prompt", promptText);
   const timeoutMs = getTranscribeRequestTimeoutMs(p, blob && blob.size);
+  const requestStartedAt = Date.now();
+  emitAsrLifecycle(observer, {
+    type: "request-start",
+    timeoutMs,
+    deadlineAt: requestStartedAt + timeoutMs,
+  });
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
   const timer = controller ? window.setTimeout(() => controller.abort(), timeoutMs) : null;
   let res;
@@ -605,6 +763,11 @@ export async function transcribeAudio(plugin, blob, mime, providerOverride?) {
       headers: p.apiKey ? { "Authorization": `Bearer ${p.apiKey}` } : {},
       body: form,
       signal: controller ? controller.signal : undefined,
+    });
+    emitAsrLifecycle(observer, {
+      type: "response-start",
+      timeoutMs,
+      deadlineAt: requestStartedAt + timeoutMs,
     });
   } catch (e) {
     if (timer) window.clearTimeout(timer);
@@ -636,6 +799,12 @@ export async function transcribeAudio(plugin, blob, mime, providerOverride?) {
     }
     // 取最终文本：若服务返回了说话人分离信息（segments[].speaker 或内联 [SPEAKER_00]），归一成 [说话人N] 前缀；否则同旧行为。
     const rawText = extractTranscriptText(data);
+    emitAsrLifecycle(observer, {
+      type: "stream-progress",
+      receivedChars: String(rawText || "").length,
+      timeoutMs,
+      deadlineAt: requestStartedAt + timeoutMs,
+    });
     return applyVocabularyCorrections(rawText, vocabularyGroups).trim();
   } finally {
     if (timer) window.clearTimeout(timer);

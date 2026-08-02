@@ -1,83 +1,22 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- LexVoice's settings/data layer is intentionally dynamically typed (files use @ts-nocheck and read untyped JSON from loadData); these type-only rules yield no actionable findings here and are tracked for incremental typing */
 // 由 main.ts 抽出（模块化拆解，提升工程稳定性；纯搬迁、零行为改动）。
 import * as obsidian from "obsidian";
+export {
+  LEXVOICE_UPDATE_REPO_URL,
+  LEXVOICE_UPDATE_BRANCH,
+  LEXVOICE_UPDATE_PLUGIN_DIR,
+  LEXVOICE_UPDATE_RAW_BASE_URL,
+  parseGithubRepoUrl,
+  trimSlashes,
+  resolveUpdateRawBase,
+  resolveUpdateRawBases,
+  resolveUpdateVersionedBases,
+  pluginBasePath,
+} from "../update-source";
 import { VIRTUAL_CABLE_PATTERNS } from '../shared/catalog-import';
 import { normalizeKnowledgeExtractionHistory } from '../shared/util-knowledge';
 
-export const LEXVOICE_UPDATE_REPO_URL = "https://github.com/Lynn-x/LexVoice";
-
-export const LEXVOICE_UPDATE_BRANCH = "main";
-
-export const LEXVOICE_UPDATE_PLUGIN_DIR = "";
-
-export const LEXVOICE_UPDATE_RAW_BASE_URL = "";
-
 export const SUPPORTED_AUDIO_INPUT_MODES = new Set(["mic", "mix-virtual", "virtualCable"]);
-
-export function parseGithubRepoUrl(url) {
-  const text = String(url || "").trim();
-  const match = text.match(/^https?:\/\/github\.com\/([^/\s]+)\/([^/\s#?]+)(?:[/#?].*)?$/i)
-    || text.match(/^git@github\.com:([^/\s]+)\/([^/\s#?]+?)(?:\.git)?$/i);
-  if (!match) return null;
-  return { owner: match[1], repo: match[2].replace(/\.git$/i, "") };
-}
-
-export function trimSlashes(value) {
-  return String(value || "").trim().replace(/^\/+|\/+$/g, "");
-}
-
-export function resolveUpdateRawBase(settings) {
-  const rawBase = String(LEXVOICE_UPDATE_RAW_BASE_URL || "").trim().replace(/\/+$/g, "");
-  if (rawBase) return rawBase;
-  const repo = parseGithubRepoUrl(LEXVOICE_UPDATE_REPO_URL);
-  if (!repo) return "";
-  const branch = String(LEXVOICE_UPDATE_BRANCH || "main").trim() || "main";
-  const subdir = trimSlashes(LEXVOICE_UPDATE_PLUGIN_DIR || "");
-  return "https://raw.githubusercontent.com/" + repo.owner + "/" + repo.repo + "/" + branch + (subdir ? "/" + subdir : "");
-}
-
-export function resolveUpdateRawBases(settings) {
-  const primary = resolveUpdateRawBase(settings);
-  const out = [];
-  const add = (url) => {
-    const clean = String(url || "").trim().replace(/\/+$/g, "");
-    if (clean && !out.includes(clean)) out.push(clean);
-  };
-  add(primary);
-  if (String(LEXVOICE_UPDATE_RAW_BASE_URL || "").trim()) return out;
-
-  const repo = parseGithubRepoUrl(LEXVOICE_UPDATE_REPO_URL);
-  if (!repo) return out;
-  const branch = String(LEXVOICE_UPDATE_BRANCH || "main").trim() || "main";
-  const subdir = trimSlashes(LEXVOICE_UPDATE_PLUGIN_DIR || "");
-  const suffix = repo.owner + "/" + repo.repo + "@" + branch + (subdir ? "/" + subdir : "");
-  add("https://fastly.jsdelivr.net/gh/" + suffix);
-  add("https://cdn.jsdelivr.net/gh/" + suffix);
-  return out;
-}
-
-// 版本锁定的下载源（手机端/国内网络关键）：安装更新时按目标版本号取文件，杜绝"版本错位"。
-// 顺序设计：jsDelivr 按 git tag 精确镜像仓库文件（main.js 自 1.12.3 起随发版提交入库）——国内手机可达、
-// 免代理；GitHub Release 直连其次（有代理/海外时权威）；ghproxy 系镜像代理 Release 资产兜底。
-export function resolveUpdateVersionedBases(version) {
-  const v = String(version || "").trim();
-  const out = [];
-  const add = (url) => {
-    const clean = String(url || "").trim().replace(/\/+$/g, "");
-    if (clean && !out.includes(clean)) out.push(clean);
-  };
-  const repo = parseGithubRepoUrl(LEXVOICE_UPDATE_REPO_URL);
-  if (!repo || !v) return out;
-  const subdir = trimSlashes(LEXVOICE_UPDATE_PLUGIN_DIR || "");
-  const tagSuffix = repo.owner + "/" + repo.repo + "@" + v + (subdir ? "/" + subdir : "");
-  add("https://fastly.jsdelivr.net/gh/" + tagSuffix);
-  add("https://cdn.jsdelivr.net/gh/" + tagSuffix);
-  const releaseBase = LEXVOICE_UPDATE_REPO_URL.replace(/\/+$/g, "") + "/releases/download/" + v;
-  add(releaseBase);
-  add("https://mirror.ghproxy.com/" + releaseBase);
-  add("https://ghproxy.net/" + releaseBase);
-  return out;
-}
 
 export function stripLexVoiceFrontmatterSimple(text) {
   return String(text || "").replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
@@ -315,18 +254,6 @@ export async function trashLexVoiceFile(app, file) {
   } else {
     await app.fileManager.trashFile(file);
   }
-}
-
-export function pluginBasePath(plugin) {
-  const configDir = String(plugin.app.vault.configDir || "");
-  const dir = plugin && plugin.manifest && plugin.manifest.dir
-    ? String(plugin.manifest.dir)
-    : String(plugin.manifest.id || "");
-  const normalizedDir = obsidian.normalizePath(dir);
-  const pluginRoot = configDir ? obsidian.normalizePath(configDir + "/plugins") : "";
-  if (pluginRoot && normalizedDir.startsWith(pluginRoot + "/")) return normalizedDir;
-  if (!pluginRoot) return normalizedDir;
-  return obsidian.normalizePath(pluginRoot + "/" + normalizedDir);
 }
 
 export function normalizeAudioInputMode(mode) {

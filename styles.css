@@ -801,13 +801,16 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
 
 /* —— 处理进度 Modal（照「处理进度 动画」定稿）：白卡 + 进度条 + 状态图标行。全走 Obsidian 变量，主色 --interactive-accent —— */
 .modal.lexvoice-progress-modal {
-  width: 466px;
-  max-width: 92vw;
+  width: 640px;
+  max-width: min(94vw, 640px);
+  max-height: 86vh;
   padding: 0;
 }
 .modal.lexvoice-progress-modal .modal-content {
   padding: 0;
   margin: 0;
+  max-height: 86vh;
+  overflow: hidden;
 }
 .lexvoice-progress { color: var(--text-normal); }
 .lexvoice-progress-head { padding: 20px 22px 15px; }
@@ -815,23 +818,67 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
 .lexvoice-progress-title {
   font-size: 16px;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   color: var(--text-normal);
 }
 .lexvoice-progress-state { font-size: 12.5px; color: var(--text-muted); }
-.lexvoice-progress-state.is-active { color: var(--interactive-accent); }
+.lexvoice-progress-state.is-running,
+.lexvoice-progress-state.is-waiting {
+  color: var(--interactive-accent);
+}
+.lexvoice-progress-state.is-slow,
+.lexvoice-progress-state.is-retrying {
+  color: var(--text-warning, var(--color-orange));
+}
+.lexvoice-progress-state.is-stalled,
+.lexvoice-progress-state.is-failed {
+  color: var(--text-error);
+}
+.lexvoice-progress-state.is-active:is(.is-running, .is-waiting, .is-slow, .is-retrying)::after {
+  content: "";
+  display: inline-block;
+  width: 1.25em;
+  height: 1em;
+  margin-left: var(--size-2-1);
+  vertical-align: text-bottom;
+  background:
+    radial-gradient(circle, currentColor 0 2px, transparent 2.5px) 0 50% / 0.42em 100% repeat-x;
+  animation: lexvoice-progress-ellipsis 1.2s steps(3, end) infinite;
+}
 .lexvoice-progress-bar {
   margin-top: 13px;
   height: 6px;
   border-radius: 99px;
   background: var(--background-secondary);
   overflow: hidden;
+  position: relative;
 }
 .lexvoice-progress-bar-fill {
   height: 100%;
   border-radius: 99px;
   background: var(--interactive-accent);
   transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.lexvoice-progress-bar-fill.is-slow,
+.lexvoice-progress-bar-fill.is-retrying {
+  background: var(--text-warning, var(--color-orange));
+}
+.lexvoice-progress-bar-fill.is-stalled,
+.lexvoice-progress-bar-fill.is-failed {
+  background: var(--text-error);
+}
+.lexvoice-progress-bar-motion {
+  position: absolute;
+  inset: 0 auto 0 -32%;
+  width: 32%;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--interactive-accent) 45%, transparent),
+    transparent
+  );
+  animation: lexvoice-progress-sweep 1.6s ease-in-out infinite;
 }
 .lexvoice-progress-summary {
   display: flex;
@@ -854,7 +901,246 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   font-size: var(--font-ui-smaller);
   line-height: 1.6;
 }
-.lexvoice-progress-list { padding: 0 22px 10px; }
+.lexvoice-progress-list {
+  padding: 0 22px 10px;
+  max-height: calc(86vh - 126px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.lexvoice-progress-section-title {
+  margin: var(--size-4-3) 0 var(--size-2-2);
+  color: var(--text-faint);
+  font-size: var(--font-ui-smallest);
+  font-weight: var(--font-semibold);
+}
+.lexvoice-progress-section-title:first-child {
+  margin-top: 0;
+}
+.lexvoice-progress-activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-3);
+}
+.lexvoice-progress-activity {
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  overflow: clip;
+}
+.lexvoice-progress-activity.is-failed,
+.lexvoice-progress-activity.is-stalled {
+  border-color: color-mix(in srgb, var(--text-error) 38%, var(--background-modifier-border));
+}
+.lexvoice-progress-activity.is-slow,
+.lexvoice-progress-activity.is-retrying {
+  border-color: color-mix(
+    in srgb,
+    var(--text-warning, var(--color-orange)) 34%,
+    var(--background-modifier-border)
+  );
+}
+.lexvoice-progress-activity > summary {
+  list-style: none;
+}
+.lexvoice-progress-activity > summary::-webkit-details-marker {
+  display: none;
+}
+.lexvoice-progress-activity-summary {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--size-2-3);
+  min-height: 52px;
+  padding: var(--size-2-3) var(--size-4-3);
+  cursor: pointer;
+  user-select: none;
+}
+.lexvoice-progress-activity-summary:hover {
+  background: var(--background-modifier-hover);
+}
+.lexvoice-progress-activity-icon {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+.lexvoice-progress-activity-icon svg {
+  width: 17px;
+  height: 17px;
+}
+.lexvoice-progress-activity-icon.is-running,
+.lexvoice-progress-activity-icon.is-waiting {
+  color: var(--text-accent);
+  animation: lexvoice-task-activity-pulse 1.6s ease-in-out infinite;
+}
+.lexvoice-progress-activity-icon.is-retrying svg {
+  color: var(--text-warning, var(--color-orange));
+  animation: lexvoice-progress-spin 1.2s linear infinite;
+}
+.lexvoice-progress-activity-icon.is-slow {
+  color: var(--text-warning, var(--color-orange));
+}
+.lexvoice-progress-activity-icon.is-failed,
+.lexvoice-progress-activity-icon.is-stalled {
+  color: var(--text-error);
+}
+.lexvoice-progress-activity-icon.is-done {
+  color: var(--text-success, var(--color-green));
+}
+.lexvoice-progress-activity-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.lexvoice-progress-activity-title {
+  min-width: 0;
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+  line-height: var(--line-height-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lexvoice-progress-activity-stage {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smallest);
+  line-height: var(--line-height-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lexvoice-progress-activity-state {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smallest);
+  white-space: nowrap;
+}
+.lexvoice-progress-activity-state.is-running,
+.lexvoice-progress-activity-state.is-waiting {
+  color: var(--text-accent);
+}
+.lexvoice-progress-activity-state.is-slow,
+.lexvoice-progress-activity-state.is-retrying {
+  color: var(--text-warning, var(--color-orange));
+}
+.lexvoice-progress-activity-state.is-failed,
+.lexvoice-progress-activity-state.is-stalled {
+  color: var(--text-error);
+}
+.lexvoice-progress-activity-state.is-done {
+  color: var(--text-success, var(--color-green));
+}
+.lexvoice-progress-activity-panel {
+  padding: 0 var(--size-4-3) var(--size-4-3) 50px;
+}
+.lexvoice-progress-activity-detail {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: var(--line-height-normal);
+  overflow-wrap: anywhere;
+}
+.lexvoice-progress-activity-progress {
+  height: 4px;
+  margin-top: var(--size-4-2);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  overflow: hidden;
+}
+.lexvoice-progress-activity-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--interactive-accent);
+  transition: width 0.35s ease;
+}
+.lexvoice-progress-activity-progress.is-slow .lexvoice-progress-activity-progress-fill,
+.lexvoice-progress-activity-progress.is-retrying .lexvoice-progress-activity-progress-fill {
+  background: var(--text-warning, var(--color-orange));
+}
+.lexvoice-progress-activity-progress.is-failed .lexvoice-progress-activity-progress-fill,
+.lexvoice-progress-activity-progress.is-stalled .lexvoice-progress-activity-progress-fill {
+  background: var(--text-error);
+}
+.lexvoice-progress-activity-progress-label {
+  margin-top: var(--size-2-1);
+  color: var(--text-faint);
+  font-size: var(--font-ui-smallest);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.lexvoice-progress-activity-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-2) var(--size-4-4);
+  margin-top: var(--size-4-2);
+}
+.lexvoice-progress-activity-fact {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--size-2-1);
+  min-width: 0;
+  font-size: var(--font-ui-smallest);
+}
+.lexvoice-progress-activity-fact-label {
+  color: var(--text-faint);
+}
+.lexvoice-progress-activity-fact-value {
+  max-width: 220px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lexvoice-progress-activity-error {
+  margin-top: var(--size-4-2);
+  padding: var(--size-2-3) var(--size-4-2);
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-error);
+  color: var(--text-error);
+}
+.lexvoice-progress-activity-error-head {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+}
+.lexvoice-progress-activity-error-icon {
+  width: 15px;
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.lexvoice-progress-activity-error-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.lexvoice-progress-activity-error-message,
+.lexvoice-progress-activity-error-hint {
+  margin-top: var(--size-2-1);
+  font-size: var(--font-ui-smallest);
+  line-height: var(--line-height-tight);
+  overflow-wrap: anywhere;
+}
+.lexvoice-progress-activity-error-hint {
+  color: var(--text-muted);
+}
+.lexvoice-progress-activity-chain {
+  margin-top: var(--size-4-2);
+}
+.lexvoice-progress-activity-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-3);
+  margin-top: var(--size-4-3);
+}
 .lexvoice-progress-row {
   display: flex;
   gap: 12px;
@@ -926,6 +1212,324 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.lexvoice-progress-spinner.is-slow,
+.lexvoice-progress-spinner.is-retrying {
+  border-color: color-mix(in srgb, var(--text-warning, var(--color-orange)) 24%, transparent);
+  border-top-color: var(--text-warning, var(--color-orange));
+}
+.lexvoice-progress-task-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--text-muted);
+}
+.lexvoice-progress-task-state svg {
+  width: 18px;
+  height: 18px;
+}
+.lexvoice-progress-task-state.is-stalled,
+.lexvoice-progress-task-state.is-failed {
+  color: var(--text-error);
+}
+.lexvoice-progress-task-state.is-done {
+  color: var(--text-success, var(--color-green));
+}
+.lexvoice-progress-detail {
+  margin-top: var(--size-2-2);
+  font-size: var(--font-ui-smaller);
+  line-height: var(--line-height-tight);
+  color: var(--text-muted);
+}
+.lexvoice-progress-stages {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--size-4-3);
+  border-top: 1px solid var(--background-modifier-border);
+}
+.lexvoice-progress-stage {
+  min-width: 0;
+  margin: 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.lexvoice-progress-stage > summary {
+  list-style: none;
+}
+.lexvoice-progress-stage > summary::-webkit-details-marker {
+  display: none;
+}
+.lexvoice-progress-stage-summary {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--size-2-3);
+  min-height: 48px;
+  padding: var(--size-2-2) 0;
+  cursor: pointer;
+  user-select: none;
+}
+.lexvoice-progress-stage-summary:hover .lexvoice-progress-stage-label {
+  color: var(--text-accent);
+}
+.lexvoice-progress-stage-marker {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-faint);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-ui-smallest);
+  font-variant-numeric: tabular-nums;
+}
+.lexvoice-progress-stage-marker svg {
+  width: 12px;
+  height: 12px;
+  stroke-width: 2.5;
+}
+.lexvoice-progress-stage.is-done .lexvoice-progress-stage-marker {
+  border-color: color-mix(in srgb, var(--interactive-accent) 35%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary));
+  color: var(--interactive-accent);
+}
+.lexvoice-progress-stage.is-active:is(.is-running, .is-waiting) .lexvoice-progress-stage-marker {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+}
+.lexvoice-progress-stage.is-slow .lexvoice-progress-stage-marker,
+.lexvoice-progress-stage.is-retrying .lexvoice-progress-stage-marker {
+  border-color: var(--text-warning, var(--color-orange));
+  color: var(--text-warning, var(--color-orange));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-warning, var(--color-orange)) 12%, transparent);
+}
+.lexvoice-progress-stage.is-stalled .lexvoice-progress-stage-marker,
+.lexvoice-progress-stage.is-failed .lexvoice-progress-stage-marker {
+  border-color: var(--text-error);
+  color: var(--text-error);
+  box-shadow: none;
+}
+.lexvoice-progress-stage-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+  animation: lexvoice-progress-stage-pulse 1.5s ease-in-out infinite;
+}
+.lexvoice-progress-stage-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.lexvoice-progress-stage-label {
+  min-width: 0;
+  font-size: var(--font-ui-small);
+  line-height: var(--line-height-tight);
+  color: var(--text-muted);
+  text-align: left;
+}
+.lexvoice-progress-stage-summary-text {
+  min-width: 0;
+  font-size: var(--font-ui-smallest);
+  line-height: var(--line-height-tight);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lexvoice-progress-stage.is-done .lexvoice-progress-stage-label {
+  color: var(--text-muted);
+}
+.lexvoice-progress-stage.is-active .lexvoice-progress-stage-label {
+  color: var(--text-normal);
+  font-weight: var(--font-semibold);
+}
+.lexvoice-progress-stage-state,
+.lexvoice-progress-request-state {
+  flex: 0 0 auto;
+  font-size: var(--font-ui-smallest);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.lexvoice-progress-stage-state.is-running,
+.lexvoice-progress-stage-state.is-waiting,
+.lexvoice-progress-request-state.is-running,
+.lexvoice-progress-request-state.is-waiting {
+  color: var(--text-accent);
+}
+.lexvoice-progress-stage-state.is-slow,
+.lexvoice-progress-stage-state.is-retrying,
+.lexvoice-progress-request-state.is-slow,
+.lexvoice-progress-request-state.is-retrying {
+  color: var(--text-warning, var(--color-orange));
+}
+.lexvoice-progress-stage-state.is-stalled,
+.lexvoice-progress-stage-state.is-failed,
+.lexvoice-progress-request-state.is-stalled,
+.lexvoice-progress-request-state.is-failed {
+  color: var(--text-error);
+}
+.lexvoice-progress-stage-panel {
+  margin: 0 0 var(--size-4-3) 34px;
+  padding: var(--size-4-2);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+}
+.lexvoice-progress-stage-description {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: var(--line-height-normal);
+}
+.lexvoice-progress-stage-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-2) var(--size-4-4);
+  margin-top: var(--size-4-2);
+}
+.lexvoice-progress-stage-fact {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--size-2-1);
+  font-size: var(--font-ui-smallest);
+}
+.lexvoice-progress-stage-fact-label {
+  color: var(--text-faint);
+}
+.lexvoice-progress-stage-fact-value {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.lexvoice-progress-section-label {
+  margin: var(--size-4-3) 0 var(--size-2-2);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smallest);
+  font-weight: var(--font-semibold);
+}
+.lexvoice-progress-request-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+}
+.lexvoice-progress-request {
+  padding: var(--size-2-3) var(--size-4-2);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+}
+.lexvoice-progress-request.is-stalled,
+.lexvoice-progress-request.is-failed {
+  box-shadow: inset 2px 0 0 var(--text-error);
+}
+.lexvoice-progress-request.is-slow,
+.lexvoice-progress-request.is-retrying {
+  box-shadow: inset 2px 0 0 var(--text-warning, var(--color-orange));
+}
+.lexvoice-progress-request-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--size-2-2);
+}
+.lexvoice-progress-request-title {
+  min-width: 0;
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-medium);
+}
+.lexvoice-progress-request-attempt {
+  margin-right: auto;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smallest);
+}
+.lexvoice-progress-request-meta,
+.lexvoice-progress-request-error {
+  margin-top: var(--size-2-1);
+  font-size: var(--font-ui-smallest);
+  line-height: var(--line-height-tight);
+  word-break: break-word;
+}
+.lexvoice-progress-request-meta {
+  color: var(--text-muted);
+}
+.lexvoice-progress-request-error {
+  color: var(--text-error);
+}
+.lexvoice-progress-event {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: var(--size-2-2);
+  padding: 3px 0;
+  font-size: var(--font-ui-smallest);
+}
+.lexvoice-progress-event-time {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.lexvoice-progress-event-copy {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-1);
+  color: var(--text-muted);
+}
+.lexvoice-progress-event-label {
+  color: var(--text-normal);
+}
+.lexvoice-progress-event-detail {
+  color: var(--text-faint);
+}
+.lexvoice-progress-live {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--size-2-3);
+  margin-top: var(--size-4-3);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+.lexvoice-progress-live-icon {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--text-accent);
+}
+.lexvoice-progress-live-icon svg {
+  width: 15px;
+  height: 15px;
+}
+.lexvoice-progress-live.is-slow .lexvoice-progress-live-icon,
+.lexvoice-progress-live.is-retrying .lexvoice-progress-live-icon {
+  color: var(--text-warning, var(--color-orange));
+}
+.lexvoice-progress-live.is-stalled .lexvoice-progress-live-icon,
+.lexvoice-progress-live.is-failed .lexvoice-progress-live-icon {
+  color: var(--text-error);
+}
+.lexvoice-progress-live-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.lexvoice-progress-live-title {
+  color: var(--text-normal);
+  font-weight: var(--font-medium);
+}
+.lexvoice-progress-live-text {
+  min-width: 0;
+  color: var(--text-muted);
+  line-height: var(--line-height-tight);
+}
+.lexvoice-progress-background-hint {
+  margin-top: var(--size-2-1);
+  color: var(--text-faint);
+  font-size: var(--font-ui-smallest);
+  line-height: var(--line-height-tight);
+}
 .lexvoice-progress-rowacts { display: flex; gap: 14px; margin-top: 6px; }
 .lexvoice-progress-link {
   color: var(--text-muted);
@@ -949,6 +1553,31 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
 @keyframes lexvoice-progress-spin { to { transform: rotate(360deg); } }
 @keyframes lexvoice-progress-pop { 0% { transform: scale(0); } 60% { transform: scale(1.15); } 100% { transform: scale(1); } }
 @keyframes lexvoice-progress-dotpulse { 0%, 100% { opacity: 0.35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1); } }
+@keyframes lexvoice-progress-sweep {
+  from { transform: translateX(0); }
+  to { transform: translateX(410%); }
+}
+@keyframes lexvoice-progress-ellipsis {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+@keyframes lexvoice-progress-stage-pulse {
+  0%, 100% { transform: scale(0.8); opacity: 0.65; }
+  50% { transform: scale(1); opacity: 1; }
+}
+@keyframes lexvoice-task-activity-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lexvoice-progress-state.is-active:is(.is-running, .is-waiting, .is-slow, .is-retrying)::after,
+  .lexvoice-progress-bar-motion,
+  .lexvoice-progress-stage-pulse,
+  .lexvoice-progress-activity-icon,
+  .lexvoice-progress-activity-icon svg {
+    animation: none;
+  }
+}
 
 /* ============================================================
    4. 导入 Modal
@@ -2832,7 +3461,7 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
 
 .lexvoice-outline-head.is-idle .lexvoice-outline-actions {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.8fr) repeat(3, minmax(0, 0.8fr));
   gap: 7px;
   margin-left: 0;
   margin-top: 4px;
@@ -2903,7 +3532,7 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
   }
 
   .lexvoice-outline-head.is-idle .lexvoice-outline-actions {
-    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1.8fr) repeat(3, minmax(0, 0.8fr));
   }
 
   .lexvoice-outline-head.is-idle .lexvoice-outline-action-button.is-record {
@@ -4247,6 +4876,102 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.lexvoice-speaker-map {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+  padding: var(--size-4-3);
+  border: 1px solid var(--lv-sediment-line);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+}
+
+.lexvoice-speaker-map-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+}
+
+.lexvoice-speaker-map-heading {
+  min-width: 0;
+}
+
+.lexvoice-speaker-map-title {
+  color: var(--lv-sediment-text);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+  line-height: var(--line-height-tight);
+}
+
+.lexvoice-speaker-map-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+}
+
+.lexvoice-speaker-map-row {
+  display: grid;
+  grid-template-columns: minmax(78px, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--size-2-2);
+  min-height: 32px;
+}
+
+.lexvoice-speaker-map-source {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+  min-width: 0;
+}
+
+.lexvoice-speaker-map-label {
+  overflow: hidden;
+  color: var(--lv-sediment-text);
+  font-size: var(--font-ui-smaller);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lexvoice-speaker-map-input {
+  width: 100%;
+  min-width: 0;
+  height: var(--input-height, 30px);
+  margin: 0;
+  color: var(--text-normal);
+  background: var(--background-modifier-form-field);
+  border: var(--input-border-width, 1px) solid var(--background-modifier-border);
+  border-radius: var(--input-radius, var(--radius-s));
+  box-shadow: var(--input-shadow);
+}
+
+.lexvoice-speaker-map .lexvoice-speaker-map-apply {
+  min-width: 48px;
+  height: var(--input-height, 30px);
+  margin: 0;
+  padding: 0 var(--size-4-2);
+  color: var(--text-accent);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  font-size: var(--font-ui-smaller);
+}
+
+.lexvoice-speaker-map .lexvoice-speaker-map-apply:hover {
+  color: var(--text-accent-hover);
+  background: var(--background-modifier-hover);
+}
+
+@container sidebar (max-width: 360px) {
+  .lexvoice-speaker-map-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .lexvoice-speaker-map-source {
+    grid-column: 1 / -1;
+  }
 }
 
 .lexvoice-sediment-rescan-row {
@@ -6585,6 +7310,133 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
 
 .lexvoice-audio-input-field {
   min-width: 0;
+}
+
+.lexvoice-audio-channel-field {
+  grid-column: 1 / -1;
+  container-name: lex-audio-channel;
+  container-type: inline-size;
+  padding: var(--size-4-3) 0 0;
+  border: 0;
+  border-top: 1px solid var(--background-modifier-border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.lexvoice-audio-channel-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+}
+
+.lexvoice-audio-channel-title-row .lexvoice-audio-input-label {
+  margin-bottom: 0;
+}
+
+.lexvoice-audio-channel-title-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--size-2-2);
+  min-width: 0;
+}
+
+.lexvoice-audio-channel-mode {
+  width: auto;
+  min-width: 104px;
+  max-width: 148px;
+  height: var(--input-height, 30px);
+  margin: 0;
+  font-size: var(--font-ui-smaller);
+}
+
+.lexvoice-audio-channel-detect {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 3px var(--size-4-2);
+  color: var(--text-accent);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  font-size: var(--font-ui-smaller);
+}
+
+.lexvoice-audio-channel-detect:hover {
+  color: var(--text-accent-hover);
+  background: var(--background-modifier-hover);
+}
+
+.lexvoice-audio-channel-field.is-multichannel .lexvoice-audio-channel-hint {
+  color: var(--text-success, var(--text-accent));
+}
+
+.lexvoice-audio-channel-field.is-channel-warning .lexvoice-audio-channel-hint {
+  color: var(--text-warning, var(--text-muted));
+}
+
+.lexvoice-audio-channel-result {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--size-2-2) var(--size-4-3);
+  margin-top: var(--size-4-2);
+  padding-top: var(--size-4-2);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.lexvoice-audio-channel-result:empty {
+  display: none;
+}
+
+.lexvoice-audio-channel-result-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--size-2-2);
+  min-width: 0;
+  font-size: var(--font-ui-smaller);
+}
+
+.lexvoice-audio-channel-result-label {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+}
+
+.lexvoice-audio-channel-result-value {
+  overflow: hidden;
+  color: var(--text-muted);
+  text-align: right;
+  text-overflow: ellipsis;
+}
+
+.lexvoice-audio-channel-result-row.is-success .lexvoice-audio-channel-result-value {
+  color: var(--text-success, var(--text-accent));
+}
+
+.lexvoice-audio-channel-result-row.is-warning .lexvoice-audio-channel-result-value {
+  color: var(--text-warning, var(--text-muted));
+}
+
+.lexvoice-audio-channel-result-row.is-error .lexvoice-audio-channel-result-value {
+  color: var(--text-error);
+}
+
+.lexvoice-audio-channel-result-row.is-running .lexvoice-audio-channel-result-value {
+  color: var(--text-accent);
+}
+
+@container lex-audio-channel (max-width: 520px) {
+  .lexvoice-audio-channel-title-row {
+    align-items: flex-start;
+  }
+
+  .lexvoice-audio-channel-title-actions {
+    flex-wrap: wrap;
+  }
+
+  .lexvoice-audio-channel-result {
+    grid-template-columns: 1fr;
+  }
 }
 
 .lexvoice-audio-input-label {
@@ -9244,7 +10096,7 @@ select.lexvoice-rcx-in.dropdown {
 }
 
 .lexvoice-outline-head.is-idle .lexvoice-outline-actions {
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.8fr) repeat(3, minmax(0, 0.8fr));
   gap: 7px;
   margin-top: 3px;
 }
@@ -10913,7 +11765,7 @@ select.lexvoice-rcx-in.dropdown {
 
 .lexvoice-outline.is-mobile .lexvoice-outline-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.85fr) minmax(0, 0.85fr);
+  grid-template-columns: minmax(0, 1.45fr) repeat(3, minmax(0, 0.85fr));
   gap: 8px;
   margin: 0;
 }
@@ -10923,7 +11775,7 @@ select.lexvoice-rcx-in.dropdown {
   height: 38px;
   padding: 0 8px;
   border-radius: 9px;
-  font-size: 13px;
+  font-size: 12px;
   white-space: nowrap;
 }
 

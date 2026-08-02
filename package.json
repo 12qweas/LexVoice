@@ -1,11 +1,12 @@
 {
   "name": "lexvoice",
-  "version": "1.14.2",
+  "version": "1.15.0",
   "description": "Obsidian desktop plugin for recording, transcription, and AI-organized Markdown notes.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "typecheck:core": "tsc -p tsconfig.strict-core.json",
+    "build": "npm run typecheck:core && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "test": "vitest run",
     "test:watch": "vitest",
     "version": "node version-bump.mjs && git add manifest.json versions.json"

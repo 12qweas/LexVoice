@@ -7,17 +7,31 @@
 export const CLEAN_TRANSCRIPT_SYSTEM =
   "你是一位资深的访谈／庭审笔录整理编辑。你的任务是把口语录音转写**改写成一篇通顺、可读的书面文字稿**：在忠实传达每个人所讲实质内容的前提下，彻底清除口语噪声、把零碎的口语整合成规范的书面句子与段落。这不是逐字稿，也不是纪要——你不摘要、不加分析、不下结论，但你要大胆地把「说出来的话」整理成「读起来顺的字」。判断标准只有一个：读者读你的清稿，应当像在读一篇精修过的访谈记录，而不是在读一份带时间戳的逐字稿。";
 
+// 多声道硬件（如 DJI 一收多发）分离出的说话人是既定事实，不能让模型再去猜。
+export function buildKnownSpeakerClause(speakerLabels: string[]): string {
+  const labels = (speakerLabels || [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  if (!labels.length) return "";
+  return `【说话人已确定——必须遵守】
+- 本次录音由多声道设备分离，每个声道对应一位固定说话人：${labels.join("、")}。这是既定事实，不是推测。
+- 每段发言前的说话人标签**原样保留**，不得改写、合并、省略，也不得写成「某位发言人」之类的模糊指代。
+- **不要重新判断谁说了哪句话**，按转写中已标注的说话人归属照抄。`;
+}
+
 export function buildCleanTranscriptChunkPrompt(
   joinedChunk: string,
   partIndex: number,
   partTotal: number,
   timeRange: string,
+  speakerLabels: string[] = [],
 ): string {
+  const knownSpeakers = buildKnownSpeakerClause(speakerLabels);
   const partLine = partTotal > 1
     ? `请把下面这场录音的**第 ${partIndex}/${partTotal} 部分**（时间段约 ${timeRange}）改写成通顺可读的书面文字稿。只改写这一部分，不复述其它部分，不要为这一部分写小结或总览。`
     : `请把下面这场录音的分段转写改写成一篇通顺、可读的书面文字稿（时间段约 ${timeRange}）。`;
   return `${partLine}
-
+${knownSpeakers ? `\n${knownSpeakers}\n` : ""}
 【放手去做——这是可读性的关键】
 - 把口语句法**改写成规范的书面句子**：补全省略、理顺语序、拆开绕口的长句、整合被打断或重复绕回的表达，让每个意思都成为完整通顺的句子。
 - 按话题与发言**自然分段**：同一个人连续讲的整合成连贯段落，换人另起一段；不要堆成一大坨，也不要碎成一句一行。
@@ -30,7 +44,7 @@ export function buildCleanTranscriptChunkPrompt(
 - 拿不准是不是实质信息时，保留它的意思，但仍要写通顺。
 
 【格式】
-- 保留说话人：用「**说话人**：」起段（转写里没有清晰说话人时，按语义分段即可，**不要硬编人名**）。
+- 保留说话人：用「**说话人**：」起段${knownSpeakers ? "（照抄上方已确定的说话人标签）" : "（转写里没有清晰说话人时，按语义分段即可，**不要硬编人名**）"}。
 - 时间锚点：只在**话题切换或较大时间跳跃**处用 \`[MM:SS]\` 标一下（取自下方各段起始时间），便于回母本核对；**不要每句都标、不要打断句子**。
 - 纯书面正文：不要 YAML frontmatter、不要顶部总览／摘要、不要列点和小标题、不要代码围栏、不要任何前言或解释。
 

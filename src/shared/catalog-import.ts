@@ -7,17 +7,17 @@ export const TEXT_IMPORT_EXT = new Set(["md", "txt"]);
 
 export const IMPORT_TEXT_CATEGORY_CONFIG = {
   "lexvoice-normal": {
-    label: "已整理 LexVoice 纪要",
+    label: "已完成的 LexVoice 纪要",
     shortLabel: "正常稿",
     desc: "已经完成 AI 整理，可用于多篇合并、换模板重整或转成其他模式。",
   },
   "lexvoice-repair": {
-    label: "待修复 / 碎片 LexVoice 转写",
+    label: "未完成的 LexVoice 转写",
     shortLabel: "待修复",
     desc: "包含转写失败、整理失败、只有原始分段或零散内容，适合重新整理。",
   },
   external: {
-    label: "外部 MD / TXT 速录稿",
+    label: "其他 Markdown / TXT 文件",
     shortLabel: "外部稿",
     desc: "用户手写速录、第三方纪要或普通 Markdown，不调用语音转写，直接交给 LLM 整理。",
   },

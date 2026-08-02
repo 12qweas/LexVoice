@@ -1,12 +1,9 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- LexVoice's settings/data layer is intentionally dynamically typed (files use @ts-nocheck and read untyped JSON from loadData); these type-only rules yield no actionable findings here and are tracked for incremental typing */
-// @ts-nocheck
 // 实时大纲的"文本/状态纯函数层"。从 main.ts 抽出，专门承载所有"把非确定性的 LLM markdown
 // 掰回确定结构"的逻辑——这是全项目正确性最敏感、历史 bug 最多的一层。
 // 这里的函数全是纯函数（无 obsidian / 无 DOM / 无 IO），便于被 vitest 回归测试覆盖（见 outline-text.test.ts）。
 // 注意：normalizeRealtimeOutlineState / renderRealtimeOutlineStateMarkdown 仍留在 main.ts（它们依赖
 // clipRealtimeContextText 等通用工具），但会从本模块 import 这里的节点构造/解析函数。
 
-export const REALTIME_OUTLINE_STATE_MAX_NODES = 60;
 export const REALTIME_OUTLINE_STATE_MAX_CHILDREN = 5;
 
 export const REALTIME_OUTLINE_ANCHOR_RE = /\[\[[^\]\n]+\|\d{1,2}:\d{2}(?::\d{2})?\]\]/;
@@ -18,9 +15,152 @@ export const REALTIME_OUTLINE_ANCHOR_GLOBAL_RE = /\[\[[^\]\n]+\|\d{1,2}:\d{2}(?:
 export const REALTIME_OUTLINE_INLINE_SEP_RE = /\s[\p{Pd}−]\s/u;
 export const REALTIME_OUTLINE_INLINE_SEP_SPLIT_RE = /\s[\p{Pd}−]\s/gu;
 
+export interface RealtimeOutlineNode {
+  id: string;
+  anchor: string;
+  time: string;
+  title: string;
+  children: string[];
+}
+
+export interface RealtimeOutlineSegmentLike {
+  text?: unknown;
+  index?: unknown;
+}
+
+export interface RecruitRealtimeOutlineProtocolResult {
+  outline: string;
+  memory: string;
+  protocolMatched: boolean;
+}
+
+export interface RecruitRealtimeOutlineFallbackOptions {
+  maxNodes?: number;
+}
+
+export interface RecruitRealtimeOutlineMemoryOptions {
+  maxChars?: number;
+  recentDetailCount?: number;
+}
+
+export interface SelectIncrementalRealtimeOutlineOptions {
+  maxSegments?: number;
+  maxChars?: number;
+  sinceCount?: number;
+  lookbackSegments?: number;
+}
+
+export interface IncrementalRealtimeOutlineSelection<T extends RealtimeOutlineSegmentLike> {
+  segments: T[];
+  newSegments: T[];
+  usedCount: number;
+  newUsedCount: number;
+  omittedBeforeCount: number;
+  totalTextCount: number;
+  totalSegmentCount: number;
+  approxChars: number;
+  isIncremental: boolean;
+  sinceCount: number;
+  deltaTotalCount: number;
+  commitThroughCount: number;
+  hasRemainingText: boolean;
+}
+
+export interface RealtimeOutlineAnchorSource {
+  anchor?: unknown;
+  index?: unknown;
+}
+
+export interface RepairRealtimeOutlineAnchorsOptions {
+  previousOutline?: unknown;
+  anchorSources?: readonly RealtimeOutlineAnchorSource[];
+}
+
+export interface RepairRealtimeOutlineAnchorsResult {
+  outline: string;
+  repairedCount: number;
+  restoredCount: number;
+  replacedCount?: number;
+  unresolvedCount: number;
+}
+
+export interface NormalizeOutlineMarkdownOptions {
+  attachUntimed?: boolean;
+  preserveUntimedTopLevel?: boolean;
+}
+
+export interface CoverageDimensionLike {
+  status?: string;
+  evidence_anchor?: unknown;
+  missing_what?: unknown;
+  followup_question?: unknown;
+  vague_hits?: readonly unknown[];
+}
+
+export type CoverageDimensions = Record<string, CoverageDimensionLike>;
+
+export type FollowupDimension = CoverageDimensionLike;
+
+export interface FollowupRule {
+  fallback?: unknown;
+  priority?: number;
+}
+
+export interface FollowupDimensionMeta {
+  key?: string;
+  name?: string;
+  group?: string;
+}
+
+export interface DeriveFollowupCardsOptions {
+  rules?: Record<string, FollowupRule>;
+  dimOrder?: readonly FollowupDimensionMeta[];
+  suppressed?: ReadonlySet<string> | readonly string[];
+  maxCards?: number;
+}
+
+export type FollowupCardStatus = "missing" | "partial";
+
+export interface FollowupCard {
+  key: string;
+  name: string;
+  group: string;
+  status: FollowupCardStatus;
+  reason: string;
+  vagueHits: unknown[];
+  question: string;
+  priority: number;
+  order: number;
+}
+
+export interface ValidateRealtimeOutlineOptions {
+  previousOutline?: unknown;
+  maxNewTopLevel?: number;
+  deltaOnly?: boolean;
+  allowUntimedTopLevel?: boolean;
+}
+
+export type RealtimeOutlineValidationReason =
+  | ""
+  | "empty_outline"
+  | "no_top_level_bullets"
+  | "too_many_top_level_bullets"
+  | "lost_all_time_anchors"
+  | "too_many_untimed_top_level_items"
+  | "numbered_items_inline_in_title";
+
+export interface RealtimeOutlineValidationResult {
+  ok: boolean;
+  reason: RealtimeOutlineValidationReason;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
 // 把一个片段在"第 2 个及以后的锚点"前切开——应对模型把多个一级条目排在一起、中间却没用任何破折号分隔的情况。
 // 锚点 [[file|HH:MM]] 是最可靠的结构信号，据它硬切能保证一级条目至少能分开（时间轴 rail 不会糊成一条）。
-export function splitRealtimeOutlineAtEmbeddedAnchors(segment) {
+export function splitRealtimeOutlineAtEmbeddedAnchors(segment: unknown): string[] {
   const s = String(segment || "");
   const re = new RegExp(REALTIME_OUTLINE_ANCHOR_GLOBAL_RE.source, "g");
   const idxs = [];
@@ -38,7 +178,7 @@ export function splitRealtimeOutlineAtEmbeddedAnchors(segment) {
 // ① 按"空格+破折号+空格"切（破折号认全 Unicode 变体，含隐形的 U+2010/U+2011）；
 // ② 再把任何内部还嵌着 ≥2 个锚点的片段在锚点前硬切；
 // ③ 按锚点重建父子：带锚点的段 = 一级条目，其后无锚点的段 = 它的子要点（缩进两格）。
-export function normalizeRealtimeOutlineList(outline) {
+export function normalizeRealtimeOutlineList(outline: unknown): string {
   const src = String(outline || "");
   if (!src.trim()) return src;
   const lines = src.replace(/\r\n/g, "\n").split("\n");
@@ -86,21 +226,21 @@ export function normalizeRealtimeOutlineList(outline) {
   return out.join("\n");
 }
 
-const RECRUIT_OUTLINE_CHILD_LABELS = [
+const RECRUIT_OUTLINE_CHILD_LABELS: ReadonlyArray<{ pattern: RegExp; prefix: string }> = [
   { pattern: /^(?:Q|问题|面试官提问|提问|主问)\s*[：:]\s*(.+)$/i, prefix: "❓" },
   { pattern: /^(?:A|回答|候选人回答|回答要点)\s*[：:]\s*(.+)$/i, prefix: "💬" },
   { pattern: /^(?:E|AI\s*评价|AI\s*简评|评价|观察|判断)\s*[：:]\s*(.+)$/i, prefix: "🤖" },
   { pattern: /^(?:F|建议追问|追问|待追问)\s*[：:]\s*(.+)$/i, prefix: "⛏" },
 ];
 
-function normalizeRecruitOutlineBody(raw) {
+function normalizeRecruitOutlineBody(raw: unknown): string {
   return String(raw || "")
     .replace(/\*\*/g, "")
     .replace(/^>\s*/, "")
     .trim();
 }
 
-function matchRecruitOutlineChild(raw) {
+function matchRecruitOutlineChild(raw: unknown): string {
   const body = normalizeRecruitOutlineBody(raw);
   const explicitIcon = /^([❓💬🤖⛏])\s*(.+)$/.exec(body);
   if (explicitIcon) {
@@ -116,18 +256,16 @@ function matchRecruitOutlineChild(raw) {
   return "";
 }
 
-// Recruitment models often return a semantically useful answer in headings,
-// labelled paragraphs, or an unindented Q/A list even when they miss the
-// realtime-outline Markdown contract. Recover only explicit structural signals;
-// arbitrary prose is deliberately ignored so a preamble cannot masquerade as
-// a valid outline.
-export function parseRecruitRealtimeOutlineProtocol(input) {
+// Recover explicit recruitment structure from the compact line protocol and
+// from legacy XML/Markdown responses. Arbitrary prose is ignored so a model
+// preamble cannot masquerade as a valid interview outline.
+export function parseRecruitRealtimeOutlineProtocol(input: unknown): RecruitRealtimeOutlineProtocolResult {
   let source = String(input || "").replace(/\r\n/g, "\n").trim();
   if (!source) return { outline: "", memory: "", protocolMatched: false };
 
   const taggedOutline = source.match(/<lexvoice-outline\b[^>]*>([\s\S]*?)(?:<\/lexvoice-outline>|$)/i);
   const taggedMemory = source.match(/<lexvoice-memory\b[^>]*>([\s\S]*?)(?:<\/lexvoice-memory>|$)/i);
-  const memoryLines = [];
+  const memoryLines: string[] = [];
   if (taggedMemory && String(taggedMemory[1] || "").trim()) {
     memoryLines.push(String(taggedMemory[1] || "").trim().replace(/\s+/g, " "));
   }
@@ -142,30 +280,29 @@ export function parseRecruitRealtimeOutlineProtocol(input) {
     .replace(/```/g, "")
     .replace(/\s+(?=(?:记忆|面试主题|主题|能力项|考察项|话题|问题|面试官提问|提问|主问|回答|候选人回答|回答要点|AI\s*评价|AI\s*简评|评价|观察|判断|建议追问|追问|待追问)\s*[：:])/gi, "\n");
 
-  const lines = source.split("\n");
-  const out = [];
+  const out: string[] = [];
   let hasTopic = false;
   let protocolMatched = false;
-  const ensureTopic = () => {
+  const ensureTopic = (): void => {
     if (hasTopic) return;
     out.push("- 面试问答（待复核）");
     hasTopic = true;
   };
 
-  for (const rawLine of lines) {
+  for (const rawLine of source.split("\n")) {
     const raw = String(rawLine || "");
     if (!raw.trim()) continue;
     const heading = /^ {0,3}#{1,6}\s+(.+)$/.exec(raw);
     const numbered = /^ {0,3}\d{1,2}[.)、．]\s*(.+)$/.exec(raw);
     const bullet = /^(\s*)[-*+•·]\s+(.+)$/.exec(raw);
-    let body = heading
+    const candidate = heading
       ? heading[1]
       : numbered
         ? numbered[1]
         : bullet
           ? bullet[2]
           : raw;
-    body = normalizeRecruitOutlineBody(body);
+    const body = normalizeRecruitOutlineBody(candidate);
     if (!body) continue;
 
     const memory = /^(?:M|记忆)\s*[：:]\s*(.+)$/i.exec(body);
@@ -219,19 +356,22 @@ export function parseRecruitRealtimeOutlineProtocol(input) {
   };
 }
 
-export function normalizeRecruitRealtimeOutline(input) {
+export function normalizeRecruitRealtimeOutline(input: unknown): string {
   return parseRecruitRealtimeOutlineProtocol(input).outline;
 }
 
-// Last-resort recruitment outline for a malformed model response. It contains
-// only clipped source transcript and a neutral review label, so it can advance
-// the ordered cursor without inventing an evaluation or losing later batches.
-export function buildRecruitRealtimeOutlineFallback(segments, opts = {}) {
+// Last-resort output for malformed/failed recruitment batches. It copies only
+// source transcript into neutral review nodes, so the ordered cursor can keep
+// moving without inventing an assessment.
+export function buildRecruitRealtimeOutlineFallback(
+  segments: readonly (RealtimeOutlineSegmentLike | null | undefined)[] | null | undefined,
+  opts: RecruitRealtimeOutlineFallbackOptions = {},
+): string {
   const source = (Array.isArray(segments) ? segments : [])
-    .filter((segment) => segment && String(segment.text || "").trim());
+    .filter((segment): segment is RealtimeOutlineSegmentLike => !!segment && !!String(segment.text || "").trim());
   const maxNodes = Math.max(1, Math.min(6, Math.floor(Number(opts.maxNodes) || 6)));
   const groupSize = Math.max(1, Math.ceil(source.length / maxNodes));
-  const lines = [];
+  const lines: string[] = [];
   for (let offset = 0; offset < source.length; offset += groupSize) {
     const group = source.slice(offset, offset + groupSize);
     const displayIndexes = group.map((segment, innerIndex) => (
@@ -246,7 +386,7 @@ export function buildRecruitRealtimeOutlineFallback(segments, opts = {}) {
     for (const segment of group) {
       const excerpt = cleanRealtimeOutlineItemText(
         String(segment.text || "").replace(/\s+/g, " "),
-        110
+        110,
       );
       if (excerpt) lines.push(`  - 💬 ${excerpt}`);
     }
@@ -254,17 +394,20 @@ export function buildRecruitRealtimeOutlineFallback(segments, opts = {}) {
   return lines.join("\n");
 }
 
-// The committed cursor is program-owned monotonic state. A stale async result
-// can acknowledge no more than the current transcript length, and can never
-// move the cursor backwards.
-export function advanceRealtimeOutlineCursor(currentCount, attemptedCount, totalCount) {
+// The committed cursor is program-owned monotonic state. Stale async results
+// can never move it backwards or acknowledge past the current transcript.
+export function advanceRealtimeOutlineCursor(
+  currentCount: unknown,
+  attemptedCount: unknown,
+  totalCount: unknown,
+): number {
   const total = Math.max(0, Math.floor(Number(totalCount) || 0));
   const current = Math.min(total, Math.max(0, Math.floor(Number(currentCount) || 0)));
   const attempted = Math.min(total, Math.max(0, Math.floor(Number(attemptedCount) || 0)));
   return Math.max(current, attempted);
 }
 
-export function hashRealtimeOutlineText(text) {
+export function hashRealtimeOutlineText(text: unknown): string {
   const src = String(text || "");
   let h = 2166136261;
   for (let i = 0; i < src.length; i++) {
@@ -274,12 +417,12 @@ export function hashRealtimeOutlineText(text) {
   return (h >>> 0).toString(36);
 }
 
-export function getRealtimeOutlineAnchorTime(anchor) {
+export function getRealtimeOutlineAnchorTime(anchor: unknown): string {
   const match = String(anchor || "").match(/\|(\d{1,2}:\d{2}(?::\d{2})?)\]\]/);
   return match ? match[1] : "";
 }
 
-export function cleanRealtimeOutlineItemText(text, maxChars = 120) {
+export function cleanRealtimeOutlineItemText(text: unknown, maxChars = 120): string {
   let value = String(text || "")
     .replace(/\[\[[^\]]+\|\d{1,2}:\d{2}(?::\d{2})?\]\]/g, "")
     // 剥掉行尾未闭合的残缺锚点（如 "[[lex-202"）——模型截断/流式半写时会漏出 [[ 却没有闭合 ]]，
@@ -299,7 +442,7 @@ export function cleanRealtimeOutlineItemText(text, maxChars = 120) {
 // 得到一个稳定 key，用于"措辞微改（加标点/空格/大小写）即视为同一条"的宽松去重。
 // 纯确定性、可 vitest；刻意不做编辑距离/语义相似（不确定、易把真正不同的话题误并）。
 // 注意虚词差异（"商业化思路" vs "商业化的思路"）不归一——宁可偶尔重复，不误并。
-export function realtimeOutlineDedupKey(text) {
+export function realtimeOutlineDedupKey(text: unknown): string {
   const cleaned = cleanRealtimeOutlineItemText(text, 200);
   return cleaned
     .toLowerCase()
@@ -307,12 +450,18 @@ export function realtimeOutlineDedupKey(text) {
     .replace(/[，。、；：！？,.;:!?（）()「」【】《》""''·…—-]/gu, "");
 }
 
-export function makeRealtimeOutlineNode(anchor, title, children, index) {
+export function makeRealtimeOutlineNode(
+  anchor: unknown,
+  title: unknown,
+  children: unknown,
+  index: unknown,
+): RealtimeOutlineNode | null {
   const safeAnchor = String(anchor || "").trim();
   const safeTitle = cleanRealtimeOutlineItemText(title, 90);
   if (!safeTitle) return null;
-  const safeChildren = [];
-  for (const child of (Array.isArray(children) ? children : [])) {
+  const safeChildren: string[] = [];
+  const childValues: unknown[] = Array.isArray(children) ? children : [];
+  for (const child of childValues) {
     const text = cleanRealtimeOutlineItemText(child, 120);
     if (text && !safeChildren.includes(text)) safeChildren.push(text);
     if (safeChildren.length >= REALTIME_OUTLINE_STATE_MAX_CHILDREN) break;
@@ -327,10 +476,10 @@ export function makeRealtimeOutlineNode(anchor, title, children, index) {
   };
 }
 
-export function parseRealtimeOutlineStateFromMarkdown(markdown) {
+export function parseRealtimeOutlineStateFromMarkdown(markdown: unknown): RealtimeOutlineNode[] {
   const lines = String(markdown || "").split(/\r?\n/);
-  const nodes = [];
-  let current = null;
+  const nodes: RealtimeOutlineNode[] = [];
+  let current: RealtimeOutlineNode | null = null;
   for (const raw of lines) {
     const line = String(raw || "");
     const child = /^ {2,}[-*+]\s+(.+)$/.exec(line);
@@ -355,28 +504,27 @@ export function parseRealtimeOutlineStateFromMarkdown(markdown) {
       continue;
     }
   }
-  // Persist every committed node. Prompt builders already clip the context
-  // handed back to the model; truncating state here would silently erase the
-  // beginning of long meetings from the user-visible outline.
+  // Prompt builders clip context independently. Persisting only the tail here
+  // would silently erase the beginning of long meetings from the visible state.
   return nodes;
 }
 
-function clipRecruitOutlineMemoryText(text, maxChars) {
+function clipRecruitOutlineMemoryText(text: unknown, maxChars: unknown): string {
   const max = Math.max(1, Math.floor(Number(maxChars) || 0));
   const cleaned = cleanRealtimeOutlineItemText(
     String(text || "").replace(/^(?:❓|💬|🤖|⛏)\s*/u, ""),
-    max + 1
+    max + 1,
   );
   if (cleaned.length <= max) return cleaned;
   if (max === 1) return "…";
   return `${cleaned.slice(0, max - 1).trimEnd()}…`;
 }
 
-function buildRecruitOutlineMemoryNodeLine(node) {
-  const title = clipRecruitOutlineMemoryText(node && node.title, 36);
+function buildRecruitOutlineMemoryNodeLine(node: RealtimeOutlineNode): string {
+  const title = clipRecruitOutlineMemoryText(node.title, 36);
   if (!title) return "";
   const labelled = { question: "", answer: "", evaluation: "", followup: "", other: "" };
-  for (const rawChild of (Array.isArray(node && node.children) ? node.children : [])) {
+  for (const rawChild of node.children) {
     const child = String(rawChild || "").trim();
     if (!child) continue;
     if (/^❓/.test(child) && !labelled.question) labelled.question = clipRecruitOutlineMemoryText(child, 64);
@@ -385,7 +533,7 @@ function buildRecruitOutlineMemoryNodeLine(node) {
     else if (/^⛏/.test(child) && !labelled.followup) labelled.followup = clipRecruitOutlineMemoryText(child, 64);
     else if (!labelled.other) labelled.other = clipRecruitOutlineMemoryText(child, 72);
   }
-  const details = [];
+  const details: string[] = [];
   if (labelled.answer) details.push(`答：${labelled.answer}`);
   if (labelled.evaluation) details.push(`判：${labelled.evaluation}`);
   if (labelled.followup) details.push(`待问：${labelled.followup}`);
@@ -394,14 +542,18 @@ function buildRecruitOutlineMemoryNodeLine(node) {
   return details.length ? `${title}｜${details.join("｜")}` : title;
 }
 
-// Recruitment memory is program-owned state derived only from already committed
-// outline nodes. The model never writes this field. Older topics are retained as
-// a compact index while recent topics keep answer/evaluation/follow-up evidence.
-export function buildRecruitRealtimeOutlineMemory(nodesOrMarkdown, opts = {}) {
+// Recruitment memory is derived only from committed nodes. Older topics remain
+// as a compact index while recent topics keep evidence and follow-up details.
+export function buildRecruitRealtimeOutlineMemory(
+  nodesOrMarkdown: readonly RealtimeOutlineNode[] | unknown,
+  opts: RecruitRealtimeOutlineMemoryOptions = {},
+): string {
   const sourceNodes = Array.isArray(nodesOrMarkdown)
-    ? nodesOrMarkdown
+    ? (nodesOrMarkdown as RealtimeOutlineNode[])
     : parseRealtimeOutlineStateFromMarkdown(nodesOrMarkdown);
-  const nodes = sourceNodes.filter((node) => node && cleanRealtimeOutlineItemText(node.title, 90));
+  const nodes = sourceNodes.filter((node): node is RealtimeOutlineNode => (
+    !!node && !!cleanRealtimeOutlineItemText(node.title, 90)
+  ));
   if (!nodes.length) return "";
 
   const maxChars = Math.max(80, Math.floor(Number(opts.maxChars) || 800));
@@ -421,12 +573,12 @@ export function buildRecruitRealtimeOutlineMemory(nodesOrMarkdown, opts = {}) {
         .map((node) => clipRecruitOutlineMemoryText(node.title, 28))
         .filter(Boolean)
         .join("、")}`,
-      historyBudget
+      historyBudget,
     );
   }
 
   let remaining = maxChars - history.length - (history ? 1 : 0);
-  const selected = [];
+  const selected: string[] = [];
   for (let index = recentLines.length - 1; index >= 0 && remaining > 0; index -= 1) {
     const separatorChars = selected.length ? 1 : 0;
     const line = recentLines[index];
@@ -449,8 +601,11 @@ export function buildRecruitRealtimeOutlineMemory(nodesOrMarkdown, opts = {}) {
 // lookback window for continuity. The returned commitThroughCount only covers
 // segments actually included in this batch, so a capped window can never skip
 // an older backlog and falsely mark it as processed.
-export function selectIncrementalRealtimeOutlineSegments(segments, opts = {}) {
-  const source = Array.isArray(segments) ? segments : [];
+export function selectIncrementalRealtimeOutlineSegments<T extends RealtimeOutlineSegmentLike>(
+  segments: readonly (T | null | undefined)[] | null | undefined,
+  opts: SelectIncrementalRealtimeOutlineOptions = {},
+): IncrementalRealtimeOutlineSelection<T> {
+  const source: readonly (T | null | undefined)[] = Array.isArray(segments) ? segments : [];
   const totalSegmentCount = source.length;
   const maxSegments = Math.max(1, Math.floor(Number(opts.maxSegments) || 10));
   const maxChars = Math.max(200, Math.floor(Number(opts.maxChars) || 6000));
@@ -460,11 +615,14 @@ export function selectIncrementalRealtimeOutlineSegments(segments, opts = {}) {
 
   const valid = source
     .map((segment, sourceIndex) => ({ segment, sourceIndex }))
-    .filter(({ segment }) => segment && String(segment.text || "").trim());
+    .filter((entry): entry is { segment: T; sourceIndex: number } => {
+      const segment = entry.segment;
+      return !!segment && !!String(segment.text || "").trim();
+    });
   const previous = valid.filter(({ sourceIndex }) => sourceIndex < sinceCount).slice(-lookbackCount);
   const pending = valid.filter(({ sourceIndex }) => sourceIndex >= sinceCount);
-  const selectedEntries = previous.slice();
-  const selectedNewEntries = [];
+  const selectedEntries: Array<{ segment: T; sourceIndex: number }> = previous.slice();
+  const selectedNewEntries: Array<{ segment: T; sourceIndex: number }> = [];
   let chars = selectedEntries.reduce((sum, item) => sum + String(item.segment.text || "").trim().length, 0);
 
   for (const item of pending) {
@@ -504,11 +662,13 @@ export function selectIncrementalRealtimeOutlineSegments(segments, opts = {}) {
   };
 }
 
-function renderRealtimeOutlineNodesMarkdown(nodes) {
+function renderRealtimeOutlineNodesMarkdown(
+  nodes: readonly RealtimeOutlineNode[] | null | undefined,
+): string {
   return (Array.isArray(nodes) ? nodes : []).map((node) => {
     const head = `- ${node.anchor ? `${node.anchor} ` : ""}${node.title}`.trimEnd();
     const children = (Array.isArray(node.children) ? node.children : [])
-      .map((child) => `  - ${child}`);
+      .map((child: string) => `  - ${child}`);
     return [head, ...children].join("\n");
   }).join("\n");
 }
@@ -518,7 +678,10 @@ function renderRealtimeOutlineNodesMarkdown(nodes) {
 // nodes with approximate anchors derived from the real transcript segments.
 // This prevents a useful outline from being rejected or merged incorrectly
 // because the model omitted, copied, repeated, or invented a timestamp.
-export function repairRealtimeOutlineAnchors(markdown, opts = {}) {
+export function repairRealtimeOutlineAnchors(
+  markdown: unknown,
+  opts: RepairRealtimeOutlineAnchorsOptions = {},
+): RepairRealtimeOutlineAnchorsResult {
   const source = String(markdown || "").trim();
   const nodes = parseRealtimeOutlineStateFromMarkdown(source);
   if (!nodes.length) {
@@ -526,7 +689,7 @@ export function repairRealtimeOutlineAnchors(markdown, opts = {}) {
   }
 
   const previousNodes = parseRealtimeOutlineStateFromMarkdown(opts.previousOutline || "");
-  const previousByTitle = new Map();
+  const previousByTitle = new Map<string, string>();
   for (const node of previousNodes) {
     const key = realtimeOutlineDedupKey(node.title);
     if (key && node.anchor && !previousByTitle.has(key)) previousByTitle.set(key, node.anchor);
@@ -543,7 +706,7 @@ export function repairRealtimeOutlineAnchors(markdown, opts = {}) {
   let restoredCount = 0;
   let replacedCount = 0;
   let unresolvedCount = 0;
-  const freshNodes = [];
+  const freshNodes: RealtimeOutlineNode[] = [];
 
   for (const node of nodes) {
     const previousAnchor = previousByTitle.get(realtimeOutlineDedupKey(node.title));
@@ -596,10 +759,13 @@ export function repairRealtimeOutlineAnchors(markdown, opts = {}) {
 // 单调 = 模型某轮漏给的子要点不会删旧的；某轮给的脏/近义子要点最多多一条噪音、不顶替历史子要点。
 // 代价（诚实）：早轮一条"错但独特"的子要点会被永久钉死（dedupKey 只挡近义、不挡内容错）——
 // 但子项不进时间轴顶层、不可点击，污染面远小于顶层，净收益为正。
-export function mergeOutlineChildrenMonotonic(existingChildren, freshChildren) {
-  const out = [];
-  const seen = new Set();
-  const push = (raw) => {
+export function mergeOutlineChildrenMonotonic(
+  existingChildren: readonly unknown[] | null | undefined,
+  freshChildren: readonly unknown[] | null | undefined,
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (raw: unknown): void => {
     const text = cleanRealtimeOutlineItemText(raw, 120);
     if (!text) return;
     const key = realtimeOutlineDedupKey(text);
@@ -624,12 +790,17 @@ export function mergeOutlineChildrenMonotonic(existingChildren, freshChildren) {
 // 升级（治"历史子要点补不全"）：不再只更新末尾节点——所有同锚点历史节点的 children 都做"单调并集合并"，
 // 但 title/anchor/time 一律保留 existing（历史冻结、抗"A 被乱改"）。这样被新话题挤下末尾的历史话题，
 // 后续轮仍能靠同锚点 fresh 补全子要点，大纲随会变厚而非停在稀薄；而 title/anchor 绝对不被模型本轮改写。
-export function mergeStableRealtimeOutlineNodes(existingNodes, freshNodes) {
-  const existing = (Array.isArray(existingNodes) ? existingNodes : []).filter(Boolean);
-  const fresh = (Array.isArray(freshNodes) ? freshNodes : []).filter(Boolean);
+export function mergeStableRealtimeOutlineNodes(
+  existingNodes: readonly (RealtimeOutlineNode | null | undefined)[] | null | undefined,
+  freshNodes: readonly (RealtimeOutlineNode | null | undefined)[] | null | undefined,
+): RealtimeOutlineNode[] {
+  const existingInput: readonly (RealtimeOutlineNode | null | undefined)[] = Array.isArray(existingNodes) ? existingNodes : [];
+  const existing = existingInput.filter((node): node is RealtimeOutlineNode => !!node);
+  const freshInput: readonly (RealtimeOutlineNode | null | undefined)[] = Array.isArray(freshNodes) ? freshNodes : [];
+  const fresh = freshInput.filter((node): node is RealtimeOutlineNode => !!node);
   if (!existing.length) return fresh;
-  const freshByTitle = new Map();
-  const freshByAnchor = new Map();
+  const freshByTitle = new Map<string, RealtimeOutlineNode>();
+  const freshByAnchor = new Map<string, RealtimeOutlineNode[]>();
   for (const node of fresh) {
     const titleKey = realtimeOutlineDedupKey(node.title);
     if (titleKey && !freshByTitle.has(titleKey)) freshByTitle.set(titleKey, node);
@@ -639,17 +810,17 @@ export function mergeStableRealtimeOutlineNodes(existingNodes, freshNodes) {
       freshByAnchor.set(node.anchor, bucket);
     }
   }
-  const existingAnchorCounts = new Map();
-  const existingCompositeKeys = new Set();
-  const existingTitles = new Set();
+  const existingAnchorCounts = new Map<string, number>();
+  const existingCompositeKeys = new Set<string>();
+  const existingTitles = new Set<string>();
   for (const node of existing) {
     const titleKey = realtimeOutlineDedupKey(node.title);
     if (titleKey) existingTitles.add(titleKey);
     if (node.anchor) existingAnchorCounts.set(node.anchor, (existingAnchorCounts.get(node.anchor) || 0) + 1);
     existingCompositeKeys.add(`${node.anchor || ""}|${titleKey}`);
   }
-  const consumedFresh = new Set();
-  const result = [];
+  const consumedFresh = new Set<RealtimeOutlineNode>();
+  const result: RealtimeOutlineNode[] = [];
   for (let i = 0; i < existing.length; i++) {
     const node = existing[i];
     const titleKey = realtimeOutlineDedupKey(node.title);
@@ -674,7 +845,7 @@ export function mergeStableRealtimeOutlineNodes(existingNodes, freshNodes) {
   }
   // 追加真正的新话题。时间锚点只表示大致区间，不是唯一键：同一三分钟
   // 分段可以有多个不同主题，按「区间 + 标题」复合键去重，绝不能只按时间吞掉后者。
-  const appendedCompositeKeys = new Set();
+  const appendedCompositeKeys = new Set<string>();
   for (const node of fresh) {
     if (consumedFresh.has(node)) continue;
     const titleKey = realtimeOutlineDedupKey(node.title);
@@ -692,7 +863,10 @@ export function mergeStableRealtimeOutlineNodes(existingNodes, freshNodes) {
 // （治"延续讨论被整轮丢光"）。**只应在处理模型本轮 fresh 输出时开启**；处理 renderRealtimeOutlineStateMarkdown
 // 产出的"已合并状态"时必须关闭（默认 false），否则会把状态里真实存在的无锚点历史顶层节点静默降级为子项、
 // 改写历史结构。顶部（首个带锚点之前）的无锚点总览行无论如何仍丢弃（挂无可挂、会挤坏时间轴）。
-export function normalizeOutlineMarkdownForDisplay(text, opts = {}) {
+export function normalizeOutlineMarkdownForDisplay(
+  text: unknown,
+  opts: NormalizeOutlineMarkdownOptions = {},
+): string {
   const attachUntimed = !!(opts && opts.attachUntimed);
   const preserveUntimedTopLevel = !!(opts && opts.preserveUntimedTopLevel);
   const src = String(text || "").trim();
@@ -704,7 +878,7 @@ export function normalizeOutlineMarkdownForDisplay(text, opts = {}) {
   });
   if (!hasTimedTopLevel) return src;
 
-  const out = [];
+  const out: string[] = [];
   let skipUntimedBlock = false;
   let afterTimedTopLevel = false;
   let seenTimedTop = false; // 是否已出现过至少一个带锚点 L1（区分"顶部总览该丢" vs "中段延续该挂"）
@@ -771,10 +945,14 @@ export function normalizeOutlineMarkdownForDisplay(text, opts = {}) {
 // freeze=false 时不冻结、本轮 fresh 完全为准（允许 covered/partial 退回 missing）——
 // 用于"早期轮"(转写还很短、模型最易误判)，让早期误判的 covered 能自我纠正，不被永久锁死；
 // 成熟轮(freeze=true)再启用单调累积防闪回。
-export function mergeCoverageNoRegress(freshDims, prevDims, freeze = true) {
-  const fresh = freshDims && typeof freshDims === "object" ? freshDims : {};
-  const prev = prevDims && typeof prevDims === "object" ? prevDims : {};
-  const out = {};
+export function mergeCoverageNoRegress(
+  freshDims: CoverageDimensions | null | undefined,
+  prevDims: CoverageDimensions | null | undefined,
+  freeze = true,
+): CoverageDimensions {
+  const fresh: CoverageDimensions = freshDims && typeof freshDims === "object" ? freshDims : {};
+  const prev: CoverageDimensions = prevDims && typeof prevDims === "object" ? prevDims : {};
+  const out: CoverageDimensions = {};
   for (const key of Object.keys(fresh)) {
     const f = fresh[key] || {};
     const p = prev[key] || null;
@@ -795,16 +973,21 @@ export function mergeCoverageNoRegress(freshDims, prevDims, freeze = true) {
 //   question 取模型 followup_question，空则回落 rules[key].fallback；
 //   排序纯按 priority 降序 → missing 先于 partial → dimOrder 原序。
 //   vague_hits 只进 reason 文案、不参与排序——避免"刚说过模糊词的软维"抢占"硬维缺失"的有限名额。
-export function deriveFollowupCards(dims, opts = {}) {
-  const d = dims && typeof dims === "object" ? dims : {};
-  const rules = opts.rules && typeof opts.rules === "object" ? opts.rules : {};
-  const dimOrder = Array.isArray(opts.dimOrder) ? opts.dimOrder : [];
-  const suppressed = opts.suppressed instanceof Set
+export function deriveFollowupCards(
+  dims: Record<string, FollowupDimension> | null | undefined,
+  opts: DeriveFollowupCardsOptions = {},
+): FollowupCard[] {
+  const d: Record<string, FollowupDimension> = dims && typeof dims === "object" ? dims : {};
+  const rules: Record<string, FollowupRule> = opts.rules && typeof opts.rules === "object" ? opts.rules : {};
+  const dimOrder: readonly FollowupDimensionMeta[] = Array.isArray(opts.dimOrder) ? opts.dimOrder : [];
+  const suppressed: ReadonlySet<string> = opts.suppressed instanceof Set
     ? opts.suppressed
-    : new Set(Array.isArray(opts.suppressed) ? opts.suppressed : []);
-  const maxCards = Number.isFinite(opts.maxCards) ? Math.max(0, opts.maxCards) : 3;
-  const statusRank = { missing: 0, partial: 1 };
-  const cards = [];
+    : new Set<string>(Array.isArray(opts.suppressed) ? opts.suppressed : []);
+  const maxCards = typeof opts.maxCards === "number" && Number.isFinite(opts.maxCards)
+    ? Math.max(0, opts.maxCards)
+    : 3;
+  const statusRank: Record<FollowupCardStatus, number> = { missing: 0, partial: 1 };
+  const cards: FollowupCard[] = [];
   for (let i = 0; i < dimOrder.length; i++) {
     const meta = dimOrder[i] || {};
     const key = meta.key;
@@ -827,7 +1010,7 @@ export function deriveFollowupCards(dims, opts = {}) {
       reason,
       vagueHits,
       question,
-      priority: Number.isFinite(rule.priority) ? rule.priority : 0,
+      priority: typeof rule.priority === "number" && Number.isFinite(rule.priority) ? rule.priority : 0,
       order: i,
     });
   }
@@ -839,7 +1022,10 @@ export function deriveFollowupCards(dims, opts = {}) {
   return cards.slice(0, maxCards);
 }
 
-export function validateRealtimeOutlineMarkdown(outline, opts = {}) {
+export function validateRealtimeOutlineMarkdown(
+  outline: unknown,
+  opts: ValidateRealtimeOutlineOptions = {},
+): RealtimeOutlineValidationResult {
   const text = String(outline || "").trim();
   const previousOutline = String(opts.previousOutline || "").trim();
   if (!text) {
@@ -848,7 +1034,7 @@ export function validateRealtimeOutlineMarkdown(outline, opts = {}) {
   const lines = text.split(/\r?\n/);
   // 只统计真·顶层项（≤1 空格缩进）。子要点缩进 ≥2 空格，绝不能算成顶层——否则富大纲会被
   // "顶层项过多(>10)" 和 "无锚点占比过高(>0.35)" 误杀，导致大纲被丢弃、永远停在稀薄状态。
-  const topBullets = [];
+  const topBullets: string[] = [];
   for (const line of lines) {
     const m = /^ {0,1}[-*+]\s+(.+)$/.exec(String(line || ""));
     if (m) topBullets.push((m[1] || "").trim());
@@ -935,7 +1121,7 @@ export function findLowEvidenceEntities(
 
 // 从 markdown 正文里抽取某标题（如 "## 岗位描述"）下的一段：取该标题之后、
 // 直到下一个"同级或更高级标题"或文件尾。找不到该标题返回 ""（回退策略由调用方决定）。
-export function extractMarkdownSection(md, heading) {
+export function extractMarkdownSection(md: unknown, heading: unknown): string {
   const text = String(md || "");
   const h = String(heading || "").trim();
   if (!h) return "";
@@ -949,7 +1135,7 @@ export function extractMarkdownSection(md, heading) {
     if (m && m[1].length === headLevel && m[2].trim() === headBody) { startIdx = i; break; }
   }
   if (startIdx < 0) return "";
-  const out = [];
+  const out: string[] = [];
   for (let i = startIdx + 1; i < lines.length; i++) {
     const m = lines[i].match(/^(#{1,6})\s+/);
     if (m && m[1].length <= headLevel) break;
@@ -961,11 +1147,11 @@ export function extractMarkdownSection(md, heading) {
 // 把 JD 的「综合素质」对象数组序列化成注入提示词的【必要素质清单】文本块。
 // 每项形如 { 素质, 定义, 信号 }（兼容 name/definition/signal）。序号即"必要素质核验表"行号
 // （提示词增 A 据此逐项产出）。无有效项返回 ""。
-export function serializeRequiredQualities(qualities) {
-  const list = Array.isArray(qualities) ? qualities : [];
-  const clean = [];
+export function serializeRequiredQualities(qualities: unknown): string {
+  const list: unknown[] = Array.isArray(qualities) ? qualities : [];
+  const clean: Array<{ name: string; def: string; signal: string }> = [];
   for (const q of list) {
-    if (!q || typeof q !== "object") continue;
+    if (!isObjectRecord(q)) continue;
     const name = String(q.素质 != null ? q.素质 : (q.name != null ? q.name : "")).trim();
     if (!name) continue;
     const def = String(q.定义 != null ? q.定义 : (q.definition != null ? q.definition : "")).trim();
@@ -986,7 +1172,7 @@ export function serializeRequiredQualities(qualities) {
 // 简历脱敏：手机号 / 身份证号 / 邮箱替换成占位符（仅作用于注入文本，原文件不动）。
 // 顺序要点：先替身份证（18 位）再替手机号——否则身份证里出生年份段（如 "1990…"）会被
 // 手机号正则先吃掉一截，导致身份证整体匹配不到而漏网；手机号再加数字边界，避免吃到长串数字的子段。
-export function desensitizeResumeText(text) {
+export function desensitizeResumeText(text: unknown): string {
   return String(text || "")
     .replace(/\d{6}(?:19|20)\d{2}(?:0\d|1[0-2])(?:[0-2]\d|3[01])\d{3}[\dXx]/g, "[身份证]")
     .replace(/(?<!\d)1[3-9]\d{9}(?!\d)/g, "[手机号]")
@@ -994,7 +1180,7 @@ export function desensitizeResumeText(text) {
 }
 
 // 项目（招聘岗位）文件夹名净化：替换 Windows/Obsidian 非法字符为短横，去首尾点和空白，空名兜底。
-export function sanitizeProjectFolderName(name) {
+export function sanitizeProjectFolderName(name: unknown): string {
   const cleaned = String(name || "")
     .replace(/[\\/:*?"<>|]/g, "-")
     .replace(/\s+/g, " ")
@@ -1014,7 +1200,7 @@ export function sanitizeProjectFolderName(name) {
 export const REPORT_BASE_ACCENT_HEX = "#E85F28";
 
 // hex → 色相(0-360)。非法返回 null。3 位/6 位都认。
-export function hexToHue(hex) {
+export function hexToHue(hex: unknown): number | null {
   let h = String(hex || "").trim().replace(/^#/, "");
   if (h.length === 3) h = h.split("").map(c => c + c).join("");
   if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
@@ -1023,7 +1209,7 @@ export function hexToHue(hex) {
   const b = parseInt(h.slice(4, 6), 16) / 255;
   const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
   if (d === 0) return 0; // 灰阶，色相无意义
-  let hue;
+  let hue: number;
   if (max === r) hue = ((g - b) / d) % 6;
   else if (max === g) hue = (b - r) / d + 2;
   else hue = (r - g) / d + 4;
@@ -1032,7 +1218,10 @@ export function hexToHue(hex) {
 }
 
 // 目标色相相对基准橙的最短旋转角（-180..180 的整数）。无法解析或同色相返回 0。
-export function reportHueDelta(targetHex, baseHex = REPORT_BASE_ACCENT_HEX) {
+export function reportHueDelta(
+  targetHex: unknown,
+  baseHex: unknown = REPORT_BASE_ACCENT_HEX,
+): number {
   const base = hexToHue(baseHex || REPORT_BASE_ACCENT_HEX);
   const tgt = hexToHue(targetHex);
   if (base == null || tgt == null) return 0;
@@ -1042,7 +1231,11 @@ export function reportHueDelta(targetHex, baseHex = REPORT_BASE_ACCENT_HEX) {
 }
 
 // 把报告 HTML 整体改色：注入 body{filter:hue-rotate(Δdeg)}。Δ=0（同色相，如默认橙）原样返回。
-export function recolorReportHtml(html, targetHex, baseHex = REPORT_BASE_ACCENT_HEX) {
+export function recolorReportHtml(
+  html: unknown,
+  targetHex: unknown,
+  baseHex: unknown = REPORT_BASE_ACCENT_HEX,
+): string {
   const s = String(html || "");
   if (!s) return s;
   const delta = reportHueDelta(targetHex, baseHex);
@@ -1050,4 +1243,3 @@ export function recolorReportHtml(html, targetHex, baseHex = REPORT_BASE_ACCENT_
   const style = `<style id="lexvoice-report-recolor">body{filter:hue-rotate(${delta}deg)}</style>`;
   return s.includes("</head>") ? s.replace("</head>", style + "</head>") : style + s;
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- end of LexVoice dynamic-typing region */

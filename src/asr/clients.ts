@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- LexVoice's settings/data layer is intentionally dynamically typed (files use @ts-nocheck and read untyped JSON from loadData); these type-only rules yield no actionable findings here and are tracked for incremental typing */
 // @ts-nocheck — JS 风格协议类（构造器赋值、无 TS 字段声明）；已用 tsc 确认无漏引用(TS2304=0)，余者皆类字段类型噪音，故与 main.ts 同档跳过。
 // 由 main.ts 抽出（模块化拆解，提升工程稳定性；纯搬迁、零行为改动）。
+import { assertSafeServiceEndpoint } from '../shared/util-llm-endpoint';
 
 export class DashScopeStreamingClient {
   constructor(opts) {
@@ -21,6 +22,7 @@ export class DashScopeStreamingClient {
     this._currentPartial = "";
   }
   async connect() {
+    assertSafeServiceEndpoint(this.endpoint, "websocket", "实时转写服务地址");
     if (!this.apiKey) throw new Error("DashScope API Key 未配置");
     let WSCtor = null;
     try {
@@ -170,6 +172,7 @@ export class OpenAIRealtimeTranscriptionClient {
     this._partialByItem = new Map();
   }
   async connect() {
+    assertSafeServiceEndpoint(this.endpoint, "websocket", "实时转写服务地址");
     if (!this.apiKey) throw new Error("OpenAI API Key 未配置");
     let WSCtor = null;
     try {
@@ -316,6 +319,7 @@ export class OpenAIRealtimeTranslationClient {
     this._translatedPartial = "";
   }
   async connect() {
+    assertSafeServiceEndpoint(this.endpointBase, "websocket", "实时翻译服务地址");
     if (!this.apiKey) throw new Error("OpenAI API Key 未配置");
     let WSCtor = null;
     try {

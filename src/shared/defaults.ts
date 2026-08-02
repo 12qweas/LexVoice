@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- LexVoice's settings/data layer is intentionally dynamically typed (files use @ts-nocheck and read untyped JSON from loadData); these type-only rules yield no actionable findings here and are tracked for incremental typing */
 // 由 main.ts 抽出（模块化拆解，提升工程稳定性；纯搬迁、零行为改动）。
+import type { PluginSettings } from "./types";
 
 export const DEFAULT_DAILY_MEETING_OVERVIEW_HEADING = "今日会议概要";
 
@@ -12,7 +13,7 @@ export const DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE = [
   "{{todos_block}}",
 ].join("\n");
 
-export const DEFAULT_SETTINGS = {
+export const DEFAULT_SETTINGS: PluginSettings = {
   audioFolder: "LexVoice/录音",
   mdFolder: "LexVoice/转写纪要",
   meetingMaterialsFolder: "LexVoice/会议资料",
@@ -185,6 +186,7 @@ export const DEFAULT_SETTINGS = {
   filterShortRecordings: true,
 
   captureMode: "mic",
+  audioChannelMode: "auto", // 自动：多声道设备保留声道，普通单声道麦克风继续使用语音增强
   selectedVirtualDevice: "",  // 用户指定的虚拟声卡 deviceId；空 = 拒绝录制并提示用户选择，插件不自动挑选设备
   selectedMicrophoneDevice: "", // 用户指定的麦克风 deviceId；空 = 使用系统默认输入（非插件挑选），选定设备不可用时直接报错不回退
 
@@ -240,6 +242,5 @@ export const DEFAULT_SETTINGS = {
   recruitHomepagePath: "",
 };
 
-// 由 DEFAULT_SETTINGS 推导的设置类型——给插件类字段上类型，让类型感知规则识别 this.settings.* 是设置项、不是 Obsidian API（渐进类型化）。
-export type LexVoiceSettings = typeof DEFAULT_SETTINGS;
+export type { LexVoiceSettings, PluginSettings } from "./types";
 /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- end of LexVoice dynamic-typing region */

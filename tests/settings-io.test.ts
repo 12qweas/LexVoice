@@ -6,6 +6,37 @@ vi.mock("obsidian", () => ({
   TFolder: class TFolder {},
 }));
 
+vi.mock("../src/shared/settings-runtime-deps", () => ({
+  normalizeAudioInputMode: (value: unknown) => {
+    if (value === "mix") return "mix-virtual";
+    if (value === "system") return "virtualCable";
+    return value === "mic" || value === "mix-virtual" || value === "virtualCable" ? value : "mic";
+  },
+  normalizeAsrConcurrency: (value: unknown) => {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(1, Math.min(3, Math.floor(number))) : 1;
+  },
+  normalizeLlmProfiles: (value: unknown) => Array.isArray(value)
+    ? value.filter(item => item !== null && typeof item === "object")
+    : [],
+  normalizePeopleContextMode: (value: unknown) =>
+    value === "hotwords" || value === "localFull" ? value : "privacy",
+  normalizePeopleSuggestionIgnores: (value: unknown) => Array.isArray(value) ? value : [],
+  normalizePeopleSuggestionCache: (value: unknown) => {
+    if (value !== null && typeof value === "object" && "pending" in value && Array.isArray(value.pending)) return value;
+    return { pending: [] };
+  },
+  isCustomPromptModeTemplate: (value: unknown) => {
+    if (value === null || typeof value !== "object") return false;
+    const template = value as { customMode?: unknown; id?: unknown; mode?: unknown };
+    return template.customMode === true && typeof template.id === "string" && template.id === template.mode;
+  },
+  normalizeKnowledgeExtractionHistory: (value: unknown) => {
+    if (value !== null && typeof value === "object" && "vocabulary" in value && "people" in value) return value;
+    return { vocabulary: {}, people: {} };
+  },
+}));
+
 import {
   SETTINGS_SCHEMA_VERSION,
   extractLexVoiceJobItems,
@@ -13,14 +44,15 @@ import {
   serializeLexVoiceSettings,
 } from "../src/shared/settings-io";
 import { DEFAULT_SETTINGS } from "../src/shared/defaults";
+import type { PluginSettings } from "../src/shared/types";
 
 // 模拟真实的「保存 → 落盘 → 重启读回」链路：
 // saveAll 写 { settings: serialize(...) } 且经过 JSON 深拷贝落盘（saveData），
 // loadAll 再 normalizeLexVoiceSettings(saved)。JSON round-trip 能同时暴露 undefined 被丢弃等问题。
 // （saveAll 里的 API Key 混淆层 transformApiKeyFieldsDeep 包在 serialize 之外、读回时先解混淆，
 // 对 normalize/serialize 本身是透明的，故这里按明文测试。）
-function roundTrip(settings: any) {
-  const persisted = JSON.parse(JSON.stringify({ settings: serializeLexVoiceSettings(settings) }));
+function roundTrip(settings: PluginSettings): PluginSettings {
+  const persisted = JSON.parse(JSON.stringify({ settings: serializeLexVoiceSettings(settings) })) as unknown;
   return normalizeLexVoiceSettings(persisted);
 }
 
@@ -166,6 +198,160 @@ describe("settings-io round-trip（白名单防丢键兜底）", () => {
     expect(b.recruitJdFolderPath).toBe("岗位JD");
 
     expect(b.floatingBallPos).toEqual({ left: 10, top: 20 });
+  });
+
+  it("坏 JSON 字段不能污染核心设置，且同组的合法字段仍可读取", () => {
+    const settings = normalizeLexVoiceSettings({
+      settings: {
+        storage: {
+          recordingLibraryPath: 42,
+          briefingNotePath: "合法/纪要",
+          autoImportInbox: "false",
+          syncQuietMs: Number.POSITIVE_INFINITY,
+        },
+        capture: {
+          sourceMode: "not-a-mode",
+          liveSegmentsEnabled: "yes",
+          segmentMinutes: "10",
+        },
+        speech: {
+          activeProviderId: { polluted: true },
+          providers: {
+            siliconflow: { apiKey: 123, model: "合法模型" },
+            broken: "not-an-object",
+          },
+        },
+        composer: {
+          endpoint: [],
+          structureLevel: "extreme",
+          thinkingMode: 99,
+          industryProfile: { industry: ["bad"], focus: "合法焦点" },
+        },
+        ui: {
+          bubbleSize: "huge",
+          floatingControlPosition: { left: "10", top: 25 },
+        },
+        updates: {
+          lastCheckedAt: 123,
+          available: { version: "2.0.0", files: "not-an-array" },
+        },
+        quickDictation: {
+          asr: { endpoint: { bad: true }, model: "qd-model" },
+          target: "file",
+        },
+      },
+    });
+
+    expect(settings.audioFolder).toBe(DEFAULT_SETTINGS.audioFolder);
+    expect(settings.mdFolder).toBe("合法/纪要");
+    expect(settings.inboxAutoImport).toBe(DEFAULT_SETTINGS.inboxAutoImport);
+    expect(settings.inboxStabilizeDelayMs).toBe(DEFAULT_SETTINGS.inboxStabilizeDelayMs);
+    expect(settings.captureMode).toBe(DEFAULT_SETTINGS.captureMode);
+    expect(settings.enableInterimOutput).toBe(DEFAULT_SETTINGS.enableInterimOutput);
+    expect(settings.segmentIntervalMinutes).toBe(DEFAULT_SETTINGS.segmentIntervalMinutes);
+    expect(settings.activeTranscribeProvider).toBe(DEFAULT_SETTINGS.activeTranscribeProvider);
+    expect(settings.transcribeProviders.siliconflow.apiKey).toBe(DEFAULT_SETTINGS.transcribeProviders.siliconflow.apiKey);
+    expect(settings.transcribeProviders.siliconflow.model).toBe("合法模型");
+    expect(settings.transcribeProviders.broken).toBeUndefined();
+    expect(settings.llmEndpoint).toBe(DEFAULT_SETTINGS.llmEndpoint);
+    expect(settings.briefingStructureLevel).toBe(DEFAULT_SETTINGS.briefingStructureLevel);
+    expect(settings.thinkingMode).toBe(DEFAULT_SETTINGS.thinkingMode);
+    expect(settings.industryProfile.industry).toBe(DEFAULT_SETTINGS.industryProfile.industry);
+    expect(settings.industryProfile.focus).toBe("合法焦点");
+    expect(settings.bubbleSize).toBe(DEFAULT_SETTINGS.bubbleSize);
+    expect(settings.floatingBallPos).toEqual({ left: DEFAULT_SETTINGS.floatingBallPos.left, top: 25 });
+    expect(settings.lastUpdateCheckAt).toBe(DEFAULT_SETTINGS.lastUpdateCheckAt);
+    expect(settings.availableUpdate).toBeNull();
+    expect(settings.quickDictationAsr).toEqual({ endpoint: "", apiKey: "", model: "qd-model", language: "" });
+    expect(settings.quickDictationTarget).toBe(DEFAULT_SETTINGS.quickDictationTarget);
+  });
+
+  it("旧版扁平字段继续迁移，包含 provider 与旧 prompt 覆盖", () => {
+    const settings = normalizeLexVoiceSettings({
+      audioFolder: "旧版/录音",
+      inboxAutoImport: false,
+      captureMode: "system",
+      transcribeApiKey: "legacy-asr-key",
+      transcribeModel: "legacy-asr-model",
+      transcribeProviders: {
+        legacyCustom: {
+          name: "旧服务",
+          endpoint: "https://legacy.example/asr",
+          apiKey: "legacy-provider-key",
+          model: "legacy-provider-model",
+        },
+      },
+      polishPromptMeeting: "旧版会议提示词",
+      quickDictationPrompt: "旧版快速口述提示词",
+      quickDictationTarget: "clipboard",
+    });
+
+    expect(settings.audioFolder).toBe("旧版/录音");
+    expect(settings.inboxAutoImport).toBe(false);
+    expect(settings.captureMode).toBe("virtualCable");
+    expect(settings.transcribeProviders.legacyCustom).toMatchObject({
+      name: "旧服务",
+      endpoint: "https://legacy.example/asr",
+      apiKey: "legacy-provider-key",
+      model: "legacy-provider-model",
+    });
+    expect(settings.transcribeProviders.siliconflow.apiKey).toBe("legacy-asr-key");
+    expect(settings.transcribeProviders.siliconflow.model).toBe("legacy-asr-model");
+    expect(settings.promptTemplates["builtin-meeting"].prompt).toBe("旧版会议提示词");
+    expect(settings.quickDictationPrompt).toBe("旧版快速口述提示词");
+    expect(settings.quickDictationTarget).toBe("clipboard");
+  });
+
+  it("prompt/provider/招聘上下文/更新状态等合法结构 round-trip 后保持", () => {
+    const settings = normalizeLexVoiceSettings({});
+    settings.transcribeProviders.enterprise = {
+      name: "企业 ASR",
+      endpoint: "https://enterprise.example/asr",
+      apiKey: "enterprise-key",
+      model: "enterprise-model",
+      language: "zh",
+      protocol: "openai-compatible",
+      targetLanguage: "en",
+      hint: "internal",
+    };
+    settings.promptTemplates["meeting-custom"] = {
+      id: "meeting-custom",
+      mode: "meeting",
+      name: "会议自定义模板",
+      prompt: "保留决策和待办",
+      description: "测试模板",
+      isBuiltin: false,
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-02T00:00:00.000Z",
+    };
+    settings.activeTemplateByMode.meeting = "meeting-custom";
+    settings.recruitFeatureUnlocked = true;
+    settings.recruitContext = {
+      ...settings.recruitContext,
+      jd: "岗位职责",
+      candidateName: "候选人甲",
+      requiredQualities: [{ 素质: "判断力", 定义: "做出好决策", 信号: "权衡充分" }],
+    };
+    settings.recruitContextLibrary = [{ ...settings.recruitContext, id: "ctx-1", type: "saved" }];
+    settings.availableUpdate = {
+      version: "2.0.0",
+      currentVersion: "1.14.0",
+      rawBaseUrl: "https://example.invalid/raw",
+      manifestUrl: "https://example.invalid/manifest.json",
+      checkedAt: "2025-02-01T00:00:00.000Z",
+      files: ["main.js", "manifest.json"],
+    };
+    settings.lastUpdateCheckAt = "2025-02-01T00:00:00.000Z";
+
+    const restored = roundTrip(settings);
+
+    expect(restored.transcribeProviders.enterprise).toEqual(settings.transcribeProviders.enterprise);
+    expect(restored.promptTemplates["meeting-custom"]).toEqual(settings.promptTemplates["meeting-custom"]);
+    expect(restored.activeTemplateByMode.meeting).toBe("meeting-custom");
+    expect(restored.recruitContext).toEqual(settings.recruitContext);
+    expect(restored.recruitContextLibrary).toEqual(settings.recruitContextLibrary);
+    expect(restored.availableUpdate).toEqual(settings.availableUpdate);
+    expect(restored.lastUpdateCheckAt).toBe(settings.lastUpdateCheckAt);
   });
 
   it("二次 round-trip 稳定（不会每次保存都漂移一点）", () => {

@@ -6,7 +6,31 @@ vi.mock("obsidian", () => ({
   TFolder: class TFolder {},
 }));
 
-import { getTranscribeRequestTimeoutMs } from "../src/asr/transcribe";
+import { getTranscribeRequestTimeoutMs, requestApimimoAsrChunk, transcribeAudio } from "../src/asr/transcribe";
+
+describe("transcribeAudio endpoint security", () => {
+  it("上传音频前阻止公网 HTTP 端点", async () => {
+    const provider = {
+      id: "custom",
+      name: "自定义转写",
+      endpoint: "http://asr.example.com/v1/audio/transcriptions",
+      apiKey: "secret",
+      model: "model",
+    };
+    await expect(transcribeAudio({ settings: {} }, new Blob(["audio"]), "audio/webm", provider))
+      .rejects.toThrow("公网地址必须使用 HTTPS");
+  });
+
+  it("APIMiMo 底层请求也会在读取和编码音频前阻止公网 HTTP", async () => {
+    const arrayBuffer = vi.fn();
+    await expect(requestApimimoAsrChunk(
+      { apiKey: "secret", model: "mimo-v2.5-asr" },
+      { blob: { size: 5, arrayBuffer }, mime: "audio/webm" },
+      "http://asr.example.com/v1/chat/completions",
+    )).rejects.toThrow("公网地址必须使用 HTTPS");
+    expect(arrayBuffer).not.toHaveBeenCalled();
+  });
+});
 
 describe("getTranscribeRequestTimeoutMs", () => {
   it("本地服务固定 10 分钟，与体积无关", () => {

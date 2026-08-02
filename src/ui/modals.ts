@@ -13,6 +13,7 @@ import { callLlm } from '../llm/core';
 import { mimeFromExt } from '../shared/util-audio';
 import { listJDProjects } from '../recruit/jd-projects';
 import { getBuiltInVisiblePolishModeKeys, getCustomPromptModeTemplates, getEffectivePolishMode, getModeMeta, getVisibleModeEntries, isCustomPromptModeTemplate, makeCustomPromptModeId, sanitizePromptTemplate, setLexVoiceModePillIcon } from '../shared/mode-meta';
+import { getActivityStagePosition } from '../shared/activity-progress';
 
 export function pickReportAccentColor(app, defaultHex) {
   return new Promise((resolve) => {
@@ -22,7 +23,7 @@ export function pickReportAccentColor(app, defaultHex) {
     let settled = false;
     const finish = (val) => { if (settled) return; settled = true; resolve(val); try { modal.close(); } catch { /* intentionally empty */ } };
     const wrap = modal.contentEl.createDiv({ cls: "lexvoice-color-pick" });
-    wrap.createEl("p", { cls: "lexvoice-color-hint", text: "报告按所选色相整体重新着色，纯白弥散风格不变。可多次生成不同配色（文件名自动加序号，不覆盖旧的）。" });
+    wrap.createEl("p", { cls: "lexvoice-color-hint", text: "报告会使用所选颜色，版式保持不变。可重复生成，不会覆盖已有文件。" });
     const sw = wrap.createDiv({ cls: "lexvoice-color-swatches" });
     const presets = [["暖橙（默认）", "#E85F28"], ["宝石蓝", "#2F6BD8"], ["青墨", "#138A8A"], ["松绿", "#3B9A4B"], ["藕紫", "#7A4AD8"], ["玫红", "#D8407E"], ["棕金", "#B5811A"], ["石墨蓝", "#54627A"]];
     const swatchEls = [];
@@ -396,7 +397,15 @@ export class PeopleDirectorySuggestionModal extends obsidian.Modal {
 }
 
 export class QueueModal extends obsidian.Modal {
-  constructor(app, plugin) { super(app); this.plugin = plugin; }
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+    this._expandedStages = new Set();
+    this._collapsedStages = new Set();
+    this._expandedActivities = new Set();
+    this._collapsedActivities = new Set();
+    this._lastActiveStage = "";
+  }
   onOpen() {
     const { contentEl } = this;
     // 静态 Modal 默认停在打开瞬间；处理中时定时重渲染让进度实时走动。先清旧定时器避免叠加。
@@ -412,6 +421,55 @@ export class QueueModal extends obsidian.Modal {
     const detail = this.plugin.getCurrentActivityDetail ? this.plugin.getCurrentActivityDetail() : null;
     const activityLabel = this.plugin.getCurrentActivityLabel ? this.plugin.getCurrentActivityLabel() : null;
     const active = !!(detail || activityLabel);
+    const activeLiveness = detail && detail.liveness ? String(detail.liveness) : (active ? "running" : "done");
+    const sessionId = this.plugin.session && this.plugin.session.id ? String(this.plugin.session.id) : "";
+    const currentActivityIds = new Set(sessionId && active
+      ? [`import:${sessionId}`, `finalize:${sessionId}`]
+      : []);
+    const taskActivities = (this.plugin.getTaskActivities
+      ? this.plugin.getTaskActivities({ includeDone: true, includeCancelled: false })
+      : [])
+      .filter((task) => task && !String(task.kind || "").startsWith("queue-"))
+      .filter((task) => !currentActivityIds.has(String(task.id || "")));
+    const taskProblems = taskActivities.filter((task) => ["failed", "stalled"].includes(String(task.status || "")));
+    const taskActive = taskActivities.filter((task) => ["queued", "running", "waiting", "slow", "stalled", "retrying"].includes(String(task.status || "")));
+    const taskDone = taskActivities.filter((task) => task.status === "done");
+    const headLiveness = taskProblems.length
+      ? "failed"
+      : active
+        ? activeLiveness
+        : taskActive.length
+          ? String(taskActive[0].status || "running")
+          : running.length
+            ? "running"
+            : pending.length
+              ? "retrying"
+              : "done";
+    const headActive = active || taskActive.length > 0 || running.length > 0;
+    const livenessLabel = (state) => ({
+      queued: "等待处理",
+      pending: "尚未开始",
+      running: "正常运行",
+      waiting: "等待服务响应",
+      slow: "响应较慢",
+      stalled: "可能卡住",
+      retrying: "等待重试",
+      failed: "已失败",
+      cancelled: "已取消",
+      done: "已完成",
+    }[state] || "处理中");
+    const livenessDetail = (state) => ({
+      queued: "任务已经登记，等待可用处理槽位",
+      pending: "前置步骤完成后自动开始",
+      running: "最近仍有明确进展",
+      waiting: "请求已经发出，服务尚未返回结果",
+      slow: "请求仍在执行，但等待时间已经明显变长",
+      stalled: "已经超过本阶段的预期截止时间，正在等待超时机制收口",
+      retrying: "本次请求未成功，已按退避规则等待下一次请求",
+      failed: "本阶段未得到可用结果",
+      cancelled: "任务已由用户取消",
+      done: "本阶段已经完成",
+    }[state] || "");
 
     const fmtDur = (ms) => { const s = Math.max(0, Math.round(Number(ms) / 1000)); if (s < 60) return `${s}秒`; const m = Math.floor(s / 60), r = s % 60; if (m < 60) return r ? `${m}分${r}秒` : `${m}分`; const h = Math.floor(m / 60), rm = m % 60; return rm ? `${h}时${rm}分` : `${h}时`; };
     const fmtTime = (ms) => { try { return window.moment ? window.moment(ms).format("HH:mm:ss") : new Date(ms).toLocaleTimeString(); } catch { return ""; } };
@@ -424,32 +482,77 @@ export class QueueModal extends obsidian.Modal {
     const head = contentEl.createDiv({ cls: "lexvoice-progress-head" });
     const titleRow = head.createDiv({ cls: "lexvoice-progress-title-row" });
     titleRow.createSpan({ cls: "lexvoice-progress-title", text: "处理进度" });
-    titleRow.createSpan({ cls: `lexvoice-progress-state${active ? " is-active" : ""}`, text: active ? "正在处理…" : "空闲" });
+    titleRow.createSpan({
+      cls: `lexvoice-progress-state is-${headLiveness}${headActive ? " is-active" : ""}`,
+      text: taskProblems.length
+        ? `${taskProblems.length} 个任务需要处理`
+        : headActive
+          ? livenessLabel(headLiveness)
+          : "空闲",
+      attr: { "aria-live": "polite" },
+    });
 
-    if (!running.length && !pending.length && !completed.length && !active) {
+    if (!running.length && !pending.length && !completed.length && !active && !taskActivities.length) {
       contentEl.createDiv({ cls: "lexvoice-progress-empty", text: "暂无处理任务。录音转写、AI 整理、重试任务的进度会显示在这里。" });
       return;
     }
 
     // —— 进度条 + 概要 ——
-    const doneCount = completed.length;
-    const activeCount = (active ? 1 : 0) + running.length;
-    const total = doneCount + activeCount + pending.length;
-    let doneEquiv = doneCount;
-    if (detail && Number.isFinite(Number(detail.percent))) doneEquiv += Math.max(0, Math.min(1, Number(detail.percent) / 100));
-    else if (activeCount) doneEquiv += 0.4;
-    const percent = total ? Math.round(Math.min(100, (doneEquiv / total) * 100)) : 0;
+    const doneCount = completed.length + taskDone.length;
+    const activeCount = (active ? 1 : 0) + running.length + taskActive.length;
+    const total = completed.length + (active ? 1 : 0) + running.length + pending.length + taskActivities.length;
+    const stagePosition = getActivityStagePosition(detail && detail.stages);
+    const hasStageProgress = stagePosition.total > 0;
+    const hasNumericProgress = !!(detail && Number.isFinite(Number(detail.percent)));
+    let percent = 0;
+    let indeterminate = false;
+    if (hasStageProgress) {
+      const currentFraction = hasNumericProgress
+        ? Math.max(0, Math.min(1, Number(detail.percent) / 100))
+        : 0;
+      percent = Math.round(Math.min(100, ((stagePosition.completed + currentFraction) / stagePosition.total) * 100));
+      indeterminate = active && (!hasNumericProgress || Number(detail.percent) <= 0);
+    } else {
+      const taskProgressEquiv = taskActivities.reduce((sum, task) => {
+        if (task.status === "done") return sum + 1;
+        if (Number.isFinite(Number(task.progress))) {
+          return sum + Math.max(0, Math.min(1, Number(task.progress) / 100));
+        }
+        return sum;
+      }, 0);
+      const doneEquiv = completed.length
+        + taskProgressEquiv
+        + (hasNumericProgress ? Math.max(0, Math.min(1, Number(detail.percent) / 100)) : 0);
+      percent = total ? Math.round(Math.min(100, (doneEquiv / total) * 100)) : 0;
+      indeterminate = activeCount > 0
+        && !hasNumericProgress
+        && !taskActivities.some((task) => Number.isFinite(Number(task.progress)));
+    }
     const _tm = this.plugin._taskMeter;
     const tmTok = _tm ? (Number(_tm.exactTokens) > 0 ? Number(_tm.exactTokens) : Math.round(((Number(_tm.inChars) || 0) + (Number(_tm.outChars) || 0)) / 2)) : 0;
     const tmTokLabel = tokenLabel(tmTok, !!(_tm && _tm.hasExact && Number(_tm.exactTokens) > 0));
 
-    const bar = head.createDiv({ cls: "lexvoice-progress-bar" });
-    bar.createDiv({ cls: `lexvoice-progress-bar-fill${active ? " is-active" : ""}` }).style.width = percent + "%";
+    const canAnimateProgress = headActive
+      && !["stalled", "failed", "done"].includes(headLiveness);
+    const bar = head.createDiv({ cls: `lexvoice-progress-bar is-${headLiveness}` });
+    bar.createDiv({
+      cls: `lexvoice-progress-bar-fill is-${headLiveness}${canAnimateProgress ? " is-active" : ""}`,
+    }).style.width = percent + "%";
+    if (indeterminate && canAnimateProgress) {
+      bar.createDiv({ cls: "lexvoice-progress-bar-motion", attr: { "aria-hidden": "true" } });
+    }
     const sum = head.createDiv({ cls: "lexvoice-progress-summary" });
-    sum.createSpan({ cls: "lexvoice-progress-summary-left", text: `已完成 ${doneCount} / ${total}` });
+    sum.createSpan({
+      cls: "lexvoice-progress-summary-left",
+      text: hasStageProgress
+        ? `第 ${stagePosition.current} / ${stagePosition.total} 步 · ${detail.step || "处理中"}`
+        : `已完成 ${doneCount} / ${total}`,
+    });
     const metaParts = [];
-    if (detail && detail.kind) metaParts.push(detail.kind);
-    if (_tm && _tm.startedAt) metaParts.push(fmtDur(Date.now() - _tm.startedAt));
+    if (detail && detail.count) metaParts.push(detail.count);
+    else if (detail && detail.kind) metaParts.push(detail.kind);
+    const activityStartedAt = detail && Number(detail.startedAt) > 0 ? Number(detail.startedAt) : (_tm && _tm.startedAt);
+    if (activityStartedAt) metaParts.push(`已用时 ${fmtDur(Date.now() - activityStartedAt)}`);
     if (tmTokLabel) metaParts.push(`${tmTokLabel} token`);
     if (metaParts.length) sum.createSpan({ cls: "lexvoice-progress-summary-right", text: metaParts.join(" · ") });
 
@@ -466,6 +569,133 @@ export class QueueModal extends obsidian.Modal {
     };
     const subLine = (bodyEl, text) => { if (text) bodyEl.createDiv({ cls: "lexvoice-progress-sub", text }); };
 
+    if (taskActivities.length) {
+      list.createDiv({ cls: "lexvoice-progress-section-title", text: "任务状态" });
+      const activityList = list.createDiv({ cls: "lexvoice-progress-activity-list" });
+      for (const activity of taskActivities) {
+        const state = String(activity.status || "queued");
+        const activityId = String(activity.id || "");
+        const item = activityList.createEl("details", {
+          cls: `lexvoice-progress-activity is-${state}`,
+        });
+        const shouldAutoOpen = !["done", "cancelled"].includes(state);
+        item.open = this._expandedActivities.has(activityId)
+          || (shouldAutoOpen && !this._collapsedActivities.has(activityId));
+        const summaryEl = item.createEl("summary", { cls: "lexvoice-progress-activity-summary" });
+        summaryEl.onclick = (event) => {
+          event.preventDefault();
+          if (item.open) {
+            this._expandedActivities.delete(activityId);
+            this._collapsedActivities.add(activityId);
+          } else {
+            this._expandedActivities.add(activityId);
+            this._collapsedActivities.delete(activityId);
+          }
+          this.onOpen();
+        };
+
+        const icon = summaryEl.createSpan({ cls: `lexvoice-progress-activity-icon is-${state}`, attr: { "aria-hidden": "true" } });
+        const iconName = state === "done" ? "circle-check"
+          : ["failed", "stalled"].includes(state) ? "triangle-alert"
+            : state === "retrying" ? "refresh-cw"
+              : state === "slow" ? "clock-3"
+                : state === "queued" ? "clock"
+                  : state === "waiting" ? "hourglass" : "activity";
+        try { obsidian.setIcon(icon, iconName); } catch { icon.setText(["failed", "stalled"].includes(state) ? "!" : ""); }
+
+        const summaryCopy = summaryEl.createSpan({ cls: "lexvoice-progress-activity-copy" });
+        summaryCopy.createSpan({ cls: "lexvoice-progress-activity-title", text: activity.title || "后台任务" });
+        summaryCopy.createSpan({
+          cls: "lexvoice-progress-activity-stage",
+          text: [activity.stageLabel, activity.count].filter(Boolean).join(" · ") || livenessDetail(state),
+        });
+        summaryEl.createSpan({ cls: `lexvoice-progress-activity-state is-${state}`, text: livenessLabel(state) });
+
+        const panel = item.createDiv({ cls: "lexvoice-progress-activity-panel" });
+        if (activity.detail) panel.createDiv({ cls: "lexvoice-progress-activity-detail", text: activity.detail });
+
+        if (Number.isFinite(Number(activity.progress))) {
+          const taskProgress = Math.max(0, Math.min(100, Number(activity.progress)));
+          const taskBar = panel.createDiv({ cls: `lexvoice-progress-activity-progress is-${state}` });
+          taskBar.createDiv({ cls: "lexvoice-progress-activity-progress-fill" }).style.width = `${taskProgress}%`;
+          panel.createDiv({ cls: "lexvoice-progress-activity-progress-label", text: `${Math.round(taskProgress)}%` });
+        }
+
+        const facts = [];
+        if (Number(activity.startedAt) > 0) facts.push(["开始", fmtTime(Number(activity.startedAt))]);
+        if (Number(activity.updatedAt) > 0) facts.push(["最近活动", `${fmtDur(Date.now() - Number(activity.updatedAt))}前`]);
+        if (Number(activity.startedAt) > 0 && !["done", "cancelled"].includes(state)) {
+          facts.push(["已运行", fmtDur(Date.now() - Number(activity.startedAt))]);
+        }
+        if (Number(activity.retryAt) > Date.now()) facts.push(["再次尝试", `${fmtDur(Number(activity.retryAt) - Date.now())}后`]);
+        if (Number(activity.attempt) > 0) {
+          facts.push(["尝试次数", activity.maxAttempts > 0
+            ? `${activity.attempt}/${activity.maxAttempts}`
+            : String(activity.attempt)]);
+        }
+        if (activity.subject) {
+          const subject = String(activity.subject);
+          const shortSubject = subject.split(/[\\/]/).pop() || subject;
+          facts.push(["对象", shortSubject]);
+        }
+        if (facts.length) {
+          const factGrid = panel.createDiv({ cls: "lexvoice-progress-activity-facts" });
+          for (const [label, value] of facts) {
+            const fact = factGrid.createDiv({ cls: "lexvoice-progress-activity-fact" });
+            fact.createSpan({ cls: "lexvoice-progress-activity-fact-label", text: label });
+            fact.createSpan({ cls: "lexvoice-progress-activity-fact-value", text: value });
+          }
+        }
+
+        if (activity.error) {
+          const errorBox = panel.createDiv({ cls: "lexvoice-progress-activity-error", attr: { role: "alert" } });
+          const errorHead = errorBox.createDiv({ cls: "lexvoice-progress-activity-error-head" });
+          const errorIcon = errorHead.createSpan({ cls: "lexvoice-progress-activity-error-icon", attr: { "aria-hidden": "true" } });
+          try { obsidian.setIcon(errorIcon, "triangle-alert"); } catch { errorIcon.setText("!"); }
+          errorHead.createSpan({ text: "未完成原因" });
+          errorBox.createDiv({ cls: "lexvoice-progress-activity-error-message", text: String(activity.error) });
+          const hint = this.plugin.getTaskActivityErrorHint
+            ? this.plugin.getTaskActivityErrorHint(activity)
+            : "";
+          if (hint) errorBox.createDiv({ cls: "lexvoice-progress-activity-error-hint", text: hint });
+        }
+
+        if (Array.isArray(activity.events) && activity.events.length) {
+          const chain = panel.createDiv({ cls: "lexvoice-progress-activity-chain" });
+          chain.createDiv({ cls: "lexvoice-progress-section-label", text: "最近链路" });
+          for (const event of activity.events.slice(-5).reverse()) {
+            const row = chain.createDiv({ cls: "lexvoice-progress-event" });
+            row.createSpan({ cls: "lexvoice-progress-event-time", text: fmtTime(Number(event.at) || Date.now()) });
+            const eventCopy = row.createSpan({ cls: "lexvoice-progress-event-copy" });
+            eventCopy.createSpan({ cls: "lexvoice-progress-event-label", text: String(event.label || "状态已更新") });
+            if (event.detail) eventCopy.createSpan({ cls: "lexvoice-progress-event-detail", text: String(event.detail) });
+          }
+        }
+
+        if (Array.isArray(activity.actions) && activity.actions.length) {
+          const actions = panel.createDiv({ cls: "lexvoice-progress-activity-actions" });
+          for (const action of activity.actions) {
+            const button = actions.createEl("button", {
+              cls: `lexvoice-progress-btn${action.primary ? " mod-cta" : ""}`,
+              text: action.label,
+              attr: { type: "button" },
+            });
+            button.onclick = async (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              button.disabled = true;
+              try {
+                await this.plugin.handleTaskActivityAction(activity.id, action.id);
+              } finally {
+                this.onOpen();
+              }
+            };
+          }
+        }
+      }
+    }
+
+    if (completed.length) list.createDiv({ cls: "lexvoice-progress-section-title", text: "最近完成" });
     for (const c of completed) {
       const { ico, body } = makeRow("done");
       try { obsidian.setIcon(ico.createSpan({ cls: "lexvoice-progress-check" }), "check"); } catch { /* intentionally empty */ }
@@ -475,18 +705,183 @@ export class QueueModal extends obsidian.Modal {
     }
 
     if (active) {
+      list.createDiv({ cls: "lexvoice-progress-section-title", text: "当前处理步骤" });
       const { ico, body } = makeRow("running");
-      ico.createSpan({ cls: "lexvoice-progress-spinner" });
+      if (["failed", "stalled"].includes(activeLiveness)) {
+        const stateIcon = ico.createSpan({ cls: `lexvoice-progress-task-state is-${activeLiveness}` });
+        try { obsidian.setIcon(stateIcon, "triangle-alert"); } catch { stateIcon.setText("!"); }
+      } else if (activeLiveness === "done") {
+        const stateIcon = ico.createSpan({ cls: "lexvoice-progress-task-state is-done" });
+        try { obsidian.setIcon(stateIcon, "check"); } catch { stateIcon.setText("✓"); }
+      } else {
+        ico.createSpan({ cls: `lexvoice-progress-spinner is-${activeLiveness}` });
+      }
       const sess = this.plugin.session;
       const fileName = sess && sess.mdPath ? String(sess.mdPath).split(/[\\/]/).pop().replace(/\.md$/i, "") : "";
       const name = fileName || (detail ? [detail.kind, detail.modeLabel].filter(Boolean).join(" · ") : activityLabel) || "处理中";
-      const right = (_tm && _tm.startedAt) ? [fmtDur(Date.now() - _tm.startedAt), tmTokLabel].filter(Boolean).join(" · ") : "";
+      const detailStartedAt = detail && Number(detail.startedAt) > 0 ? Number(detail.startedAt) : (_tm && _tm.startedAt);
+      const right = detailStartedAt ? [fmtDur(Date.now() - detailStartedAt), tmTokLabel].filter(Boolean).join(" · ") : "";
       titleLine(body, name, right, false);
       const stepBase = detail ? (detail.step || detail.kind || "处理中") : (activityLabel || "处理中");
       const pctTxt = detail && Number.isFinite(Number(detail.percent)) ? `（${Math.round(Number(detail.percent))}%）` : "";
       subLine(body, `${stepBase}${pctTxt}${detail && detail.count ? " · " + detail.count : ""}`);
+      if (detail && detail.stepDetail) {
+        body.createDiv({ cls: "lexvoice-progress-detail", text: detail.stepDetail });
+      }
+
+      if (detail && Array.isArray(detail.stages) && detail.stages.length) {
+        const activeStage = detail.stages.find((stage) => stage && stage.status === "active");
+        const activeStageId = activeStage ? String(activeStage.id || "") : "";
+        if (activeStageId && activeStageId !== this._lastActiveStage) {
+          this._lastActiveStage = activeStageId;
+          this._expandedStages.add(activeStageId);
+          this._collapsedStages.delete(activeStageId);
+        }
+        const stages = body.createDiv({
+          cls: "lexvoice-progress-stages",
+          attr: { "aria-label": "处理步骤" },
+        });
+        for (let index = 0; index < detail.stages.length; index++) {
+          const stage = detail.stages[index];
+          const stageId = String(stage.id || `stage-${index}`);
+          const stageLiveness = String(stage.liveness || (stage.status === "done" ? "done" : stage.status === "pending" ? "pending" : "running"));
+          const item = stages.createEl("details", {
+            cls: `lexvoice-progress-stage is-${stage.status || "pending"} is-${stageLiveness}`,
+          });
+          const shouldAutoOpen = stage.status === "active"
+            || ["failed", "stalled"].includes(stageLiveness);
+          const shouldOpen = this._expandedStages.has(stageId)
+            || (shouldAutoOpen && !this._collapsedStages.has(stageId));
+          item.open = shouldOpen;
+          const summaryEl = item.createEl("summary", { cls: "lexvoice-progress-stage-summary" });
+          summaryEl.onclick = (event) => {
+            event.preventDefault();
+            if (item.open) {
+              this._expandedStages.delete(stageId);
+              this._collapsedStages.add(stageId);
+            } else {
+              this._expandedStages.add(stageId);
+              this._collapsedStages.delete(stageId);
+            }
+            this.onOpen();
+          };
+          const marker = summaryEl.createSpan({ cls: "lexvoice-progress-stage-marker", attr: { "aria-hidden": "true" } });
+          const iconName = stageLiveness === "done" ? "check"
+            : stageLiveness === "failed" || stageLiveness === "stalled" ? "triangle-alert"
+              : stageLiveness === "retrying" ? "refresh-cw"
+                : stageLiveness === "slow" ? "clock-3"
+                  : "";
+          if (iconName) {
+            try { obsidian.setIcon(marker, iconName); } catch { marker.setText(stageLiveness === "done" ? "✓" : "!"); }
+          } else if (stage.status === "active") {
+            marker.createSpan({ cls: "lexvoice-progress-stage-pulse" });
+          } else {
+            marker.setText(String(index + 1));
+          }
+          const stageCopy = summaryEl.createSpan({ cls: "lexvoice-progress-stage-copy" });
+          stageCopy.createSpan({ cls: "lexvoice-progress-stage-label", text: stage.label || `步骤 ${index + 1}` });
+          if (stage.summary) stageCopy.createSpan({ cls: "lexvoice-progress-stage-summary-text", text: stage.summary });
+          summaryEl.createSpan({
+            cls: `lexvoice-progress-stage-state is-${stageLiveness}`,
+            text: livenessLabel(stageLiveness),
+          });
+
+          const panel = item.createDiv({ cls: "lexvoice-progress-stage-panel" });
+          if (stage.detail) panel.createDiv({ cls: "lexvoice-progress-stage-description", text: stage.detail });
+          const facts = [];
+          if (Number(stage.startedAt) > 0) facts.push(["开始", fmtTime(Number(stage.startedAt))]);
+          if (Number(stage.updatedAt) > 0) facts.push(["最近事件", `${fmtDur(Date.now() - Number(stage.updatedAt))}前`]);
+          if (Number(stage.startedAt) > 0 && stage.status === "active") facts.push(["本阶段", fmtDur(Date.now() - Number(stage.startedAt))]);
+          if (facts.length) {
+            const factGrid = panel.createDiv({ cls: "lexvoice-progress-stage-facts" });
+            for (const [factLabel, factValue] of facts) {
+              const fact = factGrid.createDiv({ cls: "lexvoice-progress-stage-fact" });
+              fact.createSpan({ cls: "lexvoice-progress-stage-fact-label", text: factLabel });
+              fact.createSpan({ cls: "lexvoice-progress-stage-fact-value", text: factValue });
+            }
+          }
+
+          if (Array.isArray(stage.requests) && stage.requests.length) {
+            const requestSection = panel.createDiv({ cls: "lexvoice-progress-requests" });
+            requestSection.createDiv({ cls: "lexvoice-progress-section-label", text: "分段请求" });
+            const requestList = requestSection.createDiv({ cls: "lexvoice-progress-request-list" });
+            for (const request of stage.requests) {
+              const requestState = String(request.liveness || "pending");
+              const requestRow = requestList.createDiv({ cls: `lexvoice-progress-request is-${requestState}` });
+              const requestHead = requestRow.createDiv({ cls: "lexvoice-progress-request-head" });
+              requestHead.createSpan({
+                cls: "lexvoice-progress-request-title",
+                text: `第 ${Number(request.chunkIndex) + 1}/${Math.max(1, Number(request.chunkCount) || 1)} 段`,
+              });
+              const attemptText = Number(request.attempt) > 0
+                ? `第 ${Number(request.attempt)}/${Math.max(Number(request.attempt), Number(request.maxAttempts) || 1)} 次`
+                : "";
+              if (attemptText) requestHead.createSpan({ cls: "lexvoice-progress-request-attempt", text: attemptText });
+              requestHead.createSpan({
+                cls: `lexvoice-progress-request-state is-${requestState}`,
+                text: livenessLabel(requestState),
+              });
+              const requestMeta = [];
+              if (Number(request.startedAt) > 0 && !["pending", "done"].includes(requestState)) {
+                requestMeta.push(`已等待 ${fmtDur(Date.now() - Number(request.startedAt))}`);
+              }
+              if (Number(request.receivedChars) > 0) requestMeta.push(`已收到约 ${Number(request.receivedChars)} 字`);
+              if (Number(request.retryAt) > Date.now()) requestMeta.push(`${fmtDur(Number(request.retryAt) - Date.now())}后重试`);
+              if (Number(request.deadlineAt) > 0 && !["done", "failed", "retrying"].includes(requestState)) {
+                const deadlineDelta = Number(request.deadlineAt) - Date.now();
+                requestMeta.push(deadlineDelta >= 0
+                  ? `最迟约 ${fmtDur(deadlineDelta)} 后返回或超时`
+                  : `已超过截止 ${fmtDur(Math.abs(deadlineDelta))}`);
+              }
+              if (requestMeta.length) requestRow.createDiv({ cls: "lexvoice-progress-request-meta", text: requestMeta.join(" · ") });
+              if (request.error) requestRow.createDiv({ cls: "lexvoice-progress-request-error", text: String(request.error) });
+            }
+          }
+
+          if (Array.isArray(stage.events) && stage.events.length) {
+            const eventSection = panel.createDiv({ cls: "lexvoice-progress-events" });
+            eventSection.createDiv({ cls: "lexvoice-progress-section-label", text: "最近事件" });
+            for (const event of stage.events.slice().reverse()) {
+              const eventRow = eventSection.createDiv({ cls: "lexvoice-progress-event" });
+              eventRow.createSpan({ cls: "lexvoice-progress-event-time", text: fmtTime(Number(event.at) || Date.now()) });
+              const eventCopy = eventRow.createSpan({ cls: "lexvoice-progress-event-copy" });
+              eventCopy.createSpan({ cls: "lexvoice-progress-event-label", text: String(event.label || "状态已更新") });
+              if (event.detail) eventCopy.createSpan({ cls: "lexvoice-progress-event-detail", text: String(event.detail) });
+            }
+          }
+        }
+      }
+
+      if (detail) {
+        const now = Date.now();
+        const stageStartedAt = Number(detail.stageStartedAt) || Number(detail.startedAt) || 0;
+        const updatedAt = Number(detail.updatedAt) || stageStartedAt;
+        const liveState = String(detail.liveness || "running");
+        const live = body.createDiv({ cls: `lexvoice-progress-live is-${liveState}` });
+        const liveIcon = live.createSpan({ cls: "lexvoice-progress-live-icon", attr: { "aria-hidden": "true" } });
+        const liveIconName = liveState === "done" ? "circle-check"
+          : liveState === "failed" || liveState === "stalled" ? "triangle-alert"
+            : liveState === "retrying" ? "refresh-cw"
+              : liveState === "slow" ? "clock-3" : "activity";
+        try { obsidian.setIcon(liveIcon, liveIconName); } catch { /* intentionally empty */ }
+        const liveParts = [];
+        if (stageStartedAt) liveParts.push(`本步骤已进行 ${fmtDur(now - stageStartedAt)}`);
+        if (updatedAt) liveParts.push(`最近事件在 ${fmtDur(now - updatedAt)}前`);
+        const liveCopy = live.createSpan({ cls: "lexvoice-progress-live-copy" });
+        liveCopy.createSpan({ cls: "lexvoice-progress-live-title", text: livenessLabel(liveState) });
+        liveCopy.createSpan({
+          cls: "lexvoice-progress-live-text",
+          text: [livenessDetail(liveState), liveParts.join(" · ")].filter(Boolean).join(" · "),
+        });
+        if (detail.backgroundHint) {
+          body.createDiv({ cls: "lexvoice-progress-background-hint", text: detail.backgroundHint });
+        }
+      }
     }
 
+    if (running.length || pending.length) {
+      list.createDiv({ cls: "lexvoice-progress-section-title", text: "转写重试队列" });
+    }
     for (const t of running) {
       const { ico, body } = makeRow("running");
       ico.createSpan({ cls: "lexvoice-progress-spinner" });
@@ -522,15 +917,17 @@ export class QueueModal extends obsidian.Modal {
           `取消后这 ${n} 个任务不再自动重试，对应纪要将停留在当前状态。缓存音频会暂时保留，处理中的任务不受影响。`,
           "取消重试");
         if (!ok) return;
-        this.plugin.queue.tasks = this.plugin.queue.tasks.filter((t) => t && (t.status === "running" || t.status === "live"));
-        await this.plugin.saveAll();
+        const cancellable = this.plugin.queue.tasks.filter((t) => t && t.status !== "running" && t.status !== "live");
+        for (const task of cancellable) {
+          await this.plugin.queue.remove(task.id);
+        }
         this.plugin.renderStatusBar();
         this.onOpen();
       };
     }
 
     // 处理中时每 1.2s 重渲染，让步骤名/百分比实时更新；空闲即停止刷新。
-    if (active || running.length) {
+    if (active || running.length || taskActive.length) {
       this._activityTimer = window.setInterval(() => { try { this.onOpen(); } catch { /* intentionally empty */ } }, 1200);
     }
   }
@@ -757,7 +1154,7 @@ export class RecruitContextModal extends obsidian.Modal {
     // —— JD 区块 ——
     const jdSec = contentEl.createDiv({ cls: "lexvoice-recruit-section" });
     const jdHead = jdSec.createDiv({ cls: "lexvoice-recruit-section-head" });
-    jdHead.createEl("label", { text: "📋 岗位 JD（强烈建议）", cls: "lexvoice-recruit-label-strong" });
+    jdHead.createEl("label", { text: "岗位 JD", cls: "lexvoice-recruit-label-strong" });
     if (getRecruitJdLibrary(this.plugin.settings).length > 0) {
       const libBtn = jdHead.createEl("button", { text: "从历史 JD 选择…", cls: "lexvoice-recruit-lib-btn" });
       libBtn.onclick = () => this.openLibrary();
@@ -778,13 +1175,13 @@ export class RecruitContextModal extends obsidian.Modal {
       sel.value = this.ctx.jdFile || "";
       sel.addEventListener("change", () => { void this.applyJdProjectSelection(sel.value); });
       this._jdProjectSel = sel;
-      const saveBtn = projRow.createEl("button", { text: "＋ 存为招聘项目", cls: "lexvoice-recruit-lib-btn" });
+      const saveBtn = projRow.createEl("button", { text: "存为招聘项目", cls: "lexvoice-recruit-lib-btn" });
       saveBtn.onclick = () => this.saveAsProject();
     }
 
     const jdTa = jdSec.createEl("textarea", { cls: "lexvoice-recruit-textarea lexvoice-recruit-textarea-large" });
     jdTa.value = this.ctx.jd;
-    jdTa.placeholder = "粘贴完整 JD 文本，含岗位职责、任职要求、加分项等。\n整理时会从中拆解硬性要求作为评分锚点。";
+    jdTa.placeholder = "粘贴完整 JD，包含岗位职责、任职要求和加分项等。\n整理时会将这些内容作为评估依据。";
     jdTa.addEventListener("input", () => { this.ctx.jd = jdTa.value; this.clearCachedInterviewBrief(); });
     this.formEls.jd = jdTa;
 
@@ -811,7 +1208,7 @@ export class RecruitContextModal extends obsidian.Modal {
           pdfSel.value = "";
           if (!p) return;
           const file = this.app.vault.getAbstractFileByPath(p);
-          new obsidian.Notice("正在尽力提取 PDF 文本…");
+          new obsidian.Notice("正在读取 PDF…");
           let text = await extractPdfTextBestEffort(this.app, file);
           if (!text || text.trim().length < 50) {
             new obsidian.Notice("该 PDF 没有可提取的文本（可能是扫描件），请手动粘贴简历内容", 7000);
@@ -869,7 +1266,7 @@ export class RecruitContextModal extends obsidian.Modal {
     const askLabel = askRow.createEl("label");
     const askCb = askLabel.createEl("input", { attr: { type: "checkbox" } });
     askCb.checked = this.plugin.settings.recruitAlwaysAskOnStart !== false;
-    askLabel.appendText(" 开始招聘录音前总是弹出本窗口（关闭后沿用上次保存的上下文；可在实时面板的招聘卡片「编辑」中改回）");
+    askLabel.appendText(" 每次开始招聘录音前显示此页面（关闭后使用上次保存的信息，可在侧边栏重新编辑）");
     askCb.onchange = async () => {
       this.plugin.settings.recruitAlwaysAskOnStart = !!askCb.checked;
       await this.plugin.saveSettings();
@@ -887,7 +1284,7 @@ export class RecruitContextModal extends obsidian.Modal {
     const saveOnlyBtn = actions.createEl("button", { text: this.copy.draftText });
     saveOnlyBtn.onclick = async () => {
       const added = await this.saveCurrentContext(true);
-      new obsidian.Notice(added ? "已保存招聘上下文草稿，JD 已加入历史" : "已保存招聘上下文草稿");
+      new obsidian.Notice(added ? "招聘评估信息已保存，JD 已加入历史" : "招聘评估信息已保存");
     };
 
     const startBtn = actions.createEl("button", { text: this.copy.primaryText, cls: "mod-cta" });
@@ -1041,7 +1438,7 @@ export class RecruitContextModal extends obsidian.Modal {
     const statusInp = mk("状态", "招聘中", "招聘中 / 已关闭 / 暂停");
     const actions = sub.contentEl.createDiv({ cls: "lexvoice-recruit-actions" });
     actions.createEl("button", { text: "取消" }).onclick = () => sub.close();
-    const ok = actions.createEl("button", { text: "创建三件套", cls: "mod-cta" });
+    const ok = actions.createEl("button", { text: "创建项目", cls: "mod-cta" });
     ok.onclick = async () => {
       const name = String(nameInp.value || "").trim();
       if (!name) { new obsidian.Notice("请填职位名"); return; }
@@ -1049,7 +1446,7 @@ export class RecruitContextModal extends obsidian.Modal {
         const res = await createRecruitProject(
           this.app, this.plugin.settings.recruitJdFolderPath, name,
           { 职位名: name, 序列: seqInp.value, 状态: statusInp.value }, jdText);
-        new obsidian.Notice(`已创建招聘项目：${res.name}（JD + 候选人看板）`);
+        new obsidian.Notice(`已创建招聘项目：${res.name}`);
         sub.close();
         this.ctx.jdFile = res.mdPath;
         if (!this.ctx.position) this.ctx.position = name;
@@ -1507,7 +1904,7 @@ export class ImportTextModal extends obsidian.Modal {
     if (!this.modeHint) return;
     const meta = getModeMeta(this.plugin.settings, this.selectedMode);
     if (this.selectedMode === "recruit") {
-      this.modeHint.setText("招聘评估会在开始整理前弹出 JD / 简历 / 候选人信息窗口，文本内容会和岗位上下文一起进入整理链路。");
+      this.modeHint.setText("招聘评估会在整理前请你确认岗位 JD、简历和候选人信息。");
       this.modeHint.addClass("is-recruit");
     } else {
       this.modeHint.removeClass("is-recruit");
@@ -1665,7 +2062,7 @@ export class ImportAudioModal extends obsidian.Modal {
     this.fileCheckboxes = new Map();
     contentEl.createEl("h2", { text: "导入音频" });
     const desc = contentEl.createEl("p", { cls: "lexvoice-import-desc" });
-    desc.setText(`从 ${this.plugin.settings.audioFolder} 选择音频。支持 WebM、M4A/MP4、MP3、WAV、AAC、OGG、FLAC 等格式；LexVoice 切片会自动按一次录音折叠成批次。`);
+    desc.setText(`从 ${this.plugin.settings.audioFolder} 选择音频。支持 WebM、M4A/MP4、MP3、WAV、AAC、OGG、FLAC 等格式；同一次录音的分段会合并显示。`);
 
     this.renderModeControl(contentEl);
 
@@ -2098,7 +2495,7 @@ export class BubbleWidget {
           try { span.scrollLeft = span.scrollWidth; } catch { /* intentionally empty */ } // 长句超宽时滚到句尾，始终露最新
         } else {
           // 批量：说完才出字，用「聆听中…」占位 + 光标。
-          zone.createSpan({ cls: "lexvoice-qd-listen-label", text: "聆听中…" });
+          zone.createSpan({ cls: "lexvoice-qd-listen-label", text: "正在录音…" });
           zone.createSpan({ cls: "lexvoice-qd-caret" });
         }
       } else if (qd.state === "done") {

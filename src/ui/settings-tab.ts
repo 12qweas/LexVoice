@@ -18,13 +18,62 @@ import { hasPeopleHotwordsConsent, loadPeopleDirectory, normalizePeopleContextMo
 import { isRecruitFeatureUnlocked } from '../recruit';
 import { LEXVOICE_UPDATE_REPO_URL, audioInputModeLabel, countKnowledgeExtractionHistory, enumerateAudioDevices, isVirtualCableLabel, lexvoiceConfirm, lexvoicePromptText, normalizeAudioInputMode, openLexVoiceExternalUrl, openLexVoicePickListModal, pluginBasePath, resolveUpdateRawBases, trashLexVoiceFile } from './helpers';
 import { PeopleHotwordsConsentModal, PromptTemplateModal, QueueModal, VirtualCableSetupModal } from './modals';
+import {
+  DEFAULT_SPEAKER_CHANNELS,
+  MAX_SPEAKER_CHANNELS,
+  buildMicrophoneAudioConstraints,
+  configureMicrophoneTrackChannels,
+  normalizeAudioChannelMode,
+} from '../audio/channel-speakers';
+import { analyzeRecordedAudioChannels } from '../asr/channel-transcription';
+
+function pickChannelProbeMime() {
+  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
+  return candidates.find((mime) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(mime)) || "";
+}
+
+async function recordChannelProbe(stream, durationMs = 5000) {
+  if (typeof MediaRecorder === "undefined") throw new Error("当前环境不支持录音文件检测");
+  const mimeType = pickChannelProbeMime();
+  const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+  const chunks = [];
+  return new Promise((resolve, reject) => {
+    let timer = 0;
+    recorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) chunks.push(event.data);
+    };
+    recorder.onerror = (event) => {
+      if (timer) window.clearTimeout(timer);
+      reject(event && event.error ? event.error : new Error("录音采样失败"));
+    };
+    recorder.onstop = () => {
+      if (timer) window.clearTimeout(timer);
+      const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || "audio/webm" });
+      if (!blob.size) reject(new Error("录音采样为空，请确认麦克风有输入"));
+      else resolve(blob);
+    };
+    recorder.start(250);
+    timer = window.setTimeout(() => {
+      if (recorder.state !== "inactive") recorder.stop();
+    }, Math.max(2000, Number(durationMs) || 5000));
+  });
+}
+
+function renderChannelProbeRows(container, rows) {
+  container.empty();
+  for (const row of rows) {
+    const line = container.createDiv({ cls: `lexvoice-audio-channel-result-row ${row.state ? `is-${row.state}` : ""}` });
+    line.createSpan({ cls: "lexvoice-audio-channel-result-label", text: row.label });
+    line.createSpan({ cls: "lexvoice-audio-channel-result-value", text: row.value });
+  }
+}
 
 export const LV_SETTINGS_TABS = [
   { id: "home",     label: "LexVoice" },
   { id: "general",  label: "常规" },
   { id: "api",      label: "API" },
   { id: "ai",       label: "AI 整理" },
-  { id: "knowledge", label: "信息对象" },
+  { id: "knowledge", label: "资料库" },
   { id: "advanced", label: "进阶" },
   { id: "updates",  label: "更新" },
 ];
@@ -185,7 +234,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     this.plugin.refreshOutlineView();
     this.renderSettings();
     this.showHrUnlockFireworks();
-    new obsidian.Notice("尊贵的内部用户，您已成功解锁 LexVoice 4 HR", 6000);
+    new obsidian.Notice("招聘功能已启用", 6000);
   }
 
   showHrUnlockFireworks() {
@@ -209,9 +258,9 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     });
 
     const card = burst.createDiv({ cls: "lexvoice-hr-unlock-card" });
-    card.createDiv({ cls: "lexvoice-hr-unlock-kicker", text: "尊贵的内部用户" });
-    card.createDiv({ cls: "lexvoice-hr-unlock-title", text: "您已成功解锁 LexVoice 4 HR" });
-    card.createDiv({ cls: "lexvoice-hr-unlock-copy", text: "招聘评估模式已加入下拉，可在提示词管理中调整。" });
+    card.createDiv({ cls: "lexvoice-hr-unlock-kicker", text: "招聘功能" });
+    card.createDiv({ cls: "lexvoice-hr-unlock-title", text: "招聘评估已启用" });
+    card.createDiv({ cls: "lexvoice-hr-unlock-copy", text: "现在可以在模板中选择招聘评估。" });
 
     window.setTimeout(() => burst.remove(), 2000);
   }
@@ -363,34 +412,34 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     titleLine.createDiv({ cls: "lexvoice-home-version", text: this.plugin.manifest.version || "" });
     head.createDiv({
       cls: "lexvoice-home-summary",
-      text: "在 Obsidian 桌面端完成录音、转写与 AI 整理：支持后台录制、流式或切片转写，自动按业务模式整理为可检索的 Markdown 纪要。配置纪要转写服务即可使用；如需结构化纪要、待办与翻译，再配置 AI 整理服务。",
+      text: "录音、转写并整理为 Markdown 纪要。配置转写服务即可开始；需要结构化纪要、问一问和沉淀时，再配置 AI 整理服务。",
     });
     const primary = head.createDiv({ cls: "lexvoice-home-actions" });
-    const apiBtn = primary.createEl("button", { text: "配置 API" });
+    const apiBtn = primary.createEl("button", { text: "配置服务" });
     apiBtn.addClass("mod-cta");
     apiBtn.onclick = () => jump("api");
-    const quickBtn = primary.createEl("button", { text: "使用入门配置" });
+    const quickBtn = primary.createEl("button", { text: "使用推荐配置" });
     quickBtn.onclick = async () => {
-      const ok = await lexvoiceConfirm(this.app, "切换为入门配置？",
-        "将把转写服务切换为硅基流动（其服务地址、模型恢复推荐值），大模型服务地址切换为硅基流动。已填写的访问密钥保留，其他服务的配置不会删除。",
+      const ok = await lexvoiceConfirm(this.app, "使用推荐配置？",
+        "转写与 AI 整理将切换为硅基流动的推荐设置。已填写的 API Key 和其他服务配置会保留。",
         "切换");
       if (!ok) return;
       await this.applyBeginnerDefaults();
-      new obsidian.Notice("已切换为入门连接配置：硅基流动转写 + 硅基流动大模型服务。请填写访问密钥和模型标识后测试连接。", 7000);
+      new obsidian.Notice("已应用推荐配置。请填写 API Key 和模型名称，然后测试连接。", 7000);
       jump("api");
     };
     const aiBtn = primary.createEl("button", { text: hasLlm ? "AI 整理设置" : "配置 AI 整理" });
     aiBtn.onclick = () => jump(hasLlm ? "ai" : "api");
-    const panelBtn = primary.createEl("button", { text: "打开实时纪要面板" });
+    const panelBtn = primary.createEl("button", { text: "打开 LexVoice 侧边栏" });
     panelBtn.onclick = () => this.plugin.openOutlineView();
 
     // 快速配置：MiMo / 硅基流动等"一个 Key 同时跑转写 + AI 整理"的供应商，填一次即可两边都配好。
     const oneCard = page.createDiv({ cls: "lexvoice-home-block lexvoice-home-onecard" });
-    oneCard.createEl("h3", { text: "快速配置" });
-    oneCard.createDiv({ cls: "lexvoice-home-prep-desc", text: "选一个同时支持语音转写和 AI 整理的服务，填一次 Key、点应用，自动把「转写服务」和「大模型服务」都配好，并在「API」页存成一套可切换的方案。" });
+    oneCard.createEl("h3", { text: "快速设置" });
+    oneCard.createDiv({ cls: "lexvoice-home-prep-desc", text: "选择服务商并填写 API Key，可同时配置转写和 AI 整理。" });
     let oneCardProviderId = "mimo";
     let oneCardKey = "";
-    const oneCardRow = new obsidian.Setting(oneCard).setName("供应商 + 密钥");
+    const oneCardRow = new obsidian.Setting(oneCard).setName("服务商与 API Key");
     oneCardRow.addDropdown(d => {
       for (const id of Object.keys(ONE_CARD_PROVIDERS)) d.addOption(id, ONE_CARD_PROVIDERS[id].label);
       d.setValue(oneCardProviderId);
@@ -406,7 +455,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       const cfg = ONE_CARD_PROVIDERS[oneCardProviderId];
       const done = await this.applyOneCardProvider(oneCardProviderId, oneCardKey);
       if (done) {
-        new obsidian.Notice(cfg.applyDesc + " 已存为方案，可在「API」页顶部切换。点「检测」可测连通性。", 8000);
+        new obsidian.Notice(cfg.applyDesc + " 已保存，可在「API」页切换或测试连接。", 8000);
         this.renderSettings();
       }
     }));
@@ -419,7 +468,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     }));
 
     const prep = page.createDiv({ cls: "lexvoice-home-block" });
-    prep.createEl("h3", { text: "前置准备" });
+    prep.createEl("h3", { text: "使用准备" });
     const prepGrid = prep.createDiv({ cls: "lexvoice-home-prep-grid" });
     const prepItems = [
       {
@@ -433,7 +482,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         statusClass: hasSpeechProvider ? "is-ready" : "is-required",
       },
       {
-        name: "AI 整理服务（LLM）",
+        name: "AI 整理服务",
         need: "推荐",
         price: "按量付费",
         desc: "将原始转写整理为会议纪要、待办或访谈记录。未配置时仅保留转写文本，不会进行结构化整理。",
@@ -446,7 +495,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         name: "电脑音频捕获",
         need: "会议/视频适用",
         price: "可免费",
-        desc: "仅录本人声音时无需配置。要录会议对方声音、B 站客户端、浏览器视频或课程音频，需安装虚拟声卡把电脑播放的声音引入录音，并保证耳机/扬声器仍正常出声。详见「电脑音频指引」。",
+        desc: "录制电脑声音需要虚拟声卡。选择包含电脑音频的录音来源后，在「设置电脑音频」中完成配置。",
         action: "查看设备指引",
         target: "advanced",
         status: "按需准备",
@@ -479,10 +528,10 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     const better = page.createDiv({ cls: "lexvoice-home-block" });
     better.createEl("h3", { text: "进阶能力" });
     const betterRows = [
-      ["转写提示词", "在 AI 整理中管理内置提示词和自定义提示词；自定义提示词会出现在录音、导入和重新整理的选择列表里。", hasLlm ? "去管理" : "先配大模型", hasLlm ? "ai" : "api"],
+      ["整理提示词", "管理内置和自定义提示词。自定义提示词会出现在录音、导入和重新整理的选择列表中。", hasLlm ? "管理提示词" : "配置 AI 整理", hasLlm ? "ai" : "api"],
       ["多语种会议整理", "在 AI 整理中启用纪要翻译，可由大模型在整理阶段统一输出至目标语言，或保留关键原文形成双语纪要。", "去设置", "ai"],
-      ["纪要信息对象", "从纪要中沉淀 ASR 热词、人员资料、学习卡片和待办卡片。纪要负责追溯，对象负责复用和检索。", "打开信息对象", "knowledge"],
-      ["自动更新", "从 LexVoice 官方 GitHub 仓库检查新版本并增量更新；本地设置、保存路径与自定义提示词不会被覆盖。", "去更新", "updates"],
+      ["资料库", "从纪要中沉淀转写词表、人员资料、学习卡片和待办。纪要用于追溯，资料用于复用和检索。", "打开资料库", "knowledge"],
+      ["自动更新", "检查并安装 LexVoice 新版本；本地设置、保存路径与自定义提示词不会被覆盖。", "检查更新", "updates"],
     ];
     for (const [name, desc, btnText, target] of betterRows) {
       new obsidian.Setting(better)
@@ -546,15 +595,15 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     selectEl.value = selected || "";
 
     if (selected && !hasSelected) {
-      hintEl.setText("当前已选设备可能已断开。请重新选择。");
+      hintEl.setText("所选麦克风未连接，请重新选择。");
     } else if (info.permissionRequired) {
-      hintEl.setText("设备名可能为空：请授予麦克风权限后再选择麦克风。");
+      hintEl.setText("需要麦克风权限才能显示设备名称。");
     } else if (allInputs.length === 0) {
-      hintEl.setText("未检测到任何音频输入设备。请检查系统输入设备和麦克风权限。");
+      hintEl.setText("未找到音频输入设备。请检查系统设置和麦克风权限。");
     } else if (selected) {
-      hintEl.setText("本人声音会从这只麦克风录入。");
+      hintEl.setText("使用此设备录音。");
     } else {
-      hintEl.setText("未选择时使用系统默认输入。若系统默认是虚拟声卡（如 CABLE Output），录到的将是电脑声音而非人声；要录自己说话，请在此明确选定麦克风。");
+      hintEl.setText("使用系统默认输入设备。录制人声时，建议明确选择麦克风。");
     }
   }
 
@@ -598,7 +647,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     if (selected && !hasSelected) {
       hintEl.setText("当前已选电脑音频设备可能已断开。请重新选择。");
     } else if (allInputs.length === 0) {
-      hintEl.setText("未检测到任何音频输入。请先按「电脑音频指引」安装虚拟声卡（CABLE Output / BlackHole 等）并把系统输出路由进去。");
+      hintEl.setText("未找到电脑音频输入。请先设置虚拟声卡。");
     } else if (selected) {
       hintEl.setText("电脑播放的声音会从这个输入录入。");
     } else {
@@ -612,14 +661,14 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
 
     const head = card.createDiv({ cls: "lexvoice-audio-input-head" });
     const actions = head.createDiv({ cls: "lexvoice-audio-input-actions" });
-    this.createAudioInputButton(actions, "自动推荐（可再调整）", async () => {
+    this.createAudioInputButton(actions, "自动设置", async () => {
       await this.autoConfigureAudioInput();
       this.renderSettings();
     });
-    this.createAudioInputButton(actions, "设备检测", async () => {
+    this.createAudioInputButton(actions, "测试设备", async () => {
       await this.runAudioDiagnostic();
     });
-    this.createAudioInputButton(actions, "电脑音频指引", () => new VirtualCableSetupModal(this.app, this.plugin).open());
+    this.createAudioInputButton(actions, "设置电脑音频", () => new VirtualCableSetupModal(this.app, this.plugin).open());
 
     const grid = card.createDiv({ cls: "lexvoice-audio-input-grid" });
 
@@ -637,10 +686,10 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     });
     const modeHint = modeField.createDiv({ cls: "lexvoice-audio-input-hint" });
     modeHint.setText(mode === "mic"
-      ? "只录本人说话，适合线下会议或独白。"
+      ? "录制所选麦克风。"
       : mode === "virtualCable"
-        ? "只录电脑声音，适合视频、课程、B 站客户端或浏览器音频。"
-        : "同时录本人说话和电脑声音，适合线上会议或边听边讲解。");
+        ? "录制电脑播放的声音。"
+        : "同时录制麦克风和电脑声音。");
 
     // 麦克风选择器：仅麦克风 / 混合模式下显示（仅电脑音频模式不需要麦克风）
     if (mode === "mic" || mode === "mix-virtual") {
@@ -656,6 +705,112 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         new obsidian.Notice(micSelect.value ? "麦克风选择已保存" : "请选择一个麦克风");
       });
       void this.populateAudioInputMicSelect(micSelect, micHint);
+    }
+
+    if (mode === "mic" && !isLexVoiceMobileRuntime()) {
+      const channelField = grid.createDiv({ cls: "lexvoice-audio-input-field lexvoice-audio-channel-field" });
+      const titleRow = channelField.createDiv({ cls: "lexvoice-audio-channel-title-row" });
+      titleRow.createDiv({ cls: "lexvoice-audio-input-label", text: "录音声道" });
+      const titleActions = titleRow.createDiv({ cls: "lexvoice-audio-channel-title-actions" });
+      const channelModeSelect = titleActions.createEl("select", {
+        cls: "dropdown lexvoice-audio-channel-mode",
+        attr: { "aria-label": "录音声道模式" },
+      });
+      channelModeSelect.createEl("option", { value: "auto", text: "自动" });
+      channelModeSelect.createEl("option", { value: "mono", text: "单声道" });
+      channelModeSelect.createEl("option", { value: "multichannel", text: "多声道" });
+      channelModeSelect.value = normalizeAudioChannelMode(this.plugin.settings.audioChannelMode);
+      channelModeSelect.addEventListener("change", async () => {
+        this.plugin.settings.audioChannelMode = normalizeAudioChannelMode(channelModeSelect.value);
+        await this.plugin.saveSettings();
+        this.renderSettings();
+      });
+      const detectButton = titleActions.createEl("button", {
+        cls: "lexvoice-audio-channel-detect",
+        text: "测试",
+        attr: { type: "button" },
+      });
+      const channelHint = channelField.createDiv({ cls: "lexvoice-audio-input-hint lexvoice-audio-channel-hint" });
+      const selectedChannelMode = normalizeAudioChannelMode(this.plugin.settings.audioChannelMode);
+      channelHint.setText(selectedChannelMode === "mono"
+        ? "将所有输入合并为一个声道。"
+        : selectedChannelMode === "multichannel"
+          ? "保留每个声道，分别转写为不同说话人。"
+          : "自动识别单声道或多声道。");
+      const channelResult = channelField.createDiv({ cls: "lexvoice-audio-channel-result" });
+      detectButton.onclick = async () => {
+        detectButton.disabled = true;
+        detectButton.setText("正在测试…");
+        renderChannelProbeRows(channelResult, [
+          { label: "测试", value: "请分别对每支麦克风说话", state: "running" },
+        ]);
+        let stream = null;
+        try {
+          const selected = String(this.plugin.settings.selectedMicrophoneDevice || "").trim();
+          const audio = buildMicrophoneAudioConstraints({
+            deviceId: selected,
+            channelMode: selectedChannelMode,
+            targetChannels: MAX_SPEAKER_CHANNELS,
+          });
+          stream = await navigator.mediaDevices.getUserMedia({ audio });
+          const info = await configureMicrophoneTrackChannels(
+            stream.getAudioTracks()[0],
+            selectedChannelMode,
+            MAX_SPEAKER_CHANNELS,
+          );
+          const probeBlob = await recordChannelProbe(stream, 5000);
+          const analysis = await analyzeRecordedAudioChannels(probeBlob);
+          const activeChannels = analysis.channels
+            .slice(0, MAX_SPEAKER_CHANNELS)
+            .filter((item) => item.active)
+            .map((item) => `声道 ${item.channel}`);
+          let contentStatus = "未确认";
+          let contentState = "warning";
+          if (analysis.separation === "separated") {
+            contentStatus = "已分离";
+            contentState = "success";
+          } else if (analysis.separation === "duplicated") {
+            contentStatus = "内容相同";
+            contentState = "warning";
+          } else if (analysis.separation === "single") {
+            contentStatus = "单声道";
+            contentState = "muted";
+          }
+          renderChannelProbeRows(channelResult, [
+            { label: "输入设备", value: `${info.channelCount} 个声道`, state: info.channelCount > 1 ? "success" : "muted" },
+            { label: "测试录音", value: `${analysis.channelCount} 个声道`, state: analysis.channelCount > 1 ? "success" : "muted" },
+            { label: "检测到声音", value: activeChannels.length ? activeChannels.join("、") : "无", state: activeChannels.length ? "success" : "warning" },
+            { label: "说话人区分", value: contentStatus, state: contentState },
+          ]);
+          if (analysis.separation === "separated") {
+            channelHint.setText("测试通过。各声道将分别标记为说话人1、说话人2……");
+            channelField.addClass("is-multichannel");
+            channelField.removeClass("is-channel-warning");
+          } else if (analysis.separation === "duplicated") {
+            channelHint.setText("各声道内容相同。请在接收器上把输出改为「Stereo（立体声）」后重试。");
+            channelField.removeClass("is-multichannel");
+            channelField.addClass("is-channel-warning");
+          } else {
+            channelHint.setText(analysis.channelCount > 1
+              ? "未能确认各声道是否分离。请分别对每支麦克风说话后重试。"
+              : "当前录音为单声道，无法按声道区分说话人。");
+            channelField.removeClass("is-multichannel");
+            channelField.addClass("is-channel-warning");
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          channelHint.setText(`测试失败：${message}`);
+          renderChannelProbeRows(channelResult, [
+            { label: "检测结果", value: message, state: "error" },
+          ]);
+          channelField.removeClass("is-multichannel");
+          channelField.addClass("is-channel-warning");
+        } finally {
+          if (stream) stream.getTracks().forEach((track) => track.stop());
+          detectButton.disabled = false;
+          detectButton.setText("测试");
+        }
+      };
     }
 
     // 电脑音频选择器：仅电脑音频 / 混合模式下显示（原来藏在「设备检测」里，现在直接放到主卡片）
@@ -760,19 +915,19 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     });
 
     new obsidian.Setting(c)
-      .setName("悬浮控制")
-      .setDesc("设置桌面悬浮气泡的显示状态和尺寸。")
+      .setName("悬浮按钮")
+      .setDesc("设置桌面悬浮按钮的显示和大小。")
       .setHeading();
 
-    new obsidian.Setting(c).setName("显示悬浮气泡")
+    new obsidian.Setting(c).setName("显示悬浮按钮")
       .setDesc("开启后常驻显示，可拖动到任意位置；关闭后隐藏。")
       .addToggle(t => t.setValue(this.plugin.settings.showFloatingBall).onChange(async v => {
         this.plugin.settings.showFloatingBall = v; await this.plugin.saveSettings();
         this.plugin.syncBubbleVisibility();
       }));
 
-    new obsidian.Setting(c).setName("悬浮窗大小")
-      .setDesc("整体缩放悬浮气泡。大=默认原尺寸，中/小依次等比缩小。")
+    new obsidian.Setting(c).setName("悬浮按钮大小")
+      .setDesc("调整按钮及其展开控件的大小。")
       .addDropdown(d => d
         .addOption("large", "大")
         .addOption("medium", "中")
@@ -863,8 +1018,8 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
 
   renderApiSchemeSelector(c) {
     new obsidian.Setting(c)
-      .setName("API 方案")
-      .setDesc("把「转写服务 + AI 整理」整套存成方案，顶部一键切换、检测连通性。")
+      .setName("API 配置")
+      .setDesc("保存并切换转写与 AI 整理服务。")
       .setHeading();
     const schemes = Array.isArray(this.plugin.settings.llmProfiles) ? this.plugin.settings.llmProfiles : [];
     const activeId = this.plugin.settings.activeLlmProfile || "";
@@ -876,7 +1031,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     const controls = block.createDiv({ cls: "lexvoice-scheme-controls" });
     const sel = controls.createEl("select", { cls: "dropdown lexvoice-scheme-select" });
     const addOpt = (value, label) => { const o = sel.createEl("option", { text: label }); o.value = value; };
-    addOpt("", "（临时配置 · 未保存）");
+    addOpt("", "临时配置（未保存）");
     for (const p of schemes) addOpt(p.id, p.name);
     sel.value = activeId;
     sel.addEventListener("change", async () => {
@@ -885,7 +1040,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       applyLlmProfileToWorkingConfig(this.plugin.settings, id);
       await this.plugin.saveSettings();
       const p = findLlmProfile(this.plugin.settings, id);
-      new obsidian.Notice(`已切换到方案「${p ? p.name : id}」${p && p.asr ? "（转写 + AI 整理已一并切换）" : "（仅 AI 整理）"}`, 5000);
+      new obsidian.Notice(`已切换到配置「${p ? p.name : id}」${p && p.asr ? "（转写与 AI 整理）" : "（仅 AI 整理）"}`, 5000);
       this.renderSettings();
     });
 
@@ -898,9 +1053,9 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       finally { testBtn.disabled = false; testBtn.setText("检测"); }
     };
 
-    const saveBtn = btns.createEl("button", { cls: "mod-cta", text: "保存为方案" });
+    const saveBtn = btns.createEl("button", { cls: "mod-cta", text: "保存配置" });
     saveBtn.onclick = async () => {
-      const name = await lexvoicePromptText(this.app, "为当前整套配置取个名字", "如 MiMo / DeepSeek+硅基 / 本地模型");
+      const name = await lexvoicePromptText(this.app, "配置名称", "如 MiMo / DeepSeek + 硅基流动 / 本地模型");
       if (name === null) return;
       const trimmed = String(name || "").trim();
       if (!trimmed) { new obsidian.Notice("名字不能为空"); return; }
@@ -916,31 +1071,31 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       this.plugin.settings.llmProfiles = normalizeLlmProfiles(this.plugin.settings.llmProfiles).concat([scheme]);
       this.plugin.settings.activeLlmProfile = id;
       await this.plugin.saveSettings();
-      new obsidian.Notice(`已保存方案「${trimmed}」（含转写 + AI 整理）`, 5000);
+      new obsidian.Notice(`已保存配置「${trimmed}」（含转写与 AI 整理）`, 5000);
       this.renderSettings();
     };
     if (activeId) {
-      const delBtn = btns.createEl("button", { cls: "lexvoice-icon-button", attr: { type: "button", "aria-label": "删除当前方案", title: "删除当前方案" } });
+      const delBtn = btns.createEl("button", { cls: "lexvoice-icon-button", attr: { type: "button", "aria-label": "删除当前配置", title: "删除当前配置" } });
       obsidian.setIcon(delBtn, "trash-2");
       delBtn.onclick = async () => {
         const p = findLlmProfile(this.plugin.settings, activeId);
         this.plugin.settings.llmProfiles = normalizeLlmProfiles(this.plugin.settings.llmProfiles).filter(x => x.id !== activeId);
         this.plugin.settings.activeLlmProfile = "";
         await this.plugin.saveSettings();
-        new obsidian.Notice(`已删除方案「${p ? p.name : activeId}」（当前转写 / 大模型配置仍保留在下方，可重新保存）`, 6000);
+        new obsidian.Notice(`已删除配置「${p ? p.name : activeId}」。当前服务设置仍会保留。`, 6000);
         this.renderSettings();
       };
     }
 
     if (activeId) {
       const p = findLlmProfile(this.plugin.settings, activeId);
-      const kind = p && p.asr ? "完整方案（转写 + AI 整理）" : "仅 AI 整理（旧配置；想纳入转写，重新点「保存当前为方案」即可）";
+      const kind = p && p.asr ? "转写与 AI 整理" : "仅 AI 整理（旧配置）";
       const status = block.createDiv({ cls: "lexvoice-scheme-status" });
       status.createSpan({ cls: "lexvoice-scheme-status-name", text: `当前：${p ? p.name : activeId}` });
       status.createSpan({ cls: "lexvoice-scheme-status-sep", text: " · " });
       status.createSpan({ text: kind });
       status.createSpan({ cls: "lexvoice-scheme-status-sep", text: " · " });
-      status.createSpan({ cls: "lexvoice-scheme-status-hint", text: "下方任何修改会自动更新到这套方案" });
+      status.createSpan({ cls: "lexvoice-scheme-status-hint", text: "修改下方设置会自动更新当前配置" });
     }
   }
 
@@ -1127,11 +1282,11 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       new obsidian.Notice("已恢复为内置默认（留空即自动跟随模板更新）");
     }));
 
-    new obsidian.Setting(c).setName("听写落点")
-      .setDesc("整理后的文本落到哪：插入光标（Obsidian 有活动笔记时插入光标处，否则自动转剪贴板）/ 总是复制到剪贴板。")
+    new obsidian.Setting(c).setName("写入位置")
+      .setDesc("选择即时听写结果的写入位置。")
       .addDropdown(d => d
-        .addOption("editor", "插入光标（智能回退剪贴板）")
-        .addOption("clipboard", "总是复制到剪贴板")
+        .addOption("editor", "当前光标（无活动笔记时复制到剪贴板）")
+        .addOption("clipboard", "剪贴板")
         .setValue(this.plugin.settings.quickDictationTarget === "clipboard" ? "clipboard" : "editor")
         .onChange(async v => {
           this.plugin.settings.quickDictationTarget = v === "clipboard" ? "clipboard" : "editor";
@@ -1493,8 +1648,8 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     const todoCount = countMarkdownInFolder(this.plugin.settings.todoCardsFolder || DEFAULT_SETTINGS.todoCardsFolder);
 
     new obsidian.Setting(c)
-      .setName("信息对象")
-      .setDesc("从纪要中沉淀人员、学习卡片、待办和转写词表。对象用于复用，视图用于浏览；纪要仍是原始证据和回听入口。")
+      .setName("资料库")
+      .setDesc("从纪要中沉淀人员、学习卡片、待办和转写词表，用于复用和检索；纪要保留原始证据和录音链接。")
       .setHeading();
 
     const overview = c.createDiv({ cls: "lexvoice-object-overview-grid" });
@@ -1566,11 +1721,11 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
 
     new obsidian.Setting(c)
       .setName("浏览与维护")
-      .setDesc("打开对象墙和明细表格，或补齐缺失的 Base 视图。")
+      .setDesc("打开资料总览和明细表格，或补齐缺失的 Base 视图。")
       .setHeading();
-    new obsidian.Setting(c).setName("对象墙")
+    new obsidian.Setting(c).setName("资料总览")
       .setDesc("日常浏览入口，可按学习、概念和待办分类查看。")
-      .addButton(b => b.setButtonText("对象总览").setCta().onClick(() => { void this.plugin.openObjectWall(); }))
+      .addButton(b => b.setButtonText("打开总览").setCta().onClick(() => { void this.plugin.openObjectWall(); }))
       .addButton(b => b.setButtonText("学习卡片").onClick(() => { void this.plugin.openLearningWall("learning"); }))
       .addButton(b => b.setButtonText("概念").onClick(() => { void this.plugin.openLearningWall("concept"); }))
       .addButton(b => b.setButtonText("待办").onClick(() => { void this.plugin.openTodoWall(); }));
@@ -1591,7 +1746,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
 
     new obsidian.Setting(c)
       .setName("存储与隐私")
-      .setDesc("设置对象文件位置、扫描记录和人员资料的使用范围。一般保持默认即可。")
+      .setDesc("设置资料保存位置、扫描记录和人员资料使用范围。一般保持默认即可。")
       .setHeading();
     const advancedBody = c;
     this.createSettingsSubhead(advancedBody, "保存位置", "这些路径都是当前 Obsidian 库内的相对路径，只影响后续新建内容。");
@@ -1625,7 +1780,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         setting.setDesc(`当前 ${count} 张待办卡片。待办卡片适合跟踪跨会议、跨项目的行动项。`);
       });
 
-    createPathSetting(advancedBody, "视图文件夹", "保存 LexVoice 生成的对象墙和辅助 Base。", this.plugin.settings.lexVoiceBasesFolder || DEFAULT_SETTINGS.lexVoiceBasesFolder, "LexVoice/视图",
+    createPathSetting(advancedBody, "视图文件夹", "保存 LexVoice 生成的资料总览和 Base 视图。", this.plugin.settings.lexVoiceBasesFolder || DEFAULT_SETTINGS.lexVoiceBasesFolder, "LexVoice/视图",
       async v => { this.plugin.settings.lexVoiceBasesFolder = v || DEFAULT_SETTINGS.lexVoiceBasesFolder; });
 
     const vocabScanCount = countKnowledgeExtractionHistory(this.plugin.settings, "vocabulary");
@@ -1731,23 +1886,23 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     new obsidian.Setting(c).setName("更新状态")
       .setDesc(status);
 
-    new obsidian.Setting(c).setName("官方发布源")
+    new obsidian.Setting(c).setName("更新来源")
       .setDesc("LexVoice 从官方 GitHub 仓库检查并安装更新。更新只替换插件发布文件，不会覆盖 data.json、API Key、保存路径、自定义提示词或队列数据。")
       .addButton(b => b.setButtonText("打开 GitHub").onClick(() => openLexVoiceExternalUrl(LEXVOICE_UPDATE_REPO_URL)))
-      .addButton(b => b.setButtonText("打开 Release").onClick(() => openLexVoiceExternalUrl(LEXVOICE_UPDATE_REPO_URL + "/releases")));
+      .addButton(b => b.setButtonText("查看版本").onClick(() => openLexVoiceExternalUrl(LEXVOICE_UPDATE_REPO_URL + "/releases")));
 
     new obsidian.Setting(c).setName("启动时自动检查")
       .setDesc("开启后最多每 24 小时检查一次官方仓库。")
       .addToggle(t => t.setValue(this.plugin.settings.autoCheckUpdates !== false)
         .onChange(async v => { this.plugin.settings.autoCheckUpdates = v; await this.plugin.saveSettings(); }));
 
-    new obsidian.Setting(c).setName("检查与安装")
-      .setDesc("建议先执行「检查更新」。发现新版本后可一键安装；当前版本号相同时，也可重新拉取官方发布文件用于修复本地副本。安装前会备份当前插件文件和设置。")
+    new obsidian.Setting(c).setName("安装更新")
+      .setDesc("检查新版本并安装。安装前会备份当前插件文件和设置。")
       .addButton(b => b.setButtonText("检查更新").onClick(async () => {
         await this.plugin.checkForUpdates({ silent: false });
         this.renderSettings();
       }))
-      .addButton(b => b.setButtonText("一键增量更新").setCta().onClick(async () => {
+      .addButton(b => b.setButtonText("安装更新").setCta().onClick(async () => {
         try {
           await this.plugin.installAvailableUpdate();
           this.renderSettings();
@@ -1896,8 +2051,8 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         t.inputEl.addEventListener("blur", () => { t.setValue(String(this.plugin.settings.segmentIntervalMinutes)); });
       });
 
-    new obsidian.Setting(c).setName("转写并发数")
-      .setDesc("导入长音频时同时上传几段。默认 1 最稳妥；网络和服务额度稳定时可调到 2 或 3。如经常提示「请求过于频繁」或服务器错误（代码 429/500），请改回 1。")
+    new obsidian.Setting(c).setName("同时转写数")
+      .setDesc("导入长音频时同时处理的分段数。出现请求频繁或服务错误时，请改回 1。")
       .addDropdown(d => d
         .addOption("1", "1（最稳）")
         .addOption("2", "2（平衡）")
@@ -1908,8 +2063,8 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
           await this.plugin.saveSettings();
         }));
 
-    new obsidian.Setting(c).setName("保留后台切片音频")
-      .setDesc("开启后保留每个后台切片音频用于排查，占用更多存储；关闭（默认）时只保留完整录音，成功转写的临时切片自动清理（失败重试所需的切片暂时保留）。")
+    new obsidian.Setting(c).setName("保留临时分段音频")
+      .setDesc("用于排查转写问题，会占用更多存储。关闭时保留完整录音，并自动清理转写成功的临时分段。")
       .addToggle(t => t.setValue(this.plugin.settings.keepSegmentAudioFiles === true).onChange(async v => { this.plugin.settings.keepSegmentAudioFiles = v; await this.plugin.saveSettings(); }));
 
     new obsidian.Setting(c)
@@ -1921,15 +2076,15 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       .setDesc("录音完成后笔记重排：顶部 AI 整合内容，底部可折叠原始分段。关闭后纪要按时间顺序保留原始分段，不做顶部整合。")
       .addToggle(t => t.setValue(this.plugin.settings.consolidatedLayout).onChange(async v => { this.plugin.settings.consolidatedLayout = v; await this.plugin.saveSettings(); }));
 
-    new obsidian.Setting(c).setName("自动加场景标签到文件名")
+    new obsidian.Setting(c).setName("自动添加主题到文件名")
       .setDesc("录音、导入音频、重新整理或队列重试完成后，由 AI 提炼一个不超过 15 字的主题追加到笔记文件名。")
       .addToggle(t => t.setValue(this.plugin.settings.autoRenameWithTitle).onChange(async v => { this.plugin.settings.autoRenameWithTitle = v; await this.plugin.saveSettings(); }));
 
     new obsidian.Setting(c).setName("实时大纲")
-      .setDesc("每段转写完成后自动调用 LLM 整理大纲。关闭后可在面板内手动刷新；分段越多，LLM 调用次数越多。")
+      .setDesc("每段转写完成后自动更新大纲。关闭后可在侧边栏手动刷新；分段越多，AI 调用次数越多。")
       .addToggle(t => t.setValue(this.plugin.settings.enableRealtimeOutline).onChange(async v => { this.plugin.settings.enableRealtimeOutline = v; await this.plugin.saveSettings(); }));
 
-    new obsidian.Setting(c).setName("录音开始时自动打开实时纪要面板")
+    new obsidian.Setting(c).setName("录音时自动打开侧边栏")
       .addToggle(t => t.setValue(this.plugin.settings.autoOpenOutlineOnRecord).onChange(async v => { this.plugin.settings.autoOpenOutlineOnRecord = v; await this.plugin.saveSettings(); }));
 
     // ---- 设备与诊断 ----
@@ -1974,18 +2129,18 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
 
     // ---- 外部音频联动 ----
     new obsidian.Setting(c)
-      .setName("外部音频联动")
+      .setName("自动导入音频")
       .setDesc("监控一个收件箱文件夹，自动处理从云盘或其他设备同步进来的音频。")
       .setHeading();
 
-    new obsidian.Setting(c).setName("收件箱文件夹")
+    new obsidian.Setting(c).setName("监听文件夹")
       .setDesc("Obsidian 库内的相对路径。任何音频出现在此文件夹会被自动转写并归档。留空则禁用此功能。")
       .addText(t => t.setValue(this.plugin.settings.inboxFolder || "")
         .setPlaceholder("LexVoice/录音/inbox")
         .onChange(async v => { this.plugin.settings.inboxFolder = v; await this.plugin.saveSettings(); }));
 
     new obsidian.Setting(c).setName("自动处理新文件")
-      .setDesc("关闭后需手动用命令面板的扫描收件箱命令触发。")
+      .setDesc("关闭后可从命令面板手动扫描监听文件夹。")
       .addToggle(t => t.setValue(this.plugin.settings.inboxAutoImport).onChange(async v => { this.plugin.settings.inboxAutoImport = v; await this.plugin.saveSettings(); }));
 
     new obsidian.Setting(c).setName("归档子文件夹")
@@ -1994,7 +2149,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         .setPlaceholder("processed")
         .onChange(async v => { this.plugin.settings.inboxArchiveSubfolder = v; await this.plugin.saveSettings(); }));
 
-    new obsidian.Setting(c).setName("等待云盘同步完成（毫秒）")
+    new obsidian.Setting(c).setName("开始处理前等待（毫秒）")
       .setDesc("新文件出现后先等待一段时间再处理，避免 iCloud、坚果云等尚未传完就开始转写。建议 3000–10000（即 3–10 秒）。")
       .addText(t => {
         t.setValue(String(this.plugin.settings.inboxStabilizeDelayMs ?? 3000)).onChange(async v => {
@@ -2008,7 +2163,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         t.inputEl.addEventListener("blur", () => { t.setValue(String(this.plugin.settings.inboxStabilizeDelayMs ?? 3000)); });
       });
 
-    new obsidian.Setting(c).setName("立即扫描收件箱")
+    new obsidian.Setting(c).setName("立即扫描监听文件夹")
       .setDesc("处理所有未归档的音频文件。用于补漏或初次配置后批量处理。")
       .addButton(b => b.setButtonText("扫描").onClick(() => this.plugin.scanInboxFolder()));
 
@@ -2018,7 +2173,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
 
     // ---- 失败重试 ----
     new obsidian.Setting(c)
-      .setName("失败与队列")
+      .setName("任务重试")
       .setDesc("设置自动重试上限，并查看仍在等待或失败的后台任务。")
       .setHeading();
 
@@ -2037,7 +2192,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         t.inputEl.addEventListener("blur", () => { t.setValue(String(this.plugin.settings.maxRetries || 3)); });
       });
 
-    new obsidian.Setting(c).setName("待处理队列")
+    new obsidian.Setting(c).setName("任务队列")
       .setDesc(`当前 ${this.plugin.queue.tasks.length} 个任务。`)
       .addButton(b => b.setButtonText("打开队列").onClick(() => new QueueModal(this.app, this.plugin).open()))
       .addButton(b => b.setButtonText("重试全部").onClick(() => this.plugin.retryQueue()));
@@ -2088,7 +2243,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       vcText.createDiv({ text: "之前选定的设备可能已断开，请在下方重新选择。", cls: "lexvoice-diag-sub" });
     } else {
       vcText.createDiv({ text: "未选择电脑音频输入", cls: "lexvoice-diag-label" });
-      vcText.createDiv({ text: "录制 B 站客户端、浏览器视频、系统声音或会议对方声音需要虚拟声卡，并在下方选定它。点上方「电脑音频指引」查看分平台指引。", cls: "lexvoice-diag-sub" });
+      vcText.createDiv({ text: "录制电脑声音需要虚拟声卡。请在「设置电脑音频」中完成配置。", cls: "lexvoice-diag-sub" });
     }
 
     if (info.permissionRequired) {
