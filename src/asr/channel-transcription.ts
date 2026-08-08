@@ -495,6 +495,7 @@ export async function transcribeAudioByChannels(
   blob: Blob,
   mime: string,
   expectedChannelCount = 1,
+  options: { requireSeparatedChannels?: boolean } = {},
 ): Promise<ChannelTranscriptionResult> {
   let decoded: AudioBuffer;
   try {
@@ -514,6 +515,19 @@ export async function transcribeAudioByChannels(
   if (analysis.separation === "duplicated") {
     const text = await transcribeAudio(plugin, blob, mime);
     return { text, actualChannelCount, processedChannelCount, usedMultichannel: false, separation: "duplicated", parts: [], deduplicatedParts: 0, errors: [] };
+  }
+  if (options.requireSeparatedChannels && analysis.separation !== "separated") {
+    const text = await transcribeAudio(plugin, blob, mime);
+    return {
+      text,
+      actualChannelCount,
+      processedChannelCount,
+      usedMultichannel: false,
+      separation: analysis.separation,
+      parts: [],
+      deduplicatedParts: 0,
+      errors: [],
+    };
   }
   const redundantChannels = new Set<number>();
   for (const pair of analysis.pairs) {

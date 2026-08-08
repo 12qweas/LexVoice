@@ -9,9 +9,12 @@ import {
   buildMicrophoneAudioConstraints,
   buildSpeakerMappings,
   clampSpeakerChannelCount,
+  configureMicrophoneTrackChannels,
   extractSpeakerIdsFromMarkdown,
+  initialAudioChannelRuntimeMode,
   normalizeSpeakerMappings,
   replaceSpeakerDisplayName,
+  resolveAudioChannelRuntimeMode,
 } from "../src/audio/channel-speakers";
 import {
   analyzeAudioBufferChannels,
@@ -33,8 +36,11 @@ function makeAudioBuffer(channels: Float32Array[], sampleRate = 1_000): AudioBuf
 }
 
 describe("hardware channel speaker mapping", () => {
-  it("uses the same two-channel acquisition policy for auto and multichannel modes", () => {
-    expect(buildMicrophoneAudioConstraints({ channelMode: "auto", deviceId: "dji-rx" })).toMatchObject({
+  it("leaves auto acquisition on the device default and only forces explicit modes", () => {
+    expect(buildMicrophoneAudioConstraints({ channelMode: "auto", deviceId: "dji-rx" })).toEqual({
+      deviceId: { exact: "dji-rx" },
+    });
+    expect(buildMicrophoneAudioConstraints({ channelMode: "multichannel", deviceId: "dji-rx" })).toMatchObject({
       deviceId: { exact: "dji-rx" },
       channelCount: { ideal: 2 },
       echoCancellation: false,
@@ -47,6 +53,43 @@ describe("hardware channel speaker mapping", () => {
       noiseSuppression: true,
       autoGainControl: true,
     });
+  });
+
+  it("does not negotiate an ordinary auto-mode microphone up to its advertised maximum", async () => {
+    const applyConstraints = vi.fn().mockResolvedValue(undefined);
+    const track = {
+      label: "普通麦克风",
+      getSettings: () => ({ channelCount: 1, deviceId: "mic-1" }),
+      getCapabilities: () => ({ channelCount: { min: 1, max: 4 } }),
+      applyConstraints,
+    } as unknown as MediaStreamTrack;
+    const info = await configureMicrophoneTrackChannels(track, "auto", 4);
+    expect(info.channelCount).toBe(1);
+    expect(applyConstraints).toHaveBeenCalledWith(expect.objectContaining({ channelCount: { ideal: 1 } }));
+    expect(applyConstraints).not.toHaveBeenCalledWith(expect.objectContaining({ channelCount: { ideal: 4 } }));
+  });
+
+  it("keeps auto mode undecided until independent recorded channels are confirmed", () => {
+    expect(initialAudioChannelRuntimeMode("auto", 1)).toBe("mono");
+    expect(initialAudioChannelRuntimeMode("auto", 2)).toBe("probing");
+    expect(resolveAudioChannelRuntimeMode({
+      channelMode: "auto",
+      current: "probing",
+      separation: "duplicated",
+      usedMultichannel: false,
+    })).toBe("mono");
+    expect(resolveAudioChannelRuntimeMode({
+      channelMode: "auto",
+      current: "probing",
+      separation: "separated",
+      usedMultichannel: true,
+    })).toBe("multichannel");
+    expect(resolveAudioChannelRuntimeMode({
+      channelMode: "multichannel",
+      current: "probing",
+      separation: "single",
+      usedMultichannel: false,
+    })).toBe("multichannel");
   });
 
   it("supports one to four stable speaker channels", () => {

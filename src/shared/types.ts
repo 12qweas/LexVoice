@@ -1,5 +1,6 @@
 export type AudioInputMode = "mic" | "mix-virtual" | "virtualCable";
 export type AudioChannelMode = "auto" | "mono" | "multichannel";
+export type AudioChannelRuntimeMode = "mono" | "probing" | "multichannel";
 export type BubbleSize = "large" | "medium" | "small";
 export type PeopleContextMode = "privacy" | "hotwords" | "localFull";
 export type QuickDictationTarget = "editor" | "clipboard";
@@ -306,7 +307,10 @@ export interface TranscribeQueueTaskPayload {
   sourceUrl?: string;
   sourceTitle?: string;
   sourcePlatform?: string;
+  captureMode?: string;
+  audioChannelMode?: AudioChannelMode;
   audioChannelCount?: number;
+  audioChannelRuntimeMode?: AudioChannelRuntimeMode;
 }
 
 export interface MergeQueueTaskPayload {
@@ -349,8 +353,9 @@ export interface RecordingSession {
   audioChannelMaxCount?: number;
   audioChannelLabel?: string;
   audioChannelMode?: AudioChannelMode;
+  audioChannelRuntimeMode?: AudioChannelRuntimeMode;
   speakerChannels?: Record<string, unknown>;
-  channelSeparationMode?: "single" | "device-channels" | "encoder-downmix";
+  channelSeparationMode?: "single" | "pending" | "device-channels" | "duplicated-input" | "encoder-downmix";
   _channelDownmixNotified?: boolean;
   masterAudioPath?: string;
   masterAudioName?: string;

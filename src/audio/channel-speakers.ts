@@ -3,6 +3,7 @@ export const DEFAULT_SPEAKER_CHANNELS = 2;
 
 export type SpeakerId = `spk-${number}`;
 export type AudioChannelMode = "auto" | "mono" | "multichannel";
+export type AudioChannelRuntimeMode = "mono" | "probing" | "multichannel";
 
 export interface AudioChannelInfo {
   channelCount: number;
@@ -47,13 +48,20 @@ export function buildMicrophoneAudioConstraints(options: {
   const mode = normalizeAudioChannelMode(options.channelMode);
   const deviceId = String(options.deviceId || "").trim();
   const mobile = !!options.mobile;
-  const preserveChannels = !mobile && mode !== "mono";
   const targetChannels = Math.max(1, Math.min(
     MAX_SPEAKER_CHANNELS,
     finiteChannelCount(options.targetChannels, DEFAULT_SPEAKER_CHANNELS),
   ));
+  const deviceConstraint = deviceId && !mobile ? { deviceId: { exact: deviceId } } : {};
+  if (!mobile && mode === "auto") {
+    // Auto mode must not turn every ordinary microphone into a multichannel source.
+    // Acquire the device using its native/default format, then decide from the
+    // negotiated track and the recorded audio whether channel separation is real.
+    return deviceConstraint;
+  }
+  const preserveChannels = !mobile && mode === "multichannel";
   return {
-    ...(deviceId && !mobile ? { deviceId: { exact: deviceId } } : {}),
+    ...deviceConstraint,
     channelCount: { ideal: preserveChannels ? targetChannels : 1 },
     echoCancellation: !preserveChannels,
     noiseSuppression: !preserveChannels,
@@ -124,21 +132,64 @@ export async function configureMicrophoneTrackChannels(
 ): Promise<AudioChannelInfo> {
   const mode = normalizeAudioChannelMode(channelMode);
   if (mode === "mono") return readAudioTrackChannelInfo(track);
-  let info = await negotiateAudioTrackChannels(track, targetChannels);
-  if (mode === "auto" && info.channelCount <= 1 && track && typeof track.applyConstraints === "function") {
+  if (mode === "auto") {
+    let info = readAudioTrackChannelInfo(track);
+    if (!track || typeof track.applyConstraints !== "function") return info;
     try {
-      await track.applyConstraints({
-        channelCount: { ideal: 1 },
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      });
+      if (info.channelCount > 1) {
+        // Keep the device's negotiated channel count. Do not request extra channels:
+        // many normal Windows microphones advertise a stereo maximum even though
+        // both channels contain the same signal.
+        await track.applyConstraints({
+          channelCount: { ideal: info.channelCount },
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        });
+      } else {
+        await track.applyConstraints({
+          channelCount: { ideal: 1 },
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        });
+      }
       info = readAudioTrackChannelInfo(track);
     } catch {
-      // Some single-channel drivers expose no processing constraints. Keep the acquired stream.
+      // Some drivers expose channel metadata but reject processing constraints.
+      // Keep the stream that was already acquired.
     }
+    return info;
   }
+  let info = await negotiateAudioTrackChannels(track, targetChannels);
   return info;
+}
+
+export function initialAudioChannelRuntimeMode(
+  channelMode: unknown,
+  reportedChannelCount: unknown,
+): AudioChannelRuntimeMode {
+  const mode = normalizeAudioChannelMode(channelMode);
+  if (mode === "mono") return "mono";
+  if (mode === "multichannel") return "multichannel";
+  return clampSpeakerChannelCount(reportedChannelCount) > 1 ? "probing" : "mono";
+}
+
+export function resolveAudioChannelRuntimeMode(options: {
+  channelMode?: unknown;
+  current?: unknown;
+  separation?: unknown;
+  usedMultichannel?: boolean;
+}): AudioChannelRuntimeMode {
+  const mode = normalizeAudioChannelMode(options.channelMode);
+  if (mode === "mono") return "mono";
+  if (mode === "multichannel") return "multichannel";
+  if (options.usedMultichannel && String(options.separation || "") === "separated") {
+    return "multichannel";
+  }
+  const separation = String(options.separation || "");
+  if (separation === "single" || separation === "duplicated") return "mono";
+  return options.current === "multichannel" ? "multichannel" : "probing";
 }
 
 export function buildSpeakerMappings(

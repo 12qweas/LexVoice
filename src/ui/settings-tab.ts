@@ -710,15 +710,15 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     if (mode === "mic" && !isLexVoiceMobileRuntime()) {
       const channelField = grid.createDiv({ cls: "lexvoice-audio-input-field lexvoice-audio-channel-field" });
       const titleRow = channelField.createDiv({ cls: "lexvoice-audio-channel-title-row" });
-      titleRow.createDiv({ cls: "lexvoice-audio-input-label", text: "录音声道" });
+      titleRow.createDiv({ cls: "lexvoice-audio-input-label", text: "说话人区分" });
       const titleActions = titleRow.createDiv({ cls: "lexvoice-audio-channel-title-actions" });
       const channelModeSelect = titleActions.createEl("select", {
         cls: "dropdown lexvoice-audio-channel-mode",
-        attr: { "aria-label": "录音声道模式" },
+        attr: { "aria-label": "说话人区分方式" },
       });
-      channelModeSelect.createEl("option", { value: "auto", text: "自动" });
-      channelModeSelect.createEl("option", { value: "mono", text: "单声道" });
-      channelModeSelect.createEl("option", { value: "multichannel", text: "多声道" });
+      channelModeSelect.createEl("option", { value: "auto", text: "自动（推荐）" });
+      channelModeSelect.createEl("option", { value: "mono", text: "关闭" });
+      channelModeSelect.createEl("option", { value: "multichannel", text: "按声道区分" });
       channelModeSelect.value = normalizeAudioChannelMode(this.plugin.settings.audioChannelMode);
       channelModeSelect.addEventListener("change", async () => {
         this.plugin.settings.audioChannelMode = normalizeAudioChannelMode(channelModeSelect.value);
@@ -733,10 +733,10 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       const channelHint = channelField.createDiv({ cls: "lexvoice-audio-input-hint lexvoice-audio-channel-hint" });
       const selectedChannelMode = normalizeAudioChannelMode(this.plugin.settings.audioChannelMode);
       channelHint.setText(selectedChannelMode === "mono"
-        ? "将所有输入合并为一个声道。"
+        ? "所有录音按一位说话人处理。"
         : selectedChannelMode === "multichannel"
-          ? "保留每个声道，分别转写为不同说话人。"
-          : "自动识别单声道或多声道。");
+          ? "尝试按独立声道区分说话人；单声道录音会自动回退。"
+          : "仅在录音确认包含多个独立声道时区分说话人。");
       const channelResult = channelField.createDiv({ cls: "lexvoice-audio-channel-result" });
       detectButton.onclick = async () => {
         detectButton.disabled = true;

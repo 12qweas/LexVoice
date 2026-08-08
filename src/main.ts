@@ -27,7 +27,9 @@ import { DEFAULT_DAILY_MEETING_OVERVIEW_HEADING, DEFAULT_DAILY_MEETING_OVERVIEW_
 // 设置序列化层已抽到独立模块（src/shared/settings-io.ts）并由 round-trip 测试覆盖（tests/settings-io.test.ts）。
 // 这里 import 回来，保持原有调用点用裸名引用不变。
 import { SETTINGS_SCHEMA_VERSION, LEGACY_VOCABULARY_FILE, normalizeLexVoiceSettings, serializeLexVoiceSettings, extractLexVoiceJobItems } from "./shared/settings-io";
-import type { LexVoiceSettings } from "./shared/types";
+import type { LexVoiceSettings, QueueTask, RecordingSession } from "./shared/types";
+
+declare const LEXVOICE_BUILD_VERSION: string;
 import { applyLlmProfileToWorkingConfig, getLlmOutputCeiling, getBriefingMergeDesiredTokens, getBriefingMergeMaxTokens, LLM_OUTPUT_CEILING_FALLBACK, classifyBriefingLength } from "./llm/config";
 import { getThinkingControl } from "./llm/thinking";
 import { DashScopeStreamingClient, OpenAIRealtimeTranscriptionClient, OpenAIRealtimeTranslationClient, PcmStreamEncoder } from "./asr/clients";
@@ -67,9 +69,11 @@ import {
   buildSpeakerMappings,
   configureMicrophoneTrackChannels,
   extractSpeakerIdsFromMarkdown,
+  initialAudioChannelRuntimeMode,
   normalizeAudioChannelMode,
   normalizeSpeakerMappings,
   replaceSpeakerDisplayName,
+  resolveAudioChannelRuntimeMode,
   speakerLabelForChannel,
 } from "./audio/channel-speakers";
 import { renderMultichannelAudioBufferSliceToWav, transcribeAudioByChannels } from "./asr/channel-transcription";
@@ -16323,6 +16327,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         audioChannelMaxCount: 1,
         audioChannelLabel: "",
         audioChannelMode: normalizeAudioChannelMode(this.settings.audioChannelMode),
+        audioChannelRuntimeMode: "mono",
         speakerChannels: {},
         channelSeparationMode: "single",
         meetingWorkbench: { notes: "", draft: "", materials: [], entries: [] },
@@ -16432,10 +16437,14 @@ class LexVoicePlugin extends obsidian.Plugin {
         sessionRef.audioChannelMaxCount = Math.max(count, Number(channelInfo && channelInfo.maxChannelCount) || count);
         sessionRef.audioChannelLabel = String(channelInfo && channelInfo.label || "");
         sessionRef.audioChannelMode = normalizeAudioChannelMode(channelInfo && channelInfo.channelMode || this.settings.audioChannelMode);
-        sessionRef.channelSeparationMode = captureMode === "mic" && count > 1 ? "device-channels" : "single";
-        sessionRef.speakerChannels = captureMode === "mic" && count > 1
-          ? buildSpeakerMappings(Math.min(MAX_SPEAKER_CHANNELS, count))
-          : {};
+        sessionRef.audioChannelRuntimeMode = captureMode === "mic"
+          ? initialAudioChannelRuntimeMode(sessionRef.audioChannelMode, count)
+          : "mono";
+        sessionRef.channelSeparationMode = sessionRef.audioChannelRuntimeMode === "mono" ? "single" : "pending";
+        // A stereo-looking track is not proof of two speakers. Windows drivers often
+        // duplicate one microphone into L/R. Create mappings only after recorded
+        // content confirms independent channels.
+        sessionRef.speakerChannels = {};
         if (isStreaming && count > 1) {
           sessionRef.channelSeparationMode = "single";
           new obsidian.Notice("即时听写不区分说话人；如需按说话人区分，请改用普通录音。", 9000);
@@ -16721,6 +16730,10 @@ class LexVoicePlugin extends obsidian.Plugin {
       captureMode: session.captureMode || "",
       audioChannelMode: normalizeAudioChannelMode(session.audioChannelMode || this.settings.audioChannelMode),
       audioChannelCount: session.captureMode === "mic" ? Math.max(1, Number(session.audioChannelCount) || 1) : 1,
+      audioChannelRuntimeMode: session.audioChannelRuntimeMode || initialAudioChannelRuntimeMode(
+        session.audioChannelMode || this.settings.audioChannelMode,
+        session.audioChannelCount,
+      ),
       lastError: "",
     }, patch || {});
   }
@@ -17239,18 +17252,37 @@ class LexVoicePlugin extends obsidian.Plugin {
               ? Math.max(1, Number(session.audioChannelCount) || 1)
               : 1;
             const channelMode = normalizeAudioChannelMode(session.audioChannelMode || this.settings.audioChannelMode);
-            const inspectRecordedChannels = session.captureMode === "mic" && channelMode !== "mono";
-            // 处理上限按硬件能力放到 4（DJI 一收多发 / 四声道接口）；实际只会处理录音文件里真实存在的声道。
+            const runtimeChannelMode = session.audioChannelRuntimeMode
+              || initialAudioChannelRuntimeMode(channelMode, reportedChannelCount);
+            const inspectRecordedChannels = session.captureMode === "mic" && runtimeChannelMode !== "mono";
+            // Only probe an auto-mode device until independent channel content is
+            // confirmed. Once resolved, the session stays on one stable path.
             const expectedChannels = inspectRecordedChannels ? MAX_SPEAKER_CHANNELS : 1;
             if (inspectRecordedChannels) {
-              channelTranscription = await transcribeAudioByChannels(this, transcribeBlob, transcribeMime, expectedChannels);
+              channelTranscription = await transcribeAudioByChannels(
+                this,
+                transcribeBlob,
+                transcribeMime,
+                expectedChannels,
+                { requireSeparatedChannels: channelMode === "auto" && runtimeChannelMode === "probing" },
+              );
               text = channelTranscription.text;
               session.audioChannelCount = channelTranscription.actualChannelCount;
+              session.audioChannelRuntimeMode = resolveAudioChannelRuntimeMode({
+                channelMode,
+                current: runtimeChannelMode,
+                separation: channelTranscription.separation,
+                usedMultichannel: channelTranscription.usedMultichannel,
+              });
               session.channelSeparationMode = channelTranscription.usedMultichannel
                 ? "device-channels"
-                : channelTranscription.separation === "duplicated"
-                  ? "duplicated-input"
-                  : "encoder-downmix";
+                : session.audioChannelRuntimeMode === "probing"
+                  ? "pending"
+                  : channelTranscription.separation === "duplicated"
+                    ? "duplicated-input"
+                    : channelTranscription.actualChannelCount <= 1
+                      ? "single"
+                      : "encoder-downmix";
               session.speakerChannels = channelTranscription.usedMultichannel
                 ? buildSpeakerMappings(channelTranscription.processedChannelCount, session.speakerChannels)
                 : {};
@@ -17271,7 +17303,9 @@ class LexVoicePlugin extends obsidian.Plugin {
                   totalRemovedParts: session.channelCrosstalkDeduplicated,
                 });
               }
-              if (channelTranscription.separation === "duplicated" && !session._channelDuplicatedNotified) {
+              if (channelMode === "multichannel"
+                && channelTranscription.separation === "duplicated"
+                && !session._channelDuplicatedNotified) {
                 session._channelDuplicatedNotified = true;
                 new obsidian.Notice("各声道内容相同，已按单声道转写。请在接收器上把输出改为「Stereo（立体声）」后重试。", 10000);
                 await this.logDiagnostic("warn", "asr.channel_content_duplicated", "录音多声道内容重复，已回退为单声道转写", {
@@ -17284,7 +17318,8 @@ class LexVoicePlugin extends obsidian.Plugin {
               const expectedHardwareChannels = channelMode === "multichannel"
                 ? Math.max(reportedChannelCount, DEFAULT_SPEAKER_CHANNELS)
                 : reportedChannelCount;
-              if (expectedHardwareChannels > 1
+              if (channelMode === "multichannel"
+                && expectedHardwareChannels > 1
                 && channelTranscription.actualChannelCount < expectedHardwareChannels
                 && !session._channelDownmixNotified) {
                 session._channelDownmixNotified = true;
@@ -21359,8 +21394,10 @@ ${source}`;
       const audioBuffer = await decodeAudioBlob(source.blob);
       const reportedChannelCount = Math.max(1, Number(task.audioChannelCount) || 1);
       const channelMode = normalizeAudioChannelMode(task.audioChannelMode || this.settings.audioChannelMode);
+      const runtimeChannelMode = task.audioChannelRuntimeMode
+        || initialAudioChannelRuntimeMode(channelMode, reportedChannelCount);
       const inspectRecordedChannels = (task.captureMode === "mic" || reportedChannelCount > 1)
-        && channelMode !== "mono";
+        && runtimeChannelMode !== "mono";
       const requestedChannelCount = inspectRecordedChannels ? MAX_SPEAKER_CHANNELS : 1;
       const sliceBlob = requestedChannelCount > 1
         ? renderMultichannelAudioBufferSliceToWav(audioBuffer, start, end, requestedChannelCount)
@@ -21395,13 +21432,21 @@ ${source}`;
     const audio = await this.readTranscribeTaskAudioBlob(task);
     const reportedChannelCount = Math.max(1, Number(task.audioChannelCount) || 1);
     const channelMode = normalizeAudioChannelMode(task.audioChannelMode || this.settings.audioChannelMode);
+    const runtimeChannelMode = task.audioChannelRuntimeMode
+      || initialAudioChannelRuntimeMode(channelMode, reportedChannelCount);
     const inspectRecordedChannels = (task.captureMode === "mic" || reportedChannelCount > 1)
-      && channelMode !== "mono";
+      && runtimeChannelMode !== "mono";
     const expectedChannelCount = inspectRecordedChannels
       ? MAX_SPEAKER_CHANNELS
       : reportedChannelCount;
-    const channelTranscription = inspectRecordedChannels || reportedChannelCount > 1
-      ? await transcribeAudioByChannels(this, audio.blob, audio.blob.type || "audio/wav", expectedChannelCount)
+    const channelTranscription = inspectRecordedChannels
+      ? await transcribeAudioByChannels(
+        this,
+        audio.blob,
+        audio.blob.type || "audio/wav",
+        expectedChannelCount,
+        { requireSeparatedChannels: channelMode === "auto" && runtimeChannelMode === "probing" },
+      )
       : null;
     const text = channelTranscription
       ? channelTranscription.text
