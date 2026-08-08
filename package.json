@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "typecheck:core": "tsc -p tsconfig.strict-core.json",
-    "build": "npm run typecheck:core && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "check:undefined-symbols": "node scripts/check-undefined-symbols.mjs",
+    "build": "npm run check:undefined-symbols && npm run typecheck:core && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "test": "vitest run",
+    "verify": "npm run build && npm test",
     "test:watch": "vitest",
     "version": "node version-bump.mjs && git add manifest.json versions.json"
   },

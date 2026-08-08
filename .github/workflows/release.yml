@@ -53,6 +53,9 @@ jobs:
       - name: Build plugin
         run: npm run build
 
+      - name: Run tests
+        run: npm test
+
       - name: Validate release files
         shell: bash
         run: |
