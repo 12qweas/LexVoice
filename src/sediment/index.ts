@@ -7,7 +7,7 @@ import { makeFileWikiLink } from '../shared/util-markdown';
 import { getPeopleSuggestionCacheKey, normalizePeopleSuggestionsModel, loadPeopleDirectory, isPeopleSuggestionIgnored, findMatchingPersonEntry } from '../people';
 import { callLlmWithContinuation } from '../llm/core';
 import { extractJsonObject } from '../shared/util-json';
-import { isLocalLlmEndpoint } from '../shared/util-llm-endpoint';
+import { canOmitServiceApiKey } from '../shared/util-llm-endpoint';
 import { DEFAULT_SETTINGS } from '../shared/defaults';
 import { createVocabularyGroups } from '../vocabulary';
 import { LEARNING_CARD_TAG, CONCEPT_CARD_TAG, TODO_CARD_TAG, upsertFrontmatterInMarkdown, upsertLexVoiceObjectNote, ensureTodayDailyNoteFile } from '../shared/util-note';
@@ -402,7 +402,7 @@ ${source}`;
 }
 
 export async function generateSedimentObjects(plugin, file, markdown) {
-  if (!plugin.settings.llmApiKey && !isLocalLlmEndpoint(plugin.settings.llmEndpoint)) throw new Error("请先在 API 页配置大模型服务");
+  if (!plugin.settings.llmApiKey && !canOmitServiceApiKey(plugin.settings.llmEndpoint)) throw new Error("请先在 API 页配置大模型服务");
   const sys = "你是 LexVoice 的纪要沉淀助手。你只根据当前纪要提炼结构化信息对象，输出合法 JSON，不编造，不泄露或要求任何配置。";
   // 沉淀输出是结构化 JSON，体量大、最易被输出上限截断（见真实产物里 learningCards 被切断）。
   // 走续写拼接：截断后让模型从断点续写 JSON，再整体解析，避免沉淀对象不完整。

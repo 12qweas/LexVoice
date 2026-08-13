@@ -1,7 +1,7 @@
 ﻿/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- LexVoice's settings/data layer is intentionally dynamically typed (files use @ts-nocheck and read untyped JSON from loadData); these type-only rules yield no actionable findings here and are tracked for incremental typing */
 // 由 main.ts 抽出（模块化拆解，提升工程稳定性；纯搬迁、零行为改动）。
 import * as obsidian from "obsidian";
-import { normalizeLlmEndpoint, isLocalLlmEndpoint, isPoeLlmEndpoint, isMoonshotKimiModel, buildLlmHeaders, assertSafeServiceEndpoint, getServiceEndpointSecurityIssue } from '../shared/util-llm-endpoint';
+import { normalizeLlmEndpoint, isPoeLlmEndpoint, isMoonshotKimiModel, buildLlmHeaders, assertSafeServiceEndpoint, canOmitServiceApiKey, getServiceEndpointSecurityIssue } from '../shared/util-llm-endpoint';
 import { applyThinkingParam } from './thinking';
 import { delayMs } from '../shared/util-audio';
 import { extractLlmContent } from '../shared/util-json';
@@ -260,8 +260,8 @@ export async function requestLlmChatCompletion(plugin, messages, options) {
   if (!endpoint) throw new Error("大模型服务地址未配置");
   assertSafeServiceEndpoint(endpoint, "http", "大模型服务地址");
   if (!llmModel) throw new Error("大模型名称未配置");
-  if (!llmApiKey && !isLocalLlmEndpoint(endpoint)) {
-    throw new Error("大模型访问密钥未配置；只有本地 localhost 服务可以留空");
+  if (!llmApiKey && !canOmitServiceApiKey(endpoint)) {
+    throw new Error("大模型访问密钥未配置；只有本地、局域网或 Tailscale 等私有网络服务可以留空");
   }
   // 流式默认开启（opt-out：显式传 stream:false 才关）。流式 + 空闲超时能避免"服务端算完计费、
   // 客户端却因总超时 abort 丢结果"的浪费——这对所有 LLM 调用（merge / 大纲 / 沉淀 / 词汇 / 问答）都适用。
@@ -525,7 +525,7 @@ export function getLlmConfigIssue(settings) {
   const endpointSecurityIssue = getServiceEndpointSecurityIssue(endpoint, "http", "大模型服务地址");
   if (endpointSecurityIssue) return endpointSecurityIssue;
   if (!model) return "大模型名称未配置";
-  if (!apiKey && !isLocalLlmEndpoint(endpoint)) return "大模型访问密钥未配置；只有本地 localhost 服务可以留空";
+  if (!apiKey && !canOmitServiceApiKey(endpoint)) return "大模型访问密钥未配置；只有本地、局域网或 Tailscale 等私有网络服务可以留空";
   return "";
 }
 

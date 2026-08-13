@@ -38,7 +38,7 @@ import { isRecord, pickDefined, genId, pad, formatElapsed, sanitizeFilename, esc
 import { escapeHtmlText, makeFileWikiLink } from "./shared/util-markdown";
 import { mimeFromExt, extFromMime, isAsrNonRetryableError, isTransientAsrError, pickMimeType, assertAudioCaptureSupported } from "./shared/util-audio";
 import { LIVE_ASR_CIRCUIT_COOLDOWN_MS, LIVE_ASR_TASK_STATUS, classifyLiveAsrBacklog, createLiveAsrCircuitState, isLiveAsrCircuitOpen, recordLiveAsrFailure, recordLiveAsrSuccess, summarizeLiveAsrJobs } from "./asr/live-segment-policy";
-import { isLocalLlmEndpoint } from "./shared/util-llm-endpoint";
+import { canOmitServiceApiKey, isLocalLlmEndpoint } from "./shared/util-llm-endpoint";
 import { obfuscateApiKey, deobfuscateApiKey, redactDiagnosticText, sanitizeDiagnosticData, diagnosticError } from "./shared/util-key-diag";
 import { extractJsonObject } from "./shared/util-json";
 import { MODE_BODIES } from "./prompts/mode-bodies";
@@ -18484,8 +18484,8 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
   // 返回 { html } 或 null（未配置/用户取消）。HTML 报告与 PDF 报告共用，保证选色/改色逻辑只有一份。
   async produceReportHtmlForFile(file) {
     if (!(file instanceof obsidian.TFile) || file.extension !== "md") return null;
-    if (!this.settings.llmApiKey && !isLocalLlmEndpoint(this.settings.llmEndpoint)) {
-      new obsidian.Notice("请先在 API 页配置大模型服务；本地 localhost 服务可留空密钥。", 8000);
+    if (!this.settings.llmApiKey && !canOmitServiceApiKey(this.settings.llmEndpoint)) {
+      new obsidian.Notice("请先在 API 页配置大模型服务；本地、局域网或 Tailscale 等私有网络服务可留空密钥。", 8000);
       return null;
     }
     if (!this.settings.llmEndpoint || !this.settings.llmModel) {
@@ -19171,7 +19171,7 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
 
   async extractVocabulary(merge) {
     const p = this.settings.industryProfile || {};
-    if (!this.settings.llmApiKey && !isLocalLlmEndpoint(this.settings.llmEndpoint)) throw new Error("请先在 API 页配置大模型服务");
+    if (!this.settings.llmApiKey && !canOmitServiceApiKey(this.settings.llmEndpoint)) throw new Error("请先在 API 页配置大模型服务");
     const customPromptBrief = getCustomPromptModeTemplates(this.settings)
       .slice(0, 12)
       .map(t => `- ${t.name || t.id}: ${(t.prompt || t.description || "").replace(/\s+/g, " ").slice(0, 180)}`)
@@ -19247,7 +19247,7 @@ ${customPromptBrief}
   }
 
   async extractVocabularyFromMarkdown(file, markdown) {
-    if (!this.settings.llmApiKey && !isLocalLlmEndpoint(this.settings.llmEndpoint)) throw new Error("请先在 API 页配置大模型服务");
+    if (!this.settings.llmApiKey && !canOmitServiceApiKey(this.settings.llmEndpoint)) throw new Error("请先在 API 页配置大模型服务");
     const source = String(markdown || "")
       .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/m, "")
       .slice(0, 18000);
@@ -19663,7 +19663,7 @@ ${source}`;
   }
 
   async extractVocabularyFromLibrary() {
-    if (!this.settings.llmApiKey && !isLocalLlmEndpoint(this.settings.llmEndpoint)) {
+    if (!this.settings.llmApiKey && !canOmitServiceApiKey(this.settings.llmEndpoint)) {
       new obsidian.Notice("请先配置大模型服务");
       return { processed: 0, added: 0, failed: 0, remaining: 0 };
     }
@@ -19702,7 +19702,7 @@ ${source}`;
       }).open();
       return;
     }
-    if (!this.settings.llmApiKey && !isLocalLlmEndpoint(this.settings.llmEndpoint)) {
+    if (!this.settings.llmApiKey && !canOmitServiceApiKey(this.settings.llmEndpoint)) {
       new obsidian.Notice("请先配置大模型服务");
       return;
     }

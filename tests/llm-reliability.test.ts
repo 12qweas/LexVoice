@@ -6,7 +6,7 @@ vi.mock("obsidian", () => ({
 
 import { fetchLlmModelList, getLlmConfigIssue, isTransientLlmError, readLlmSseStream, requestLlmChatCompletion, requestLlmChatCompletionViaObsidian } from "../src/llm/core";
 import { DashScopeStreamingClient, OpenAIRealtimeTranscriptionClient, OpenAIRealtimeTranslationClient } from "../src/asr/clients";
-import { assertSafeServiceEndpoint, getServiceEndpointSecurityIssue } from "../src/shared/util-llm-endpoint";
+import { assertSafeServiceEndpoint, canOmitServiceApiKey, getServiceEndpointSecurityIssue, isLocalLlmEndpoint, isSharedAddressSpaceHost } from "../src/shared/util-llm-endpoint";
 
 describe("service endpoint transport security", () => {
   it("允许公网 HTTPS/WSS", () => {
@@ -35,6 +35,32 @@ describe("service endpoint transport security", () => {
     expect(getServiceEndpointSecurityIssue("ws://192.168.1.8:9000/realtime", "websocket")).toBe("");
   });
 
+  it("允许 Tailscale 共享地址空间使用 HTTP/WS，但不按本地模型调度", () => {
+    const endpoints = [
+      "http://100.64.0.0:11434/v1",
+      "http://100.100.100.100:11434/v1",
+      "http://100.127.255.255:11434/v1",
+      "http://[::ffff:6440:1]:11434/v1",
+    ];
+    for (const endpoint of endpoints) {
+      expect(getServiceEndpointSecurityIssue(endpoint, "http"), endpoint).toBe("");
+      expect(canOmitServiceApiKey(endpoint), endpoint).toBe(true);
+      expect(isLocalLlmEndpoint(endpoint), endpoint).toBe(false);
+    }
+    expect(getServiceEndpointSecurityIssue("ws://100.64.0.1:9000/realtime", "websocket")).toBe("");
+    expect(isSharedAddressSpaceHost("100.64.0.1")).toBe(true);
+  });
+
+  it("严格限制 Tailscale 共享地址空间边界", () => {
+    for (const endpoint of [
+      "http://100.63.255.255:11434/v1",
+      "http://100.128.0.0:11434/v1",
+    ]) {
+      expect(getServiceEndpointSecurityIssue(endpoint, "http"), endpoint).toContain("公网地址必须使用 HTTPS");
+      expect(canOmitServiceApiKey(endpoint), endpoint).toBe(false);
+    }
+  });
+
   it("阻止公网 HTTP/WS、伪私网地址和错误协议", () => {
     expect(() => assertSafeServiceEndpoint("http://api.example.com/v1", "http", "大模型服务地址"))
       .toThrow("公网地址必须使用 HTTPS");
@@ -54,6 +80,11 @@ describe("service endpoint transport security", () => {
     })).toContain("公网地址必须使用 HTTPS");
     expect(getLlmConfigIssue({
       llmEndpoint: "http://127.0.0.1:11434/v1",
+      llmApiKey: "",
+      llmModel: "model",
+    })).toBe("");
+    expect(getLlmConfigIssue({
+      llmEndpoint: "http://100.100.100.100:11434/v1",
       llmApiKey: "",
       llmModel: "model",
     })).toBe("");

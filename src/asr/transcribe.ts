@@ -3,7 +3,7 @@
 import { delayMs, extFromMime, isTransientAsrError } from '../shared/util-audio';
 import { extractLlmContent } from '../shared/util-json';
 import { isLocalServiceEndpoint } from '../shared/util-note';
-import { assertSafeServiceEndpoint } from '../shared/util-llm-endpoint';
+import { assertSafeServiceEndpoint, canOmitServiceApiKey } from '../shared/util-llm-endpoint';
 import { buildVocabularyPrompt, applyVocabularyCorrections, loadVocabularyGroups } from '../vocabulary';
 import { buildPeopleHotwordsForAsr } from '../people';
 import { lexvoiceArrayBufferToBase64 } from './clients';
@@ -731,7 +731,7 @@ export async function transcribeAudio(
     : resolveTranscribeProvider(plugin, providerOverride);
   if (!p.endpoint) throw new Error(`转写服务地址未配置（当前服务：${p.name || p.id}）`);
   assertSafeServiceEndpoint(p.endpoint, "http", "转写服务地址");
-  if (!p.apiKey && !isLocalServiceEndpoint(p.endpoint)) throw new Error(`转写访问密钥未配置（当前服务：${p.name || p.id}）`);
+  if (!p.apiKey && !canOmitServiceApiKey(p.endpoint)) throw new Error(`转写访问密钥未配置（当前服务：${p.name || p.id}）`);
   if (!p.model)    throw new Error(`转写模型名称未配置（当前服务：${p.name || p.id}）`);
   const vocabularyGroups = await loadVocabularyGroups(plugin);
   if (isApimimoAsrProvider(p)) {

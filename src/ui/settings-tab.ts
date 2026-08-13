@@ -4,7 +4,7 @@
 import * as obsidian from "obsidian";
 import { DEFAULT_SETTINGS, DEFAULT_DAILY_MEETING_OVERVIEW_HEADING, DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE } from '../shared/defaults';
 import { genId } from '../shared/util-common';
-import { isLocalLlmEndpoint } from '../shared/util-llm-endpoint';
+import { canOmitServiceApiKey, isLocalLlmEndpoint, isSharedAddressSpaceEndpoint } from '../shared/util-llm-endpoint';
 import { isLocalServiceEndpoint } from '../shared/util-note';
 import { compareVersions, isLexVoiceMobileRuntime } from '../shared/util-platform';
 import { getEffectivePolishMode, getModeMeta, getVisibleModeEntries } from '../shared/mode-meta';
@@ -400,10 +400,10 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       const p = (this.plugin.settings.transcribeProviders || {})[id] || {};
       // 从 provider profile 取 requiresKey，避免硬编码与 profile 不一致
       const profile = this.getTranscribeProviderProfile(id, p);
-      const needsKey = !!profile.requiresKey;
+      const needsKey = !!profile.requiresKey && !canOmitServiceApiKey(p.endpoint);
       return !!(p.endpoint && p.model && (!needsKey || p.apiKey));
     })();
-    const hasLlm = !!(this.plugin.settings.llmEndpoint && this.plugin.settings.llmModel && (this.plugin.settings.llmApiKey || isLocalLlmEndpoint(this.plugin.settings.llmEndpoint)));
+    const hasLlm = !!(this.plugin.settings.llmEndpoint && this.plugin.settings.llmModel && (this.plugin.settings.llmApiKey || canOmitServiceApiKey(this.plugin.settings.llmEndpoint)));
     const dailyOn = this.plugin.settings.writeDailyMeetingOverview !== false;
 
     const head = page.createDiv({ cls: "lexvoice-home-head" });
@@ -947,7 +947,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
 
   renderTranscribeProviderGuide(c, activeId, provider, profile) {
     const p = provider || {};
-    const needsKey = !!profile.requiresKey;
+    const needsKey = !!profile.requiresKey && !canOmitServiceApiKey(p.endpoint);
     const ready = !!(p.endpoint && p.model && (!needsKey || p.apiKey));
     const missing = [];
     if (!p.endpoint) missing.push("服务地址");
@@ -1137,7 +1137,8 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       await this.plugin.saveSettings();
     };
 
-    new obsidian.Setting(c).setName(profile.requiresKey ? "访问密钥" : "访问密钥（可选）")
+    const providerNeedsKey = !!profile.requiresKey && !canOmitServiceApiKey(provider.endpoint);
+    new obsidian.Setting(c).setName(providerNeedsKey ? "访问密钥" : "访问密钥（可选）")
       .setDesc(profile.keyHelp)
       .addText(t => { t.inputEl.type = "password"; t.setValue(provider.apiKey || "").onChange(v => writeProvider("apiKey", v)); });
 
@@ -1806,8 +1807,16 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       }));
 
     const transcribeProvider = resolveTranscribeProvider(this.plugin);
-    const asrScope = isLocalServiceEndpoint(transcribeProvider.endpoint) ? "当前转写服务识别为本地或局域网" : "当前转写服务识别为云端";
-    const llmScope = isLocalLlmEndpoint(this.plugin.settings.llmEndpoint) ? "当前大模型服务识别为本地或局域网" : "当前大模型服务识别为云端";
+    const asrScope = isLocalServiceEndpoint(transcribeProvider.endpoint)
+      ? "当前转写服务识别为本地或局域网"
+      : (isSharedAddressSpaceEndpoint(transcribeProvider.endpoint)
+        ? "当前转写服务识别为 Tailscale 等私有网络"
+        : "当前转写服务识别为云端");
+    const llmScope = isLocalLlmEndpoint(this.plugin.settings.llmEndpoint)
+      ? "当前大模型服务识别为本地或局域网"
+      : (isSharedAddressSpaceEndpoint(this.plugin.settings.llmEndpoint)
+        ? "当前大模型服务识别为 Tailscale 等私有网络"
+        : "当前大模型服务识别为云端");
     const modeLabel = { privacy: "隐私优先", hotwords: "人名热词", localFull: "本地增强" }[normalizePeopleContextMode(this.plugin.settings.peopleContextMode)] || "隐私优先";
     const consentText = hasPeopleHotwordsConsent(this.plugin.settings) ? `已于 ${this.plugin.settings.peopleHotwordsConsentAt} 授权人名热词。` : "尚未授权人名热词。";
 
@@ -1844,7 +1853,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
   }
 
   async _extractVocabFromLibrary(refreshStatus) {
-    if (!this.plugin.settings.llmApiKey && !isLocalLlmEndpoint(this.plugin.settings.llmEndpoint)) {
+    if (!this.plugin.settings.llmApiKey && !canOmitServiceApiKey(this.plugin.settings.llmEndpoint)) {
       new obsidian.Notice("请先配置大模型服务");
       return;
     }

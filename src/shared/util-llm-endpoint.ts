@@ -19,11 +19,11 @@ export function getServiceEndpointSecurityIssue(endpoint, transport: ServiceEndp
   const secureName = transport === "websocket" ? "WSS" : "HTTPS";
   const localName = transport === "websocket" ? "WS" : "HTTP";
   if (protocol === secureProtocol) return "";
-  if (protocol === localProtocol && isPrivateNetworkHost(url.hostname)) return "";
+  if (protocol === localProtocol && isPlaintextAllowedServiceHost(url.hostname)) return "";
   if (protocol === localProtocol) {
-    return `${label}不安全：公网地址必须使用 ${secureName}；只有 localhost 或明确的局域网/私网地址可使用 ${localName}`;
+    return `${label}不安全：公网地址必须使用 ${secureName}；只有 localhost、局域网/私网或 Tailscale 等私有网络地址可使用 ${localName}`;
   }
-  return `${label}协议不受支持；请使用 ${secureName}，本地或私网服务可使用 ${localName}`;
+  return `${label}协议不受支持；请使用 ${secureName}，本地、私网或 Tailscale 等私有网络服务可使用 ${localName}`;
 }
 
 export function assertSafeServiceEndpoint(endpoint, transport: ServiceEndpointTransport, label = "服务地址") {
@@ -51,6 +51,24 @@ export function isLocalLlmEndpoint(endpoint) {
     const url = new URL(normalizeLlmEndpoint(endpoint));
     const host = (url.hostname || "").toLowerCase();
     return isPrivateNetworkHost(host);
+  } catch {
+    return false;
+  }
+}
+
+export function isSharedAddressSpaceEndpoint(endpoint) {
+  try {
+    const url = new URL(normalizeLlmEndpoint(endpoint));
+    return isSharedAddressSpaceHost(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+export function canOmitServiceApiKey(endpoint) {
+  try {
+    const url = new URL(normalizeLlmEndpoint(endpoint));
+    return isPlaintextAllowedServiceHost(url.hostname);
   } catch {
     return false;
   }
@@ -91,6 +109,34 @@ export function buildLlmHeaders(apiKey, endpoint) {
 
 export function comparableLlmEndpoint(endpoint) {
   return normalizeLlmEndpoint(endpoint).replace(/\/+$/, "").toLowerCase();
+}
+
+export function isPlaintextAllowedServiceHost(hostname) {
+  return isPrivateNetworkHost(hostname) || isSharedAddressSpaceHost(hostname);
+}
+
+export function isSharedAddressSpaceHost(hostname) {
+  // RFC 6598 is accepted for user-configured Tailscale-style transport, but is
+  // intentionally kept out of isLocalLlmEndpoint so it does not change LLM scheduling.
+  const host = String(hostname || "").toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  if (!host) return false;
+  const mappedIpv4 = host.match(/^::ffff:(.+)$/i);
+  if (mappedIpv4) {
+    const suffix = mappedIpv4[1];
+    if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(suffix)) return isSharedAddressSpaceHost(suffix);
+    const hex = suffix.match(/^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+    if (hex) {
+      const high = parseInt(hex[1], 16);
+      const low = parseInt(hex[2], 16);
+      return isSharedAddressSpaceHost(`${high >>> 8}.${high & 255}.${low >>> 8}.${low & 255}`);
+    }
+  }
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!ipv4) return false;
+  const octets = ipv4.slice(1).map(Number);
+  if (octets.some(n => n < 0 || n > 255)) return false;
+  const [a, b] = octets;
+  return a === 100 && b >= 64 && b <= 127;
 }
 
 export function isPrivateNetworkHost(hostname) {
