@@ -346,9 +346,9 @@ export const BRIEFING_MERGE_MAX_TOKENS_LONG = 16000;
 
 export const BRIEFING_MERGE_MAX_TOKENS_ULTRA = 48000;
 
-// 这是需求目标的防失控上界，不是模型兼容上限。已知旧模型会在上面的 ceiling 中单独限额，
-// 新模型则按材料体量请求，服务端若仍拒绝会走输出预算降档。
-export const BRIEFING_MERGE_TARGET_MAX_TOKENS = 128000;
+// 这是极端长材料的防失控上界，不是模型兼容上限，也不参与模型名称判断。
+// 现代服务端可以先按材料体量请求更大的输出；实际不支持时由请求层依据明确错误降档。
+export const BRIEFING_MERGE_TARGET_MAX_TOKENS = 384000;
 
 export function normalizeSchemeAsrSnapshot(asr) {
   if (!asr || typeof asr !== "object") return undefined;

@@ -585,7 +585,7 @@ export function isLlmOutputParameterError(error) {
   return mentionsMaxTokens && rejectsParameter && !looksLikeValueLimit;
 }
 
-const OUTPUT_BUDGET_FALLBACKS = [128000, 64000, 32000, 16000, 8192, 4096];
+const OUTPUT_BUDGET_FALLBACKS = [384000, 256000, 192000, 128000, 64000, 32000, 16000, 8192, 4096];
 
 export function getNextLlmOutputBudget(options) {
   const requested = getLlmOutputBudgetFromOptions(options);
