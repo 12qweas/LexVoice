@@ -50,7 +50,7 @@ import { JOBPORTRAIT_SYSTEM_PROMPT, JOBPORTRAIT_FOLLOWUP_RULES } from "./prompts
 import { CLEAN_TRANSCRIPT_SYSTEM, buildCleanTranscriptChunkPrompt, buildKnownSpeakerClause, QUICK_DICTATION_SYSTEM, buildQuickDictationCleanupPrompt } from "./prompts/clean-transcript";
 import { RealtimeOutlineCoordinator, runInOutlineSessionTail } from "./outline-coordinator";
 import { buildLexVoiceVersionPayload, replaceExistingLexVoiceActiveVersionBlock, replaceLeadingFrontmatter, sanitizeLexVoiceActiveVersionBody, splitLeadingFrontmatter, splitLexVoiceVersionPayload } from "./version-content";
-import { normalizeRecentNoteRoots, isPathUnderRecentNoteRoots } from "./recent-note-paths";
+import { getRecentNoteParentPath, getRecentNotePathRelativeToRoot, getRecentNoteTopLevelFolder, normalizeRecentNoteRoot, normalizeRecentNoteRoots, isPathUnderRecentNoteRoots } from "./recent-note-paths";
 import {
   appendActivityEvent,
   audioImportStageFromWorkProgress,
@@ -2479,6 +2479,11 @@ const RECENT_TIME_FILTER_OPTIONS = [
   { id: "all", label: "全部日期" },
 ];
 
+const RECENT_GROUP_OPTIONS = [
+  { id: "time", label: "按时间" },
+  { id: "folder", label: "按文件夹" },
+];
+
 const RECENT_TOPIC_FALLBACKS = ["招聘", "学习", "会议", "访谈", "PPT", "AI"];
 
 function formatRecentDurationLabel(raw) {
@@ -2576,6 +2581,40 @@ function getMarkdownFilesUnderRecentRoots(plugin) {
       && isPathUnderRecentNoteRoots(file.path, roots));
 }
 
+function getRecentRootForPath(plugin, pathValue) {
+  const path = obsidian.normalizePath(String(pathValue || ""));
+  const roots = getRecentNoteRoots(plugin);
+  return roots
+    .filter((root) => !root || path === root || path.startsWith(`${root}/`))
+    .sort((a, b) => b.length - a.length)[0] || "";
+}
+
+function getRecentFolderInfo(plugin, file) {
+  const folderPath = getRecentNoteParentPath(file && file.path);
+  const root = getRecentRootForPath(plugin, folderPath || (file && file.path));
+  const relativeFolder = getRecentNotePathRelativeToRoot(folderPath, root);
+  const rootLabel = root ? root.split("/").pop() : "库根目录";
+  const label = relativeFolder || rootLabel || "库根目录";
+  return {
+    key: folderPath || "__root__",
+    label,
+    path: folderPath,
+    depth: relativeFolder ? relativeFolder.split("/").length : 0,
+  };
+}
+
+function getRecentProjectInfo(plugin, file) {
+  const configuredRoot = normalizeRecentNoteRoot(plugin && plugin.settings ? plugin.settings.recruitJdFolderPath : "");
+  const project = configuredRoot ? getRecentNoteTopLevelFolder(file && file.path, configuredRoot) : "";
+  if (!project) return { key: "__unassigned__", label: "未归入项目", path: "", depth: 0 };
+  return {
+    key: `${configuredRoot}/${project}`,
+    label: project,
+    path: `${configuredRoot}/${project}`,
+    depth: 0,
+  };
+}
+
 function getRecentNotes(plugin, limit) {
   const moment = window.moment;
   const currentYear = moment ? moment().year() : new Date().getFullYear();
@@ -2626,6 +2665,8 @@ function getRecentNotes(plugin, limit) {
     const durationLabel = formatRecentDurationLabel(frontmatter["时长"] || frontmatter.duration || frontmatter["duration"]);
     const topics = collectRecentNoteTopics(frontmatter, title, mode);
     const quickStatus = getRecentNoteQuickStatus(plugin, f, pendingPathSet);
+    const folder = getRecentFolderInfo(plugin, f);
+    const project = getRecentProjectInfo(plugin, f);
     items.push({
       file: f,
       timestamp: t.valueOf(),
@@ -2639,6 +2680,13 @@ function getRecentNotes(plugin, limit) {
       axisSecondary: sameYear ? t.format("M月") : t.format("M月D日"),
       displayTime: t.format(m && m[2] ? "HH:mm" : "MM-DD"),
       durationLabel,
+      folderKey: folder.key,
+      folderLabel: folder.label,
+      folderPath: folder.path,
+      folderDepth: folder.depth,
+      projectKey: project.key,
+      projectLabel: project.label,
+      projectPath: project.path,
     });
   }
   // 把派生版本挂到各自母本下（按 source_path 归并；母本不在列表里的派生暂不显示，仍可经反链/文件树找到）。
@@ -3224,6 +3272,7 @@ class QuickDictationController {
       new obsidian.Notice("会议录音中，听写不可用；请先停止录音。", 5000);
       return;
     }
+    new obsidian.Notice("即时听写不会保存录音；需要保存会议内容，请使用“会议纪要录音”。", 6000);
     this._starting = true; // 同步占位，防麦克风获取期间二次触发起两条流
     try {
       // 自动落点：设置为「剪贴板」则强制走剪贴板；否则自动判断——
@@ -3408,7 +3457,7 @@ class QuickDictationController {
       this._setState("idle"); // 没转出内容：静默回落
       return;
     }
-    this._lastRawText = raw; // 原文可召回：整理成败都留一份（命令「听写 · 复制上次转写原文」）
+    this._lastRawText = raw; // 原文可召回：整理成败都留一份（命令「即时听写 · 复制上次转写原文」）
     // 不先写原文（用户要求）：等结构化整理出来，一次性落整理版；整理失败才兜底落原文，并把失败原因显示出来。
     const toEditor = this.target === "editor" && !!(this.anchor && this.anchor.editor);
     this._setState("cleaning");
@@ -3450,7 +3499,7 @@ class QuickDictationController {
         try {
           await navigator.clipboard.writeText(finalText);
           landedOk = true;
-          new obsidian.Notice("编辑器已关闭，听写结果已复制到剪贴板", 6000);
+          new obsidian.Notice("编辑器已关闭，即时听写结果已复制到剪贴板", 6000);
         } catch { /* intentionally empty */ }
       }
     } else {
@@ -3467,7 +3516,7 @@ class QuickDictationController {
         if (this.state === "done") this._setState("idle");
       }, 1200);
     } else {
-      new obsidian.Notice("即时听写结果写入失败；可用命令「即时听写：复制上次原文」找回内容。", 9000);
+      new obsidian.Notice("即时听写结果写入失败；可用命令“即时听写 · 复制上次转写原文”找回内容。", 9000);
       try { void this.plugin.logDiagnostic("error", "quickdict.land_failed", "听写结果落字失败", { toEditor, chars: finalText.length }); } catch { /* intentionally empty */ }
       this._setState("idle");
     }
@@ -6868,11 +6917,15 @@ class OutlineView extends obsidian.ItemView {
     this.lastOutlineWorkbenchSignature = "";
     this.outlineSessionId = "";
     this._renderRaf = 0;
+    this._preserveScrollOnNextRender = false;
     this._lastSig = "";
     this._lastRenderedOutline = "";
     this.showRecentHome = true;
     this.idlePanelTab = "";
     this.recentFilters = { time: "week", mode: "all" };
+    // 纪要列表默认按文件夹组织；时间线仍可从筛选条切换回来。
+    this.recentGroupBy = "folder";
+    this.recentCollapsedFolders = new Set();
     this.sedimentGroup = "person";
     this.sedimentSwitcherOpen = false;
     this.sedimentExpandedGroups = new Set(); // 哪些候选分组已"展开全部"（默认只显示前 8 条）
@@ -7024,6 +7077,7 @@ class OutlineView extends obsidian.ItemView {
       session && session.workProgress ? `${session.workProgress.stage || ""}:${session.workProgress.label || ""}:${session.workProgress.percent ?? ""}` : "",
       this.idlePanelTab || (this.showRecentHome ? "recent" : "outline"),
       recentFilterSig,
+      this.recentGroupBy || "time",
       sedimentSig,
       this.sedimentGroup || "person",
       this.sedimentSwitcherOpen ? 1 : 0,
@@ -7054,6 +7108,16 @@ class OutlineView extends obsidian.ItemView {
   render() {
     const root = this.containerEl.children[1];
     if (!root) return;
+    const preserveScroll = this._preserveScrollOnNextRender === true;
+    const previousScrollTop = preserveScroll ? root.scrollTop : 0;
+    this._preserveScrollOnNextRender = false;
+    const restoreScroll = () => {
+      if (!preserveScroll) return;
+      root.scrollTop = previousScrollTop;
+      window.requestAnimationFrame(() => {
+        if (this.containerEl.children[1] === root) root.scrollTop = previousScrollTop;
+      });
+    };
     root.empty();
     root.addClass("lexvoice-outline");
     root.toggleClass("is-mobile", isLexVoiceMobileRuntime());
@@ -7079,6 +7143,7 @@ class OutlineView extends obsidian.ItemView {
     if (this._recruitEditing && !activelyRecording && isRecruitFeatureUnlocked(this.plugin.settings)) {
       this.renderRecruitContextInline(root);
       this._lastSig = this.computeSignature();
+      restoreScroll();
       return;
     }
 
@@ -7146,6 +7211,7 @@ class OutlineView extends obsidian.ItemView {
       }
     }
     this._lastSig = this.computeSignature();
+    restoreScroll();
   }
 
   getSessionNoteFile(session) {
@@ -10893,7 +10959,13 @@ class OutlineView extends obsidian.ItemView {
           for (const it of opts.items) {
             menu.addItem(mi => {
               mi.setTitle(it.label);
-              mi.onClick(() => { curVal = it.value; lbl.setText(it.label); void opts.onPick(it.value); });
+              mi.onClick(() => {
+                curVal = it.value;
+                lbl.setText(it.label);
+                // 选择下拉项会触发侧边栏重绘；先记住滚动位置，避免选完后跳回顶部。
+                this._preserveScrollOnNextRender = true;
+                void opts.onPick(it.value);
+              });
             });
           }
           const r = trigger.getBoundingClientRect();
@@ -12026,6 +12098,7 @@ class OutlineView extends obsidian.ItemView {
     this.recentFilters = { ...this.getRecentFilters(), [key]: value || "all" };
     this.showRecentHome = true;
     this.idlePanelTab = "recent";
+    this._preserveScrollOnNextRender = true;
     this.render();
   }
 
@@ -12033,7 +12106,48 @@ class OutlineView extends obsidian.ItemView {
     this.recentFilters = this.getDefaultRecentFilters();
     this.showRecentHome = true;
     this.idlePanelTab = "recent";
+    this._preserveScrollOnNextRender = true;
     this.render();
+  }
+
+  getRecentGroupBy() {
+    return RECENT_GROUP_OPTIONS.some((item) => item.id === this.recentGroupBy) ? this.recentGroupBy : "folder";
+  }
+
+  setRecentGroupBy(value) {
+    this.recentGroupBy = RECENT_GROUP_OPTIONS.some((item) => item.id === value) ? value : "time";
+    this.showRecentHome = true;
+    this.idlePanelTab = "recent";
+    this._preserveScrollOnNextRender = true;
+    this.render();
+  }
+
+  showRecentGroupMenu(evt) {
+    evt.preventDefault();
+    evt.stopPropagation();
+    const menu = new obsidian.Menu();
+    const current = this.getRecentGroupBy();
+    for (const option of RECENT_GROUP_OPTIONS) {
+      menu.addItem((item) => {
+        item.setTitle(option.label);
+        if (option.id === current) item.setIcon("check");
+        item.onClick(() => this.setRecentGroupBy(option.id));
+      });
+    }
+    const target = evt.currentTarget instanceof HTMLElement
+      ? evt.currentTarget
+      : evt.target instanceof HTMLElement
+        ? evt.target.closest(".lexvoice-outline-recent-group-chip")
+        : null;
+    if (target && typeof menu.showAtPosition === "function") {
+      const rect = target.getBoundingClientRect();
+      const menuWidthHint = 160;
+      const x = Math.max(8, Math.min(Math.round(rect.left), Math.max(8, window.innerWidth - menuWidthHint - 8)));
+      const y = Math.max(8, Math.min(Math.round(rect.bottom + 8), Math.max(8, window.innerHeight - 8)));
+      this.showLexVoiceMenuAtPosition(menu, { x, y });
+      return;
+    }
+    this.showLexVoiceMenuAtMouse(menu, evt);
   }
 
   getRecentModeFilterOptions() {
@@ -12175,6 +12289,12 @@ class OutlineView extends obsidian.ItemView {
     searchInput.value = this._recentSearch || "";
     searchInput.addEventListener("input", () => { this._recentSearch = searchInput.value; this.applyRecentSearchFilter(parent); });
     const bar = wrap.createDiv({ cls: "lexvoice-outline-recent-filters" });
+    const groupChip = bar.createEl("button", {
+      cls: "lexvoice-outline-recent-group-chip lexvoice-outline-recent-filter-chip is-active",
+      text: (RECENT_GROUP_OPTIONS.find((item) => item.id === this.getRecentGroupBy()) || RECENT_GROUP_OPTIONS[0]).label,
+      attr: { type: "button", title: "选择纪要分组方式" },
+    });
+    groupChip.onclick = (evt) => this.showRecentGroupMenu(evt);
     const chipDefs = [
       ["time", RECENT_TIME_FILTER_OPTIONS],
       ["mode", this.getRecentModeFilterOptions()],
@@ -12215,6 +12335,129 @@ class OutlineView extends obsidian.ItemView {
     }
   }
 
+  renderRecentNoteRow(parent, r, activePath, options = {}) {
+    const isActive = activePath && obsidian.normalizePath(r.file.path) === activePath;
+    const row = parent.createDiv({ cls: `lexvoice-outline-recent-row ${isActive ? "is-active" : ""}` });
+    if (options.indent) row.style.setProperty("--lexvoice-recent-indent", `${Math.min(4, Math.max(0, Number(options.indent) || 0))}`);
+    row.addEventListener("click", async () => {
+      try { await this.app.workspace.getLeaf(false).openFile(r.file); } catch (e) { console.error(e); }
+    });
+    let nameEl;
+    row.addEventListener("contextmenu", (evt) => {
+      evt.preventDefault();
+      evt.stopPropagation();
+      this.showRecentNoteContextMenu(evt, r.file, () => this.beginRecentNoteRename(nameEl, r.file, r.title));
+    });
+    const meta = getModeMeta(this.plugin.settings, r.mode) || MODE_META.off;
+    const chip = row.createDiv({ cls: "lexvoice-outline-recent-chip", attr: { title: meta.label || meta.prefix || "录音" } });
+    try { obsidian.setIcon(chip, meta.icon || "mic"); } catch { chip.setText((meta.prefix || "录音").slice(0, 1)); }
+    const body = row.createDiv({ cls: "lexvoice-outline-recent-body" });
+    const titleLine = body.createDiv({ cls: "lexvoice-outline-recent-title-line" });
+    nameEl = titleLine.createDiv({ cls: "lexvoice-outline-recent-name", text: r.title || r.file.basename });
+    nameEl.addEventListener("click", (e) => { if (nameEl.isContentEditable) e.stopPropagation(); });
+    const metaText = [r.displayTime, meta.prefix, r.durationLabel].filter(Boolean).join(" · ");
+    body.createDiv({ cls: "lexvoice-outline-recent-meta", text: metaText });
+    const failedTasks = getQueueTasksForMarkdown(this.plugin, r.file, { types: ["transcribe"], failedOnly: true });
+    const actions = body.createDiv({ cls: "lexvoice-outline-recent-actions" });
+    this.createRecentActionButton(actions, {
+      icon: "pencil",
+      title: "重命名",
+      cls: "is-rename",
+      onClick: () => this.beginRecentNoteRename(nameEl, r.file, r.title),
+    });
+    const queueState = getRecentQueueProcessingState(this.plugin, r.file);
+    if (queueState) this.setRecentProcessingStatus(row, actions, queueState);
+    if (failedTasks.length) {
+      this.createRecentActionButton(actions, {
+        icon: "rotate-ccw",
+        label: `重试转写${failedTasks.length > 1 ? ` ${failedTasks.length}` : ""}`,
+        title: `重试这篇纪要的 ${failedTasks.length} 个转写失败片段`,
+        cls: "is-retry",
+        onClick: () => this.retryRecentTranscription(r.file),
+      });
+    }
+    this.syncRecentNoteProcessingState(r.file, row, actions, failedTasks.length);
+    if (r.variants && r.variants.length) {
+      for (const v of r.variants) {
+        const vrow = parent.createDiv({ cls: "lexvoice-outline-recent-variant" });
+        if (activePath && obsidian.normalizePath(v.file.path) === activePath) vrow.addClass("is-active");
+        const vchip = vrow.createDiv({ cls: "lexvoice-outline-recent-variant-chip" });
+        try { obsidian.setIcon(vchip, v.kind === "clean" ? "file-text" : "files"); } catch { /* intentionally empty */ }
+        vrow.createDiv({ cls: "lexvoice-outline-recent-variant-name", text: v.label || v.file.basename });
+        vrow.addEventListener("click", async () => {
+          try { await this.plugin.switchLexVoiceVersion(v.file, v.sourcePath); } catch (e) { console.error(e); }
+        });
+        vrow.addEventListener("contextmenu", (evt) => {
+          evt.preventDefault();
+          evt.stopPropagation();
+          this.showVariantContextMenu(evt, v.file, v.sourcePath);
+        });
+      }
+    }
+    return row;
+  }
+
+  renderRecentGrouped(sec, recents, activePath, groupBy) {
+    const list = sec.createDiv({ cls: `lexvoice-outline-recent lexvoice-outline-recent--${groupBy}` });
+    const groups = new Map();
+    for (const item of recents) {
+      const key = groupBy === "project" ? item.projectKey : item.folderKey;
+      const label = groupBy === "project" ? item.projectLabel : item.folderLabel;
+      const path = groupBy === "project" ? item.projectPath : item.folderPath;
+      const depth = groupBy === "project" ? 0 : item.folderDepth;
+      if (!groups.has(key)) groups.set(key, { key, label, path, depth, items: [] });
+      groups.get(key).items.push(item);
+    }
+    const groupList = Array.from(groups.values()).sort((a, b) => {
+      if (groupBy === "project" && a.key === "__unassigned__") return 1;
+      if (groupBy === "project" && b.key === "__unassigned__") return -1;
+      return String(a.label || "").localeCompare(String(b.label || ""), "zh-CN");
+    });
+    for (const group of groupList) {
+      const groupEl = list.createDiv({ cls: "lexvoice-outline-recent-group lexvoice-outline-recent-group--named" });
+      if (groupBy === "folder") groupEl.style.paddingLeft = `${Math.min(4, Math.max(0, Number(group.depth) || 0)) * 12}px`;
+      const axis = groupEl.createDiv({ cls: "lexvoice-outline-recent-axis lexvoice-outline-recent-axis--named" });
+      const axisIcon = axis.createDiv({ cls: "lexvoice-outline-recent-axis-icon", attr: { title: group.path || group.label } });
+      try { obsidian.setIcon(axisIcon, groupBy === "project" ? "folder-open" : "folder"); } catch { /* intentionally empty */ }
+      const itemsEl = groupEl.createDiv({ cls: "lexvoice-outline-recent-items" });
+      const groupTitle = itemsEl.createDiv({ cls: "lexvoice-outline-recent-group-title" });
+      const collapseKey = groupBy === "folder" ? `folder:${group.key}` : "";
+      const applyCollapsedState = (collapsed) => {
+        groupEl.classList.toggle("is-collapsed", collapsed);
+        groupTitle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        const toggle = groupTitle.querySelector(".lexvoice-outline-recent-folder-toggle");
+        if (toggle) {
+          try { obsidian.setIcon(toggle, collapsed ? "chevron-right" : "chevron-down"); } catch { /* intentionally empty */ }
+        }
+      };
+      if (groupBy === "folder") {
+        const toggle = groupTitle.createSpan({ cls: "lexvoice-outline-recent-folder-toggle" });
+        try { obsidian.setIcon(toggle, this.recentCollapsedFolders.has(collapseKey) ? "chevron-right" : "chevron-down"); } catch { /* intentionally empty */ }
+        groupTitle.setAttribute("role", "button");
+        groupTitle.setAttribute("tabindex", "0");
+        groupTitle.setAttribute("title", group.path || group.label || "文件夹");
+        groupTitle.addEventListener("click", (evt) => {
+          evt.preventDefault();
+          evt.stopPropagation();
+          const collapsed = !this.recentCollapsedFolders.has(collapseKey);
+          if (collapsed) this.recentCollapsedFolders.add(collapseKey);
+          else this.recentCollapsedFolders.delete(collapseKey);
+          applyCollapsedState(collapsed);
+        });
+        groupTitle.addEventListener("keydown", (evt) => {
+          if (evt.key !== "Enter" && evt.key !== " ") return;
+          evt.preventDefault();
+          groupTitle.click();
+        });
+      }
+      groupTitle.createSpan({ cls: "lexvoice-outline-recent-group-weekday", text: group.label || "未命名文件夹" });
+      groupTitle.createSpan({ cls: "lexvoice-outline-recent-group-count", text: `${group.items.length} 篇` });
+      for (const item of group.items) this.renderRecentNoteRow(itemsEl, item, activePath, { indent: group.depth });
+      if (groupBy === "folder") applyCollapsedState(this.recentCollapsedFolders.has(collapseKey));
+    }
+    this.applyRecentSearchFilter(sec);
+  }
+
   renderRecent(root) {
     const allRecents = getRecentNotes(this.plugin, 120);
     const recents = this.applyRecentFilters(allRecents).slice(0, 48);
@@ -12230,6 +12473,11 @@ class OutlineView extends obsidian.ItemView {
     }
     const active = this.getActiveLexVoiceNoteFile();
     const activePath = active && active.path ? obsidian.normalizePath(active.path) : "";
+    const groupBy = this.getRecentGroupBy();
+    if (groupBy !== "time") {
+      this.renderRecentGrouped(sec, recents, activePath, groupBy);
+      return;
+    }
     const list = sec.createDiv({ cls: "lexvoice-outline-recent" });
     const groupCounts = new Map();
     for (const item of recents) groupCounts.set(item.dateKey, (groupCounts.get(item.dateKey) || 0) + 1);
@@ -12257,66 +12505,7 @@ class OutlineView extends obsidian.ItemView {
         if (isToday) groupTitle.createSpan({ cls: "lexvoice-outline-recent-group-today", text: "今日" });
         groupTitle.createSpan({ cls: "lexvoice-outline-recent-group-count", text: `${groupCounts.get(r.dateKey) || 0} 篇` });
       }
-      const isActive = activePath && obsidian.normalizePath(r.file.path) === activePath;
-      const row = itemsEl.createDiv({ cls: `lexvoice-outline-recent-row ${isActive ? "is-active" : ""}` });
-      row.addEventListener("click", async () => {
-        try { await this.app.workspace.getLeaf(false).openFile(r.file); } catch (e) { console.error(e); }
-      });
-      row.addEventListener("contextmenu", (evt) => {
-        evt.preventDefault();
-        evt.stopPropagation();
-        // nameEl 在本次迭代后续才声明；闭包在右键时才执行，届时已初始化（TDZ 安全）。
-        this.showRecentNoteContextMenu(evt, r.file, () => this.beginRecentNoteRename(nameEl, r.file, r.title));
-      });
-      const meta = getModeMeta(this.plugin.settings, r.mode) || MODE_META.off;
-      const chip = row.createDiv({ cls: "lexvoice-outline-recent-chip", attr: { title: meta.label || meta.prefix || "录音" } });
-      try { obsidian.setIcon(chip, meta.icon || "mic"); } catch { chip.setText((meta.prefix || "录音").slice(0, 1)); }
-      const body = row.createDiv({ cls: "lexvoice-outline-recent-body" });
-      const titleLine = body.createDiv({ cls: "lexvoice-outline-recent-title-line" });
-      const nameEl = titleLine.createDiv({ cls: "lexvoice-outline-recent-name", text: r.title || r.file.basename });
-      // 改名进行中（contentEditable）时，点击姓名只移动光标，别冒泡到整行去打开笔记。
-      nameEl.addEventListener("click", (e) => { if (nameEl.isContentEditable) e.stopPropagation(); });
-      const metaText = [r.displayTime, meta.prefix, r.durationLabel].filter(Boolean).join(" · ");
-      body.createDiv({ cls: "lexvoice-outline-recent-meta", text: metaText });
-      const failedTasks = getQueueTasksForMarkdown(this.plugin, r.file, { types: ["transcribe"], failedOnly: true });
-      const actions = body.createDiv({ cls: "lexvoice-outline-recent-actions" });
-      // 改名入口：可见铅笔按钮（桌面悬停浮现、移动端常显，触屏也能点），点击进入就地编辑。
-      this.createRecentActionButton(actions, {
-        icon: "pencil",
-        title: "重命名",
-        cls: "is-rename",
-        onClick: () => this.beginRecentNoteRename(nameEl, r.file, r.title),
-      });
-      const queueState = getRecentQueueProcessingState(this.plugin, r.file);
-      if (queueState) this.setRecentProcessingStatus(row, actions, queueState);
-      if (failedTasks.length) {
-        this.createRecentActionButton(actions, {
-          icon: "rotate-ccw",
-          label: `重试转写${failedTasks.length > 1 ? ` ${failedTasks.length}` : ""}`,
-          title: `重试这篇纪要的 ${failedTasks.length} 个转写失败片段`,
-          cls: "is-retry",
-          onClick: () => this.retryRecentTranscription(r.file),
-        });
-      }
-      this.syncRecentNoteProcessingState(r.file, row, actions, failedTasks.length);
-      // 派生版本（清稿等）作为母本下的缩进子行展示；点开打开派生，右键给派生专属菜单。
-      if (r.variants && r.variants.length) {
-        for (const v of r.variants) {
-          const vrow = itemsEl.createDiv({ cls: "lexvoice-outline-recent-variant" });
-          if (activePath && obsidian.normalizePath(v.file.path) === activePath) vrow.addClass("is-active");
-          const vchip = vrow.createDiv({ cls: "lexvoice-outline-recent-variant-chip" });
-          try { obsidian.setIcon(vchip, v.kind === "clean" ? "file-text" : "files"); } catch { /* intentionally empty */ }
-          vrow.createDiv({ cls: "lexvoice-outline-recent-variant-name", text: v.label || v.file.basename });
-          vrow.addEventListener("click", async () => {
-            try { await this.plugin.switchLexVoiceVersion(v.file, v.sourcePath); } catch (e) { console.error(e); }
-          });
-          vrow.addEventListener("contextmenu", (evt) => {
-            evt.preventDefault();
-            evt.stopPropagation();
-            this.showVariantContextMenu(evt, v.file, v.sourcePath);
-          });
-        }
-      }
+      this.renderRecentNoteRow(itemsEl, r, activePath);
     }
     this.applyRecentSearchFilter(sec);
   }
@@ -13301,11 +13490,11 @@ class LexVoicePlugin extends obsidian.Plugin {
     this.app.workspace.onLayoutReady(() => this.syncBubbleVisibility());
 
     this.addCommand({ id: "toggle-recording", name: "开始/停止录音", callback: () => this.toggleRecording() });
-    this.addCommand({ id: "quick-dictation-toggle", name: "听写 · 开始/结束", callback: () => { void this.quickDictation.toggle(this.settings.quickDictationTarget || "editor"); } });
-    this.addCommand({ id: "quick-dictation-copy-raw", name: "听写 · 复制上次转写原文", callback: () => {
+    this.addCommand({ id: "quick-dictation-toggle", name: "即时听写 · 开始/结束", callback: () => { void this.quickDictation.toggle(this.settings.quickDictationTarget || "editor"); } });
+    this.addCommand({ id: "quick-dictation-copy-raw", name: "即时听写 · 复制上次转写原文", callback: () => {
       const t = (this.quickDictation && this.quickDictation._lastRawText) || "";
       if (!t) { new obsidian.Notice("还没有可复制的听写原文"); return; }
-      navigator.clipboard.writeText(t).then(() => new obsidian.Notice("已复制上次听写原文")).catch(() => new obsidian.Notice("复制失败", 5000));
+      navigator.clipboard.writeText(t).then(() => new obsidian.Notice("已复制上次即时听写原文")).catch(() => new obsidian.Notice("复制失败", 5000));
     }});
     this.addCommand({ id: "pause-resume-recording", name: "暂停/继续录音", callback: () => {
       const s = this.recorder.state;
@@ -14200,6 +14389,10 @@ class LexVoicePlugin extends obsidian.Plugin {
   }
 
   getTaskActivityErrorHint(activity) {
+    const raw = getTaskErrorMessage(activity && activity.error, "");
+    if (/file already exists|文件已存在|already exists/i.test(raw)) {
+      return "目标版本文件已存在。已保留原始转写，重新整理不会覆盖原始材料。";
+    }
     return getTaskErrorHint(activity && activity.errorKind ? activity.errorKind : "");
   }
 
@@ -20178,8 +20371,19 @@ ${source}`;
     const manifestPath = obsidian.normalizePath(`${folder}/manifest.json`);
     const payload = JSON.stringify(Object.assign({ version: 1 }, manifest || {}), null, 2);
     const f = this.app.vault.getAbstractFileByPath(manifestPath);
-    if (f instanceof obsidian.TFile) await this.app.vault.modify(f, payload);
-    else await this.app.vault.create(manifestPath, payload);
+    if (f instanceof obsidian.TFile) {
+      await this.app.vault.modify(f, payload);
+      return;
+    }
+    try {
+      await this.app.vault.create(manifestPath, payload);
+    } catch (error) {
+      // 旧版本重复任务可能同时首次创建 manifest。create 发生竞争时，
+      // 转为更新已经由另一个任务创建的文件，不把整理结果判为失败。
+      const raced = this.app.vault.getAbstractFileByPath(manifestPath);
+      if (!(raced instanceof obsidian.TFile)) throw error;
+      await this.app.vault.modify(raced, payload);
+    }
   }
 
   async writeLexVoiceVersionFile(folder, fileName, content) {
@@ -20190,7 +20394,16 @@ ${source}`;
       await this.app.vault.modify(existing, content);
       return existing;
     }
-    return await this.app.vault.create(path, content);
+    try {
+      return await this.app.vault.create(path, content);
+    } catch (error) {
+      // 版本缓存按 source + version id 幂等写入。并发 create 竞争时，
+      // 使用已经落盘的文件继续完成本轮，而不是显示 File already exists。
+      const raced = this.app.vault.getAbstractFileByPath(path);
+      if (!(raced instanceof obsidian.TFile)) throw error;
+      await this.app.vault.modify(raced, content);
+      return raced;
+    }
   }
 
   async saveLexVoiceVersion(sourceFile, sourceContent, segments, versionInput) {
@@ -20249,12 +20462,64 @@ ${source}`;
       sourceId,
       sourceHash,
       segments: buildLexVoiceSegmentStatusList(segments),
-      activeVersionId: id,
+      // 派生文件不改变母本当前显示版本；清稿/历史版本仍可显式激活。
+      activeVersionId: versionInput.activate === false ? (manifest.activeVersionId || "") : id,
       updatedAt: createdAt,
       versions,
     });
     await this.writeLexVoiceVersionManifest(folder, manifest);
     return { folder, manifest, meta, body, frontmatter };
+  }
+
+  async createLexVoiceDerivedNote(sourceFile, sourceContent, version, label, mode, style = "") {
+    if (!(sourceFile instanceof obsidian.TFile)) throw new Error("找不到原始纪要");
+    const sourceDir = sourceFile.parent && sourceFile.parent.path ? sourceFile.parent.path : "";
+    const prefix = String(label || "综合纪要").trim() || "综合纪要";
+    const stem = `【${prefix}】${sourceFile.basename}`;
+    const stableTarget = obsidian.normalizePath(
+      sourceDir ? `${sourceDir}/${stem}.md` : `${stem}.md`,
+    );
+    // 同一来源和同一模式重做时更新这份派生文件；只有目标被用户占用为
+    // 其他内容时才生成 -2，避免每次点击都制造一份重复纪要。
+    const stableExisting = this.app.vault.getAbstractFileByPath(stableTarget);
+    const target = stableExisting instanceof obsidian.TFile
+      ? stableTarget
+      : this.getAvailableMarkdownPath(stableTarget);
+    if (!target) throw new Error("无法生成派生纪要文件路径");
+
+    const sourceFm = ((this.app.metadataCache.getFileCache(sourceFile) || {}).frontmatter) || {};
+    const versionFm = version && version.frontmatter
+      ? (() => { try { return obsidian.parseYaml(splitLeadingFrontmatter(version.frontmatter).frontmatter.replace(/^---\n|\n---\n?$/g, "")) || {}; } catch { return {}; } })()
+      : {};
+    const derivedFm = Object.assign({}, sourceFm, versionFm, {
+      "类型": "LexVoice派生版本",
+      variant_kind: "minutes",
+      variant_label: prefix,
+      variant_mode: mode || "",
+      variant_style: style || "",
+      source_path: sourceFile.path,
+      source_id: version && version.meta ? version.meta.sourceId : "",
+      contains_raw: false,
+      created: version && version.meta ? version.meta.createdAt : new Date().toISOString(),
+    });
+    const yaml = obsidian.stringifyYaml(derivedFm);
+    const body = String(version && version.body || "_[无输出]_").trim() || "_[无输出]_";
+    const heading = /^#\s/m.test(body) ? "" : `# ${prefix} · ${sourceFile.basename}\n\n`;
+    const backlink = `> [!info] 基于原始转写重新生成 · 原始纪要：[[${sourceFile.basename}]]`;
+    const content = `---\n${yaml.trimEnd()}\n---\n\n${heading}${backlink}\n\n${body}\n`;
+    let existing = this.app.vault.getAbstractFileByPath(target);
+    if (existing instanceof obsidian.TFile) await this.app.vault.modify(existing, content);
+    else {
+      try {
+        existing = await this.app.vault.create(target, content);
+      } catch (error) {
+        const raced = this.app.vault.getAbstractFileByPath(target);
+        if (!(raced instanceof obsidian.TFile)) throw error;
+        await this.app.vault.modify(raced, content);
+        existing = raced;
+      }
+    }
+    return existing instanceof obsidian.TFile ? existing : null;
   }
 
   async applyLexVoiceVersionToSource(sourceFile, versionMeta, body, frontmatter = "") {
@@ -20306,10 +20571,16 @@ ${source}`;
     }
     const meta = getModeMeta(this.settings, mode);
     let taskMeter = null;
-    const taskId = `repolish:${file.path}`;
+    // 重新整理必须按来源纪要单飞。否则用户连续切换模式/重复点击时，两个
+    // LLM 任务会同时写同一个版本缓存文件，Obsidian 会把后到的 create 请求
+    // 拒绝为 "File already exists."，并留下一个看起来仍在运行的重复任务。
+    let taskId = `repolish:${file.path}`;
     let taskStarted = false;
+    let repolishLockAcquired = false;
     try {
       const content = await this.app.vault.read(file);
+      const sourceId = getLexVoiceSourceIdFromMarkdown(content, file);
+      taskId = `repolish:${sourceId || file.path}`;
       let segments = extractLexVoiceTranscriptSegments(content);
       if (!segments.length) {
         new obsidian.Notice("未找到 LexVoice 原始转写。请在包含「分段原始转写」或录音段落的纪要 Markdown 上使用。", 8000);
@@ -20360,6 +20631,14 @@ ${source}`;
         recruitContext = result.action === "skip" ? null : result.ctx;
       }
 
+      if (!this._repolishInFlight) this._repolishInFlight = new Set();
+      if (this._repolishInFlight.has(taskId)) {
+        new obsidian.Notice("这篇纪要正在重新整理，请等待当前任务完成。", 5000);
+        return;
+      }
+      this._repolishInFlight.add(taskId);
+      repolishLockAcquired = true;
+
       const preferenceLabel = repolishOptions && repolishOptions.label ? ` · ${repolishOptions.label}` : "";
       const mapNotice = roleMapping.length
         ? `LexVoice：应用 ${roleMapping.length} 条角色映射后按${meta.prefix}模式重新整理${preferenceLabel}…`
@@ -20401,48 +20680,65 @@ ${source}`;
       taskMeter = this.beginTaskMeter();
       const polished = await mergeAndPolish(this, segments, mode, recruitContext, sessionMeta, originalFmForRegen, repolishOptions);
 
-      // 重整完成后，把 frontmatter 里的"代号 → 真名"项压平为"真名"，让 yaml 干净
-      let finalContent = await this.app.vault.read(file);
-      if (roleMapping.length) {
-        const fmMatch = finalContent.match(/^---\n([\s\S]*?)\n---/);
-        if (fmMatch) {
-          const cleaned = rewriteFrontmatterRoleMappings(fmMatch[1], roleMapping);
-          if (cleaned !== fmMatch[1]) {
-            finalContent = "---\n" + cleaned + "\n---" + finalContent.slice(fmMatch[0].length);
-            await this.app.vault.modify(file, finalContent);
-          }
-        }
-      }
-
-      let dailyTargetFile = file;
-      const renamed = await this.renameMarkdownWithGeneratedTitle(file, polished, mode);
-      if (renamed instanceof obsidian.TFile) dailyTargetFile = renamed;
+      // 重新整理只生成派生纪要，不重命名、不修改母本。角色映射只作为本次
+      // LLM 输入使用，原始转写和用户已经保存的 YAML 必须保持可追溯。
+      const dailyTargetFile = file;
       const latestSourceContent = await this.app.vault.read(dailyTargetFile);
       const versionLabel = `${meta.prefix}${preferenceLabel}`;
       const versionStyle = repolishOptions && repolishOptions.label ? repolishOptions.label : "";
-      const version = await this.saveLexVoiceVersion(dailyTargetFile, latestSourceContent, segments, {
-        kind: "minutes",
-        label: versionLabel,
+      const versionBody = stripModeSuggestionBlocks(polished || "_[无输出]_").trim();
+      const versionParts = splitLexVoiceVersionPayload(versionBody);
+      const fallbackVersion = {
+        body: versionParts.body.trim() || "_[无输出]_",
+        frontmatter: versionParts.frontmatter || "",
+        meta: {
+          sourceId: getLexVoiceSourceIdFromMarkdown(latestSourceContent, dailyTargetFile),
+          createdAt: window.moment ? window.moment().format("YYYY-MM-DD HH:mm:ss") : new Date().toISOString(),
+        },
+      };
+
+      // 可见副本是用户交付物，必须先落盘；版本缓存/manifest 只是索引，
+      // 即使索引写入异常，也不能阻断新纪要生成。
+      const derivedFile = await this.createLexVoiceDerivedNote(
+        dailyTargetFile,
+        latestSourceContent,
+        fallbackVersion,
+        versionLabel,
         mode,
-        style: versionStyle,
-        idLabel: `${meta.prefix}${versionStyle ? "-" + versionStyle : ""}`,
-        body: stripModeSuggestionBlocks(polished || "_[无输出]_").trim(),
-      });
-      await this.applyLexVoiceVersionToSource(dailyTargetFile, version.meta, version.body, version.frontmatter);
+        versionStyle,
+      );
+      let versionCacheError = "";
       try {
-        const dailyContent = await this.app.vault.read(dailyTargetFile);
-        await this.appendDailyMeetingOverviewForMarkdown(dailyTargetFile, dailyContent, polished, mode, segments, sessionMeta);
+        await this.saveLexVoiceVersion(dailyTargetFile, latestSourceContent, segments, {
+          kind: "minutes",
+          label: versionLabel,
+          mode,
+          style: versionStyle,
+          idLabel: `${meta.prefix}${versionStyle ? "-" + versionStyle : ""}`,
+          body: versionBody,
+          activate: false,
+        });
+      } catch (cacheError) {
+        versionCacheError = getTaskErrorMessage(cacheError);
+        console.warn("[LexVoice] derived note created but version cache update failed", cacheError);
+      }
+      try {
+        const dailyFile = derivedFile instanceof obsidian.TFile ? derivedFile : dailyTargetFile;
+        const dailyContent = await this.app.vault.read(dailyFile);
+        await this.appendDailyMeetingOverviewForMarkdown(dailyFile, dailyContent, polished, mode, segments, sessionMeta);
       } catch (e) {
         console.error("[LexVoice] daily overview after repolish failed", e);
       }
-      new obsidian.Notice(`LexVoice：已生成${meta.prefix}版本${preferenceLabel}${roleMapping.length ? `（角色映射 ${roleMapping.length} 条已应用）` : ""}`);
+      const outputPath = derivedFile instanceof obsidian.TFile ? derivedFile.path : dailyTargetFile.path;
+      new obsidian.Notice(`LexVoice：已生成${meta.prefix}派生纪要${preferenceLabel}${roleMapping.length ? `（角色映射 ${roleMapping.length} 条已应用）` : ""}${versionCacheError ? "（版本索引稍后可重建）" : ""}`);
       const completedTaskMeter = taskMeter ? this.endTaskMeter(taskMeter) : null;
       taskMeter = null;
       try { this.logCompletedWork(`重新整理完成 · ${meta.prefix}`, (file && file.path) || "", completedTaskMeter); } catch { /* intentionally empty */ }
       this.completeTaskActivity(taskId, {
         stage: "done",
         stageLabel: "新版本已生成",
-        detail: dailyTargetFile.path || file.path,
+        detail: versionCacheError ? `${outputPath} · 版本索引未同步：${versionCacheError}` : outputPath,
+        subject: outputPath,
         actions: [
           { id: "open-task-note", label: "打开纪要", primary: true },
           { id: "dismiss-task", label: "关闭记录" },
@@ -20464,6 +20760,7 @@ ${source}`;
       }
       new obsidian.Notice(`重新整理失败：${(e && e.message) || e}`, 8000);
     } finally {
+      if (repolishLockAcquired && this._repolishInFlight) this._repolishInFlight.delete(taskId);
       if (taskMeter) this.endTaskMeter(taskMeter);
       this._busyLabel = null;
       this.updateBusyStatus();
@@ -21396,8 +21693,7 @@ ${source}`;
       const channelMode = normalizeAudioChannelMode(task.audioChannelMode || this.settings.audioChannelMode);
       const runtimeChannelMode = task.audioChannelRuntimeMode
         || initialAudioChannelRuntimeMode(channelMode, reportedChannelCount);
-      const inspectRecordedChannels = (task.captureMode === "mic" || reportedChannelCount > 1)
-        && runtimeChannelMode !== "mono";
+      const inspectRecordedChannels = task.captureMode === "mic" && runtimeChannelMode !== "mono";
       const requestedChannelCount = inspectRecordedChannels ? MAX_SPEAKER_CHANNELS : 1;
       const sliceBlob = requestedChannelCount > 1
         ? renderMultichannelAudioBufferSliceToWav(audioBuffer, start, end, requestedChannelCount)
@@ -21434,8 +21730,7 @@ ${source}`;
     const channelMode = normalizeAudioChannelMode(task.audioChannelMode || this.settings.audioChannelMode);
     const runtimeChannelMode = task.audioChannelRuntimeMode
       || initialAudioChannelRuntimeMode(channelMode, reportedChannelCount);
-    const inspectRecordedChannels = (task.captureMode === "mic" || reportedChannelCount > 1)
-      && runtimeChannelMode !== "mono";
+    const inspectRecordedChannels = task.captureMode === "mic" && runtimeChannelMode !== "mono";
     const expectedChannelCount = inspectRecordedChannels
       ? MAX_SPEAKER_CHANNELS
       : reportedChannelCount;

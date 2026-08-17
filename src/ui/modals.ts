@@ -431,6 +431,8 @@ export class QueueModal extends obsidian.Modal {
       : [])
       .filter((task) => task && !String(task.kind || "").startsWith("queue-"))
       .filter((task) => !currentActivityIds.has(String(task.id || "")));
+    // 当前处理链由三阶段流程展示；这里只保留真正需要用户处理的后台异常，避免同一任务重复展开。
+    const visibleTaskActivities = taskActivities.filter((task) => ["failed", "stalled"].includes(String(task.status || "")));
     const taskProblems = taskActivities.filter((task) => ["failed", "stalled"].includes(String(task.status || "")));
     const taskActive = taskActivities.filter((task) => ["queued", "running", "waiting", "slow", "stalled", "retrying"].includes(String(task.status || "")));
     const taskDone = taskActivities.filter((task) => task.status === "done");
@@ -479,9 +481,20 @@ export class QueueModal extends obsidian.Modal {
       : t.type === "generate-prompt" ? "提示词生成" : (t.type || "任务");
 
     // —— 头部：标题 + 状态 ——
+    const activityText = [
+      detail && detail.stage,
+      detail && detail.step,
+      detail && detail.kind,
+      detail && detail.modeLabel,
+      activityLabel,
+    ].filter(Boolean).join(" ").toLowerCase();
+    const isTranscribing = /(transcrib|asr|转写|音频|分段)/i.test(activityText);
+    const headTitle = headActive
+      ? (isTranscribing ? "正在转写" : "正在整理纪要")
+      : taskProblems.length ? "处理未完成" : "处理进度";
     const head = contentEl.createDiv({ cls: "lexvoice-progress-head" });
     const titleRow = head.createDiv({ cls: "lexvoice-progress-title-row" });
-    titleRow.createSpan({ cls: "lexvoice-progress-title", text: "处理进度" });
+    titleRow.createSpan({ cls: "lexvoice-progress-title", text: headTitle });
     titleRow.createSpan({
       cls: `lexvoice-progress-state is-${headLiveness}${headActive ? " is-active" : ""}`,
       text: taskProblems.length
@@ -497,7 +510,7 @@ export class QueueModal extends obsidian.Modal {
       return;
     }
 
-    // —— 进度条 + 概要 ——
+    // —— 进度链：转写 → AI 整理 → 完成 ——
     const doneCount = completed.length + taskDone.length;
     const activeCount = (active ? 1 : 0) + running.length + taskActive.length;
     const total = completed.length + (active ? 1 : 0) + running.length + pending.length + taskActivities.length;
@@ -532,6 +545,67 @@ export class QueueModal extends obsidian.Modal {
     const tmTok = _tm ? (Number(_tm.exactTokens) > 0 ? Number(_tm.exactTokens) : Math.round(((Number(_tm.inChars) || 0) + (Number(_tm.outChars) || 0)) / 2)) : 0;
     const tmTokLabel = tokenLabel(tmTok, !!(_tm && _tm.hasExact && Number(_tm.exactTokens) > 0));
 
+    const primaryActivity = taskActivities.find((task) => ["queued", "running", "waiting", "slow", "stalled", "retrying"].includes(String(task.status || "")))
+      || taskActivities[0]
+      || null;
+    const progressStartedAt = detail && Number(detail.startedAt) > 0
+      ? Number(detail.startedAt)
+      : primaryActivity && Number(primaryActivity.startedAt) > 0
+        ? Number(primaryActivity.startedAt)
+        : _tm && Number(_tm.startedAt) > 0 ? Number(_tm.startedAt) : 0;
+    const elapsedMs = progressStartedAt ? Math.max(0, Date.now() - progressStartedAt) : 0;
+    const remainingText = percent > 0 && percent < 100
+      ? `剩余约 ${fmtDur(elapsedMs * ((100 - percent) / percent))}`
+      : "剩余时间计算中";
+    const timing = head.createDiv({ cls: "lexvoice-progress-timing", attr: { "aria-live": "polite" } });
+    timing.setText(progressStartedAt ? `已用 ${fmtDur(elapsedMs)} · ${remainingText}` : "正在准备处理");
+
+    const phaseText = [
+      detail && detail.stage,
+      detail && detail.step,
+      detail && detail.kind,
+      detail && detail.modeLabel,
+      primaryActivity && primaryActivity.stageLabel,
+      primaryActivity && primaryActivity.title,
+    ].filter(Boolean).join(" ").toLowerCase();
+    const phase = headActive || pending.length || running.length
+      ? (/(transcrib|asr|转写|音频|分段)/i.test(phaseText) ? "transcribe" : "organize")
+      : "complete";
+    const phaseIndex = { transcribe: 0, organize: 1, complete: 2 }[phase] || 0;
+    const pipeline = head.createDiv({ cls: `lexvoice-progress-pipeline is-${headLiveness}` });
+    const pipelineSteps = [
+      {
+        key: "transcribe",
+        label: "转写",
+        summary: detail && detail.count
+          ? String(detail.count)
+          : running.length || pending.length ? `${running.length + pending.length} 项待处理` : "原始转写已保留",
+      },
+      {
+        key: "organize",
+        label: "AI 整理",
+        summary: phase === "organize" && taskActive.length ? `${taskActive.length} 项进行中` : phase === "organize" ? (detail && detail.count ? String(detail.count) : "正在整理") : phaseIndex > 1 ? "已完成" : "等待转写完成",
+      },
+      {
+        key: "complete",
+        label: "完成",
+        summary: phase === "complete" ? "已写入纪要" : "写入纪要",
+      },
+    ];
+    for (let index = 0; index < pipelineSteps.length; index++) {
+      const step = pipelineSteps[index];
+      const state = index < phaseIndex ? "done" : index === phaseIndex ? (taskProblems.length ? "failed" : "active") : "pending";
+      const stepEl = pipeline.createDiv({ cls: `lexvoice-progress-pipeline-step is-${state}` });
+      const marker = stepEl.createDiv({ cls: "lexvoice-progress-pipeline-marker", attr: { "aria-hidden": "true" } });
+      if (state === "done") {
+        try { obsidian.setIcon(marker, "check"); } catch { marker.setText("✓"); }
+      } else if (state === "active") {
+        marker.createSpan({ cls: "lexvoice-progress-pipeline-pulse" });
+      }
+      stepEl.createDiv({ cls: "lexvoice-progress-pipeline-label", text: step.label });
+      stepEl.createDiv({ cls: "lexvoice-progress-pipeline-summary", text: step.summary });
+    }
+
     const canAnimateProgress = headActive
       && !["stalled", "failed", "done"].includes(headLiveness);
     const bar = head.createDiv({ cls: `lexvoice-progress-bar is-${headLiveness}` });
@@ -558,9 +632,9 @@ export class QueueModal extends obsidian.Modal {
 
     // —— 任务列表：已完成（✓）→ 处理中（转圈）→ 待处理（脉冲点）——
     const list = contentEl.createDiv({ cls: "lexvoice-progress-list" });
-    const makeRow = (kind) => {
-      const r = list.createDiv({ cls: `lexvoice-progress-row is-${kind}` });
-      return { ico: r.createDiv({ cls: "lexvoice-progress-ico" }), body: r.createDiv({ cls: "lexvoice-progress-body" }) };
+    const makeRow = (kind, extraCls = "") => {
+      const r = list.createDiv({ cls: `lexvoice-progress-row is-${kind}${extraCls ? " " + extraCls : ""}` });
+      return { row: r, ico: r.createDiv({ cls: "lexvoice-progress-ico" }), body: r.createDiv({ cls: "lexvoice-progress-body" }) };
     };
     const titleLine = (bodyEl, name, right, faint) => {
       const tl = bodyEl.createDiv({ cls: "lexvoice-progress-line" });
@@ -569,18 +643,16 @@ export class QueueModal extends obsidian.Modal {
     };
     const subLine = (bodyEl, text) => { if (text) bodyEl.createDiv({ cls: "lexvoice-progress-sub", text }); };
 
-    if (taskActivities.length) {
+    if (visibleTaskActivities.length) {
       list.createDiv({ cls: "lexvoice-progress-section-title", text: "任务状态" });
       const activityList = list.createDiv({ cls: "lexvoice-progress-activity-list" });
-      for (const activity of taskActivities) {
+      for (const activity of visibleTaskActivities) {
         const state = String(activity.status || "queued");
         const activityId = String(activity.id || "");
         const item = activityList.createEl("details", {
           cls: `lexvoice-progress-activity is-${state}`,
         });
-        const shouldAutoOpen = !["done", "cancelled"].includes(state);
-        item.open = this._expandedActivities.has(activityId)
-          || (shouldAutoOpen && !this._collapsedActivities.has(activityId));
+        item.open = this._expandedActivities.has(activityId);
         const summaryEl = item.createEl("summary", { cls: "lexvoice-progress-activity-summary" });
         summaryEl.onclick = (event) => {
           event.preventDefault();
@@ -649,15 +721,23 @@ export class QueueModal extends obsidian.Modal {
 
         if (activity.error) {
           const errorBox = panel.createDiv({ cls: "lexvoice-progress-activity-error", attr: { role: "alert" } });
+          const rawError = String(activity.error).trim();
+          const displayError = /file already exists|文件已存在|already exists/i.test(rawError)
+            ? "目标版本文件已存在，未重复创建。"
+            : rawError;
+          const isFileExistsError = displayError !== rawError;
+          if (rawError && rawError !== displayError) errorBox.setAttr("title", rawError);
           const errorHead = errorBox.createDiv({ cls: "lexvoice-progress-activity-error-head" });
           const errorIcon = errorHead.createSpan({ cls: "lexvoice-progress-activity-error-icon", attr: { "aria-hidden": "true" } });
           try { obsidian.setIcon(errorIcon, "triangle-alert"); } catch { errorIcon.setText("!"); }
-          errorHead.createSpan({ text: "未完成原因" });
-          errorBox.createDiv({ cls: "lexvoice-progress-activity-error-message", text: String(activity.error) });
+          errorHead.createSpan({ text: "处理未完成" });
+          errorBox.createDiv({ cls: "lexvoice-progress-activity-error-message", text: displayError });
           const hint = this.plugin.getTaskActivityErrorHint
             ? this.plugin.getTaskActivityErrorHint(activity)
             : "";
-          if (hint) errorBox.createDiv({ cls: "lexvoice-progress-activity-error-hint", text: hint });
+          if (hint && hint !== displayError && !isFileExistsError) {
+            errorBox.createDiv({ cls: "lexvoice-progress-activity-error-hint", text: hint });
+          }
         }
 
         if (Array.isArray(activity.events) && activity.events.length) {
@@ -695,9 +775,9 @@ export class QueueModal extends obsidian.Modal {
       }
     }
 
-    if (completed.length) list.createDiv({ cls: "lexvoice-progress-section-title", text: "最近完成" });
+    if (completed.length) list.createDiv({ cls: "lexvoice-progress-section-title lexvoice-progress-legacy-completed", text: "最近完成" });
     for (const c of completed) {
-      const { ico, body } = makeRow("done");
+      const { ico, body } = makeRow("done", "lexvoice-progress-legacy-completed");
       try { obsidian.setIcon(ico.createSpan({ cls: "lexvoice-progress-check" }), "check"); } catch { /* intentionally empty */ }
       const right = [(c.durationMs > 0 ? fmtDur(c.durationMs) : ""), tokenLabel(c.tokens, c.tokensExact)].filter(Boolean).join(" · ");
       titleLine(body, c.title || "完成", right, false);
@@ -705,8 +785,8 @@ export class QueueModal extends obsidian.Modal {
     }
 
     if (active) {
-      list.createDiv({ cls: "lexvoice-progress-section-title", text: "当前处理步骤" });
-      const { ico, body } = makeRow("running");
+      list.createDiv({ cls: "lexvoice-progress-section-title lexvoice-progress-legacy-current", text: "当前处理步骤" });
+      const { ico, body } = makeRow("running", "lexvoice-progress-legacy-current");
       if (["failed", "stalled"].includes(activeLiveness)) {
         const stateIcon = ico.createSpan({ cls: `lexvoice-progress-task-state is-${activeLiveness}` });
         try { obsidian.setIcon(stateIcon, "triangle-alert"); } catch { stateIcon.setText("!"); }
@@ -880,24 +960,31 @@ export class QueueModal extends obsidian.Modal {
     }
 
     if (running.length || pending.length) {
-      list.createDiv({ cls: "lexvoice-progress-section-title", text: "转写重试队列" });
+      const queueHead = list.createDiv({ cls: "lexvoice-progress-queue-head" });
+      const queueTitle = queueHead.createDiv({ cls: "lexvoice-progress-queue-title" });
+      queueTitle.createSpan({ text: "待处理" });
+      queueTitle.createSpan({ cls: "lexvoice-progress-queue-count", text: ` ${pending.length} 项 · 音频均已保留` });
+      if (pending.length) {
+        const retryAllBtn = queueHead.createEl("button", { cls: "lexvoice-progress-queue-retry", text: "全部重试", attr: { type: "button" } });
+        retryAllBtn.onclick = async () => { retryAllBtn.disabled = true; await this.plugin.retryQueue(); this.onOpen(); };
+      }
     }
     for (const t of running) {
-      const { ico, body } = makeRow("running");
+      const { ico, body } = makeRow("running", "lexvoice-progress-queue-row");
       ico.createSpan({ cls: "lexvoice-progress-spinner" });
       titleLine(body, taskTitle(t), "", false);
       subLine(body, t.status === "live" ? `切片已落盘 · ${t.mdPath || "等待本场转写"}` : (t.mdPath || ""));
     }
 
     for (const t of pending) {
-      const { ico, body } = makeRow("pending");
+      const { row, ico, body } = makeRow("pending", "lexvoice-progress-queue-row");
       ico.createSpan({ cls: "lexvoice-progress-dot" });
-      titleLine(body, taskTitle(t), `重试 ${t.retries || 0}/${this.plugin.settings.maxRetries || 3}`, true);
-      subLine(body, `${t.mdPath || "排队中…"}${t.lastError ? " · " + t.lastError : ""}`);
-      const acts = body.createDiv({ cls: "lexvoice-progress-rowacts" });
-      const retryBtn = acts.createSpan({ cls: "lexvoice-progress-link", attr: { role: "button", tabindex: "0" }, text: "重试" });
+      titleLine(body, taskTitle(t), "", false);
+      subLine(body, `${t.lastError || "等待下一次处理"} · 已试 ${t.retries || 0} 次`);
+      const acts = row.createDiv({ cls: "lexvoice-progress-queue-actions" });
+      const retryBtn = acts.createEl("button", { cls: "lexvoice-progress-queue-retry", attr: { type: "button" }, text: "重试" });
       retryBtn.onclick = async () => { try { await this.plugin.queue.processOne(t); } catch { /* intentionally empty */ } this.onOpen(); };
-      const delBtn = acts.createSpan({ cls: "lexvoice-progress-link", attr: { role: "button", tabindex: "0" }, text: "取消重试" });
+      const delBtn = acts.createEl("button", { cls: "lexvoice-progress-queue-cancel", attr: { type: "button" }, text: "取消" });
       delBtn.onclick = async () => {
         await this.plugin.queue.remove(t.id);
         new obsidian.Notice("已取消自动重试。缓存音频会暂时保留，之后仍可从纪要右键重新发起。", 6000);
@@ -905,12 +992,16 @@ export class QueueModal extends obsidian.Modal {
       };
     }
 
-    // —— 待处理批量操作 ——
+    // —— 底部操作 ——
+    const foot = contentEl.createDiv({ cls: "lexvoice-progress-foot" });
+    if (tmTokLabel) foot.createSpan({ cls: "lexvoice-progress-foot-token", text: `${tmTokLabel} token` });
+    const footActions = foot.createDiv({ cls: "lexvoice-progress-foot-actions" });
+    const logBtn = footActions.createEl("button", { cls: "lexvoice-progress-foot-link", attr: { type: "button" }, text: "查看日志" });
+    logBtn.onclick = async () => { try { await this.plugin.copyDiagnosticReport(); } catch { /* intentionally empty */ } };
+    const backgroundBtn = footActions.createEl("button", { cls: "lexvoice-progress-foot-link is-primary", attr: { type: "button" }, text: "后台运行" });
+    backgroundBtn.onclick = () => this.close();
     if (pending.length) {
-      const foot = contentEl.createDiv({ cls: "lexvoice-progress-foot" });
-      const retryAllBtn = foot.createEl("button", { cls: "lexvoice-progress-btn mod-cta", text: `重试全部 (${pending.length})`, attr: { type: "button" } });
-      retryAllBtn.onclick = async () => { await this.plugin.retryQueue(); this.onOpen(); };
-      const clearBtn = foot.createSpan({ cls: "lexvoice-progress-link", attr: { role: "button", tabindex: "0" }, text: "取消全部重试" });
+      const clearBtn = footActions.createEl("button", { cls: "lexvoice-progress-foot-link", attr: { type: "button" }, text: "取消全部" });
       clearBtn.onclick = async () => {
         const n = this.plugin.queue.tasks.filter((t) => t && t.status !== "running" && t.status !== "live").length;
         const ok = await lexvoiceConfirm(this.app, "取消全部自动重试？",
@@ -2477,7 +2568,7 @@ export class BubbleWidget {
       this.el.addClass("is-qd");
       // 填色波形按钮常驻 left:8（在这些态里就是结束触发器）
       const waveBtn = this.el.createEl("button", { cls: "lexvoice-qd-wave" });
-      obsidian.setTooltip(waveBtn, "听写", { placement: "top" });
+      obsidian.setTooltip(waveBtn, "结束即时听写", { placement: "top" });
       this._paintIcon(waveBtn, ["audio-lines", "lucide-audio-lines"]);
       waveBtn.onclick = (e) => { e.stopPropagation(); void this.plugin.quickDictation.toggle(this.plugin.settings.quickDictationTarget || "editor"); };
       if (qd.state === "listening") {
@@ -2532,13 +2623,19 @@ export class BubbleWidget {
       if (!this._paintIcon(locateBtn, ["file-text", "lucide-file-text", "file"])) locateBtn.addClass("is-fallback-icon");
       locateBtn.onclick = (e) => { e.stopPropagation(); this.plugin.openRecentNote(); };
       // audio-lines 填色按钮 · 即时转写（主触发）
-      const waveBtn = this.el.createEl("button", { cls: "lexvoice-qd-wave" });
-      obsidian.setTooltip(waveBtn, "听写", { placement: "top" });
+      const waveBtn = this.el.createEl("button", {
+        cls: "lexvoice-qd-wave",
+        attr: { "aria-label": "即时听写（不保存录音）", title: "即时听写（不保存录音）" },
+      });
+      obsidian.setTooltip(waveBtn, "即时听写（不保存录音）", { placement: "top" });
       this._paintIcon(waveBtn, ["audio-lines", "lucide-audio-lines"]);
       waveBtn.onclick = (e) => { e.stopPropagation(); void this.plugin.quickDictation.toggle(this.plugin.settings.quickDictationTarget || "editor"); };
       // mic 幽灵按钮 · 会议纪要录音
-      const micBtn = this.el.createEl("button", { cls: "lexvoice-qd-ghost lexvoice-qd-mic" });
-      obsidian.setTooltip(micBtn, "会议纪要录音", { placement: "top" });
+      const micBtn = this.el.createEl("button", {
+        cls: "lexvoice-qd-ghost lexvoice-qd-mic",
+        attr: { "aria-label": "会议纪要录音（保存录音）", title: "会议纪要录音（保存录音）" },
+      });
+      obsidian.setTooltip(micBtn, "会议纪要录音（保存录音）", { placement: "top" });
       this._paintIcon(micBtn, ["mic", "lucide-mic"]);
       micBtn.onclick = (e) => { e.stopPropagation(); this.plugin.startRecording(); };
       if (this.plugin.queue && this.plugin.queue.hasPendingGeneratePrompt && this.plugin.queue.hasPendingGeneratePrompt()) {

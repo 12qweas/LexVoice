@@ -1099,9 +1099,9 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
 }
 .lexvoice-progress-activity-error {
   margin-top: var(--size-4-2);
-  padding: var(--size-2-3) var(--size-4-2);
-  border-radius: var(--radius-s);
-  background: var(--background-modifier-error);
+  padding: var(--size-2-2) 0 var(--size-2-2) var(--size-4-2);
+  border-left: 2px solid var(--text-error);
+  background: transparent;
   color: var(--text-error);
 }
 .lexvoice-progress-activity-error-head {
@@ -1134,6 +1134,8 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
 }
 .lexvoice-progress-activity-chain {
   margin-top: var(--size-4-2);
+  max-height: 132px;
+  overflow-y: auto;
 }
 .lexvoice-progress-activity-actions {
   display: flex;
@@ -6178,6 +6180,17 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
   font-weight: 600;
 }
 
+/* 纪要分组方式：与筛选控件共用主题表面，但单独保留清晰的当前状态。 */
+.lexvoice-outline-recent-filter-wrap .lexvoice-outline-recent-group-chip {
+  color: var(--text-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 13%, transparent);
+}
+
+.lexvoice-outline-recent-filter-wrap .lexvoice-outline-recent-group-chip:hover {
+  color: var(--text-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 19%, transparent);
+}
+
 /* 清除筛选：纯文字链，无框无底 */
 .lexvoice-outline-recent-filter-wrap .lexvoice-outline-recent-filter-clear {
   flex: 0 0 auto;
@@ -6289,6 +6302,80 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
   box-sizing: border-box;
   box-shadow: 0 0 0 3px var(--background-primary);
   z-index: 1;
+}
+
+/* 按文件夹仍沿用时间轴骨架，只把节点替换为主题图标。 */
+.lexvoice-outline-recent-group--named .lexvoice-outline-recent-axis--named::after {
+  display: none;
+}
+
+.lexvoice-outline-recent-group--named .lexvoice-outline-recent-axis--named::before {
+  top: 24px;
+}
+
+.lexvoice-outline-recent-axis-icon {
+  position: absolute;
+  right: -5px;
+  top: 10px;
+  z-index: 1;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-accent);
+  background: transparent;
+}
+
+.lexvoice-outline-recent-axis-icon svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.8;
+}
+
+.lexvoice-outline-recent-group--named .lexvoice-outline-recent-group-title {
+  margin-bottom: 3px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.lexvoice-outline-recent-group--named .lexvoice-outline-recent-group-title:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-s);
+}
+
+.lexvoice-outline-recent-folder-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+}
+
+.lexvoice-outline-recent-folder-toggle svg {
+  width: 13px;
+  height: 13px;
+  stroke-width: 2;
+}
+
+.lexvoice-outline-recent-group.is-collapsed .lexvoice-outline-recent-row,
+.lexvoice-outline-recent-group.is-collapsed .lexvoice-outline-recent-variant {
+  display: none;
+}
+
+.lexvoice-outline-recent-group.is-collapsed .lexvoice-outline-recent-items {
+  padding-bottom: 8px;
+}
+
+.lexvoice-outline-recent-group--named .lexvoice-outline-recent-group-weekday {
+  color: var(--text-normal);
+}
+
+.lexvoice-outline-recent-group--named .lexvoice-outline-recent-items {
+  padding-top: 10px;
 }
 
 .lexvoice-outline-recent-group.is-today .lexvoice-outline-recent-axis::after {
@@ -7480,6 +7567,324 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
 
   .lexvoice-audio-input-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* 处理进度：当前阶段与待处理队列分开，避免把同一条任务链重复展开。 */
+.modal.lexvoice-progress-modal {
+  width: min(660px, 92vw);
+  max-width: min(660px, 92vw);
+  max-height: min(760px, 88vh);
+  border-radius: var(--radius-l, 14px);
+  overflow: hidden;
+}
+
+.modal.lexvoice-progress-modal .modal-content {
+  max-height: min(760px, 88vh);
+  overflow: hidden;
+}
+
+.modal.lexvoice-progress-modal .lexvoice-progress-head {
+  padding: var(--size-4-5) var(--size-4-6) var(--size-4-4);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.modal.lexvoice-progress-modal .lexvoice-progress-title {
+  font-size: var(--font-ui-large);
+  line-height: var(--line-height-tight);
+}
+
+.modal.lexvoice-progress-modal .lexvoice-progress-state {
+  display: none;
+}
+
+.lexvoice-progress-timing {
+  margin-top: var(--size-2-1);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  line-height: var(--line-height-tight);
+  font-variant-numeric: tabular-nums;
+}
+
+.lexvoice-progress-pipeline {
+  display: flex;
+  margin-top: var(--size-4-5);
+  padding: 0 var(--size-2-2);
+}
+
+.lexvoice-progress-pipeline-step {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: center;
+}
+
+.lexvoice-progress-pipeline-step::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  top: 13px;
+  left: 50%;
+  width: 100%;
+  height: 2px;
+  background: var(--background-modifier-border);
+}
+
+.lexvoice-progress-pipeline-step.is-done::after {
+  background: var(--interactive-accent);
+}
+
+.lexvoice-progress-pipeline-step:last-child::after {
+  display: none;
+}
+
+.lexvoice-progress-pipeline-marker {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--background-modifier-border);
+  border-radius: 50%;
+  background: var(--background-primary);
+  color: var(--text-on-accent, var(--background-primary));
+}
+
+.lexvoice-progress-pipeline-marker svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 3;
+}
+
+.lexvoice-progress-pipeline-step.is-done .lexvoice-progress-pipeline-marker {
+  border-color: var(--interactive-accent);
+  background: var(--interactive-accent);
+}
+
+.lexvoice-progress-pipeline-step.is-active .lexvoice-progress-pipeline-marker {
+  border-color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 20%, var(--background-primary));
+}
+
+.lexvoice-progress-pipeline-step.is-failed .lexvoice-progress-pipeline-marker {
+  border-color: var(--text-error);
+  background: color-mix(in srgb, var(--text-error) 14%, var(--background-primary));
+}
+
+.lexvoice-progress-pipeline-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--interactive-accent) 18%, transparent);
+  animation: lexvoice-progress-pipeline-pulse 1.6s ease-in-out infinite;
+}
+
+.lexvoice-progress-pipeline-label {
+  margin-top: var(--size-2-2);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+  line-height: var(--line-height-tight);
+}
+
+.lexvoice-progress-pipeline-step.is-active .lexvoice-progress-pipeline-label {
+  color: var(--text-accent, var(--interactive-accent));
+}
+
+.lexvoice-progress-pipeline-step.is-done .lexvoice-progress-pipeline-label {
+  color: var(--text-normal);
+}
+
+.lexvoice-progress-pipeline-summary {
+  margin-top: var(--size-2-1);
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal.lexvoice-progress-modal .lexvoice-progress-bar,
+.modal.lexvoice-progress-modal .lexvoice-progress-summary,
+.modal.lexvoice-progress-modal .lexvoice-progress-legacy-current,
+.modal.lexvoice-progress-modal .lexvoice-progress-legacy-completed {
+  display: none;
+}
+
+.modal.lexvoice-progress-modal .lexvoice-progress-list {
+  max-height: min(430px, 52vh);
+  padding: 0;
+  overflow-y: auto;
+}
+
+.lexvoice-progress-queue-head {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+  padding: var(--size-4-3) var(--size-4-6) var(--size-2-2);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.lexvoice-progress-queue-title {
+  min-width: 0;
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+}
+
+.lexvoice-progress-queue-count {
+  color: var(--text-muted);
+  font-weight: var(--font-normal);
+}
+
+.lexvoice-progress-queue-head .lexvoice-progress-queue-retry {
+  margin-left: auto;
+}
+
+.lexvoice-progress-queue-row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--size-4-2);
+  min-height: 68px;
+  padding: var(--size-4-3) var(--size-4-6);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.lexvoice-progress-queue-row .lexvoice-progress-body {
+  min-width: 0;
+}
+
+.lexvoice-progress-queue-row .lexvoice-progress-line {
+  gap: var(--size-2-2);
+}
+
+.lexvoice-progress-queue-row .lexvoice-progress-name {
+  overflow: hidden;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lexvoice-progress-queue-row .lexvoice-progress-sub {
+  overflow: hidden;
+  margin-top: var(--size-2-1);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lexvoice-progress-queue-row .lexvoice-progress-ico {
+  width: 10px;
+  height: 10px;
+}
+
+.lexvoice-progress-queue-row.is-pending .lexvoice-progress-ico::before {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-warning, var(--interactive-accent));
+  content: "";
+}
+
+.lexvoice-progress-queue-row.is-running .lexvoice-progress-ico {
+  color: var(--interactive-accent);
+}
+
+.lexvoice-progress-queue-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+}
+
+.lexvoice-progress-queue-retry,
+.lexvoice-progress-queue-cancel,
+.lexvoice-progress-foot-link {
+  min-height: var(--input-height);
+  padding: 0 var(--size-4-2);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-normal);
+  font: inherit;
+  font-size: var(--font-ui-small);
+  cursor: pointer;
+}
+
+.lexvoice-progress-queue-retry:hover,
+.lexvoice-progress-queue-cancel:hover,
+.lexvoice-progress-foot-link:hover {
+  background: var(--background-modifier-hover);
+}
+
+.lexvoice-progress-queue-cancel,
+.lexvoice-progress-foot-link {
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.lexvoice-progress-queue-head .lexvoice-progress-queue-retry,
+.lexvoice-progress-foot-link.is-primary {
+  border-color: transparent;
+  color: var(--text-accent, var(--interactive-accent));
+  font-weight: var(--font-semibold);
+}
+
+.lexvoice-progress-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-4-3);
+  min-height: 54px;
+  padding: var(--size-2-2) var(--size-4-6);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.lexvoice-progress-foot-token {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.lexvoice-progress-foot-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  margin-left: auto;
+}
+
+@keyframes lexvoice-progress-pipeline-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 16%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--interactive-accent) 10%, transparent); }
+}
+
+@media (max-width: 560px) {
+  .modal.lexvoice-progress-modal .lexvoice-progress-head,
+  .lexvoice-progress-queue-head,
+  .lexvoice-progress-queue-row,
+  .lexvoice-progress-foot {
+    padding-left: var(--size-4-3);
+    padding-right: var(--size-4-3);
+  }
+
+  .lexvoice-progress-pipeline-summary {
+    font-size: var(--font-ui-smaller);
+  }
+
+  .lexvoice-progress-queue-row {
+    gap: var(--size-2-2);
+  }
+
+  .lexvoice-progress-queue-actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
 
@@ -12802,4 +13207,97 @@ select.lexvoice-rcx-in.dropdown {
   max-width: none;
   justify-self: stretch;
   justify-content: flex-start;
+}
+
+/* 进度弹窗最终覆盖层：位于旧版兼容规则之后，确保紧凑队列布局生效。 */
+.modal.lexvoice-progress-modal {
+  width: min(660px, 92vw);
+  max-width: min(660px, 92vw);
+  max-height: min(760px, 88vh);
+  overflow: hidden;
+}
+
+.modal.lexvoice-progress-modal .modal-content {
+  max-height: min(760px, 88vh);
+  overflow: hidden;
+}
+
+.modal.lexvoice-progress-modal .lexvoice-progress-head {
+  padding: var(--size-4-5) var(--size-4-6) var(--size-4-4);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.modal.lexvoice-progress-modal .lexvoice-progress-title {
+  font-size: var(--font-ui-large);
+}
+
+.modal.lexvoice-progress-modal .lexvoice-progress-list {
+  max-height: min(430px, 52vh);
+  padding: 0;
+  overflow-y: auto;
+}
+
+.modal.lexvoice-progress-modal .lexvoice-progress-row.lexvoice-progress-queue-row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--size-4-2);
+  min-height: 68px;
+  padding: var(--size-4-3) var(--size-4-6);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.modal.lexvoice-progress-modal .lexvoice-progress-queue-row .lexvoice-progress-body {
+  min-width: 0;
+}
+
+.modal.lexvoice-progress-modal .lexvoice-progress-queue-row .lexvoice-progress-sub {
+  overflow: hidden;
+  margin-top: var(--size-2-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal.lexvoice-progress-modal .lexvoice-progress-queue-row .lexvoice-progress-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal.lexvoice-progress-modal .lexvoice-progress-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 54px;
+  padding: var(--size-2-2) var(--size-4-6);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.modal.lexvoice-progress-modal .lexvoice-progress-foot-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  margin-left: auto;
+}
+
+.modal.lexvoice-progress-modal .lexvoice-progress-queue-head {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+  padding: var(--size-4-3) var(--size-4-6) var(--size-2-2);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.modal.lexvoice-progress-modal .lexvoice-progress-queue-head .lexvoice-progress-queue-retry {
+  margin-left: auto;
+}
+
+@media (max-width: 560px) {
+  .modal.lexvoice-progress-modal .lexvoice-progress-head,
+  .modal.lexvoice-progress-modal .lexvoice-progress-queue-head,
+  .modal.lexvoice-progress-modal .lexvoice-progress-row.lexvoice-progress-queue-row,
+  .modal.lexvoice-progress-modal .lexvoice-progress-foot {
+    padding-left: var(--size-4-3);
+    padding-right: var(--size-4-3);
+  }
 }

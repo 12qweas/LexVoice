@@ -29,3 +29,23 @@ export function isPathUnderRecentNoteRoots(pathValue: unknown, rootsValue: unkno
   const roots = normalizeRecentNoteRoots(rootsValue);
   return roots.some((root) => !root || path === root || path.startsWith(`${root}/`));
 }
+
+export function getRecentNoteParentPath(pathValue: unknown): string {
+  const path = normalizeRecentNoteRoot(pathValue);
+  const separator = path.lastIndexOf("/");
+  return separator < 0 ? "" : path.slice(0, separator);
+}
+
+export function getRecentNotePathRelativeToRoot(pathValue: unknown, rootValue: unknown): string {
+  const path = normalizeRecentNoteRoot(pathValue);
+  const root = normalizeRecentNoteRoot(rootValue);
+  if (!path) return "";
+  if (!root) return path;
+  if (path === root) return "";
+  return path.startsWith(`${root}/`) ? path.slice(root.length + 1) : "";
+}
+
+export function getRecentNoteTopLevelFolder(pathValue: unknown, rootValue: unknown): string {
+  const relative = getRecentNotePathRelativeToRoot(pathValue, rootValue);
+  return relative ? relative.split("/")[0] : "";
+}

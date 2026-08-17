@@ -189,7 +189,10 @@ export function resolveAudioChannelRuntimeMode(options: {
   }
   const separation = String(options.separation || "");
   if (separation === "single" || separation === "duplicated") return "mono";
-  return options.current === "multichannel" ? "multichannel" : "probing";
+  // Auto mode should only switch to multichannel on explicit evidence.
+  // Inconclusive/ambiguous results are treated as provisional to avoid
+  // forcing all subsequent segments into channel-separated transcription.
+  return "probing";
 }
 
 export function buildSpeakerMappings(

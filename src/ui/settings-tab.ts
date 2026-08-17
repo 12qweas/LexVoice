@@ -497,7 +497,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         price: "可免费",
         desc: "录制电脑声音需要虚拟声卡。选择包含电脑音频的录音来源后，在「设置电脑音频」中完成配置。",
         action: "查看设备指引",
-        target: "advanced",
+        target: "general",
         status: "按需准备",
         statusClass: "is-neutral",
       },
