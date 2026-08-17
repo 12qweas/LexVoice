@@ -551,6 +551,46 @@ export function isLlmNonRetryableError(error) {
   return isLlmConfigError(error) || isLlmServiceBlockedError(error);
 }
 
+// 只有服务端明确说输出预算不被接受时才降档；普通上下文超限、鉴权失败和网络错误不走这条路径。
+// 这样新模型可以先按实际需求请求更大的输出，旧模型仍能在真实拒绝后兼容，而不是事先被模型名猜测绑死。
+export function isLlmOutputBudgetError(error) {
+  const status = Number(error && error.status) || 0;
+  if (status !== 400) return false;
+  const message = String((error && (error.statusDetail || error.message)) || error || "");
+  return /max[_ -]?tokens|max(?:imum)?[_ -]?(?:completion|output)[_ -]?tokens|output[_ -]?token(?:s)?|too many tokens|token limit|生成长度|输出长度|输出 token/i.test(message);
+}
+
+const OUTPUT_BUDGET_FALLBACKS = [128000, 64000, 32000, 16000, 8192, 4096];
+
+export function getNextLlmOutputBudget(options) {
+  const requested = Number(options && options.payload && options.payload.max_tokens);
+  if (!Number.isFinite(requested) || requested <= 4096) return 0;
+  return OUTPUT_BUDGET_FALLBACKS.find((value) => value < requested) || 4096;
+}
+
+export async function requestLlmChatCompletionWithBudgetFallback(plugin, messages, options) {
+  let currentOptions = options || {};
+  for (let attempt = 0; attempt < OUTPUT_BUDGET_FALLBACKS.length; attempt++) {
+    try {
+      return await requestLlmChatCompletion(plugin, messages, currentOptions);
+    } catch (error) {
+      if (!isLlmOutputBudgetError(error)) throw error;
+      const nextBudget = getNextLlmOutputBudget(currentOptions);
+      if (!nextBudget) throw error;
+      const requested = Number(currentOptions && currentOptions.payload && currentOptions.payload.max_tokens) || 0;
+      await logLlmRequestDiagnostic(plugin, "warn", "llm.output_budget_fallback", "服务端拒绝当前输出预算，已按实际能力降档重试", {
+        requested,
+        retryBudget: nextBudget,
+        attempt: attempt + 1,
+      });
+      currentOptions = Object.assign({}, currentOptions, {
+        payload: Object.assign({}, currentOptions.payload || {}, { max_tokens: nextBudget }),
+      });
+    }
+  }
+  throw new Error("LLM 输出预算重试次数已用尽");
+}
+
 export function formatLlmConfigIssue(issue) {
   const text = String(issue || "").trim();
   if (!text) return "";
@@ -583,7 +623,7 @@ export async function callLlmWithMeta(plugin, system, user, options) {
   const attempts = (options && options.noRetry) ? 1 : 2;
   for (let i = 0; i < attempts; i++) {
     try {
-      data = await requestLlmChatCompletion(plugin, [
+      data = await requestLlmChatCompletionWithBudgetFallback(plugin, [
         { role: "system", content: system },
         { role: "user", content: user },
       ], options);
@@ -630,21 +670,41 @@ function stitchContinuation(a, b) {
 // 工程兜底，与 mergeAndPolishLongSession 的「事前按时间分段」互补：那条防"明显超长"，这条防"偶发被切"。
 export async function callLlmWithContinuation(plugin, system, user, options, opts) {
   const maxContinuations = Math.max(0, (opts && Number(opts.maxContinuations)) || 3);
-  const first = await callLlmWithMeta(plugin, system, user, options);
+  let effectiveOptions = options || {};
+  let first = await callLlmWithMeta(plugin, system, user, effectiveOptions);
   let text = String(first.text || "");
   let finishReason = first.finishReason;
   let continuations = 0;
-  while (isTruncatedFinishReason(finishReason) && continuations < maxContinuations && text.trim()) {
+  // 推理 token 耗尽但没有可见正文时，不能拿空 assistant 消息续写；先用 fast 档重跑一次原始请求。
+  // 这是针对推理模型的恢复分支，正常有正文的截断不改变原有续写行为。
+  if (isTruncatedFinishReason(finishReason) && !text.trim() && effectiveOptions.thinkingMode !== "fast") {
+    const fastOptions = Object.assign({}, effectiveOptions, { thinkingMode: "fast" });
+    try {
+      await logLlmRequestDiagnostic(plugin, "warn", "llm.empty_truncated_fast_retry", "模型耗尽输出预算但未返回正文，已关闭深度思考重试", {});
+      first = await callLlmWithMeta(plugin, system, user, fastOptions);
+      effectiveOptions = fastOptions;
+      text = String(first.text || "");
+      finishReason = first.finishReason;
+    } catch {
+      // 继续走有界的空正文恢复；失败时由上层保留原始转写并报告原因。
+    }
+  }
+  while (isTruncatedFinishReason(finishReason) && continuations < maxContinuations) {
     continuations++;
-    const messages = [
-      { role: "system", content: system },
-      { role: "user", content: user },
-      { role: "assistant", content: text },
-      { role: "user", content: "你上一条回复因长度上限被截断了。请直接从断点处继续输出剩余内容、无缝衔接，不要重复任何已输出的文字、不要重新开头、不要加任何前言或结束语，直接接着写。" },
-    ];
+    const messages = text.trim()
+      ? [
+        { role: "system", content: system },
+        { role: "user", content: user },
+        { role: "assistant", content: text },
+        { role: "user", content: "你上一条回复因长度上限被截断了。请直接从断点处继续输出剩余内容、无缝衔接，不要重复任何已输出的文字、不要重新开头、不要加任何前言或结束语，直接接着写。" },
+      ]
+      : [
+        { role: "system", content: system },
+        { role: "user", content: `${user}\n\n上一次生成因思考或输出过长被截断，且没有产生可见正文。请直接完整回答原始任务，不要提及截断，不要加前言。` },
+      ];
     let data;
     try {
-      data = await requestLlmChatCompletion(plugin, messages, options);
+      data = await requestLlmChatCompletionWithBudgetFallback(plugin, messages, effectiveOptions);
     } catch {
       break; // 续写失败就用已有内容，不让整体失败
     }

@@ -4,7 +4,7 @@ vi.mock("obsidian", () => ({
   requestUrl: vi.fn(),
 }));
 
-import { fetchLlmModelList, getLlmConfigIssue, isTransientLlmError, readLlmSseStream, requestLlmChatCompletion, requestLlmChatCompletionViaObsidian } from "../src/llm/core";
+import { fetchLlmModelList, getLlmConfigIssue, getNextLlmOutputBudget, isLlmOutputBudgetError, isTransientLlmError, readLlmSseStream, requestLlmChatCompletion, requestLlmChatCompletionViaObsidian } from "../src/llm/core";
 import { DashScopeStreamingClient, OpenAIRealtimeTranscriptionClient, OpenAIRealtimeTranslationClient } from "../src/asr/clients";
 import { assertSafeServiceEndpoint, canOmitServiceApiKey, getServiceEndpointSecurityIssue, isLocalLlmEndpoint, isSharedAddressSpaceHost } from "../src/shared/util-llm-endpoint";
 
@@ -145,6 +145,20 @@ describe("LLM transient error classification", () => {
     const error = new Error("LLM 调用已取消");
     error.name = "AbortError";
     expect(isTransientLlmError(error)).toBe(false);
+  });
+});
+
+describe("LLM 输出预算兼容", () => {
+  it("只把明确的输出预算错误识别为可降档", () => {
+    expect(isLlmOutputBudgetError({ status: 400, message: "max_tokens is too large" })).toBe(true);
+    expect(isLlmOutputBudgetError({ status: 400, message: "invalid api key" })).toBe(false);
+    expect(isLlmOutputBudgetError({ status: 413, message: "output token limit" })).toBe(false);
+  });
+
+  it("输出预算按有限阶梯降档，不无限重试", () => {
+    expect(getNextLlmOutputBudget({ payload: { max_tokens: 128000 } })).toBe(64000);
+    expect(getNextLlmOutputBudget({ payload: { max_tokens: 8192 } })).toBe(4096);
+    expect(getNextLlmOutputBudget({ payload: { max_tokens: 4096 } })).toBe(0);
   });
 });
 

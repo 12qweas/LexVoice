@@ -300,20 +300,20 @@ function llmPresetEndpointMatches(preset, endpoint) {
 }
 
 export function getLlmOutputCeiling(settings) {
-  // 纯按 model 名判定，不掺 endpoint——避免"未知本地模型 + claude/deepseek 命名的中转域名"被误判成大上限后超限 400。
+  // 这里只保留「明确知道是旧模型」的兼容上限。
+  // 新模型/中转模型不再因为名字无法识别而被一刀切到 8000；请求如果真的超出服务端能力，
+  // 由 llm/core.ts 根据实际 400 响应做有限次自适应降档。
   const model = String((settings && settings.llmModel) || "").toLowerCase();
-  if (!model) return LLM_OUTPUT_CEILING_FALLBACK;
-  // DeepSeek：V4 系列（v4-pro/v4-flash）与 V3.2+ 真实 384K，给充裕但留冗余的 64000；旧 chat/reasoner/V3 仍是 8192。
+  if (!model) return 0;
+  // DeepSeek V4 官方输出上限为 384K；这里不再用旧版 8K 兼容值限制它。
   if (/deepseek/.test(model)) {
-    if (/v4|v3\.[2-9]/.test(model)) return 64000;
-    return LLM_OUTPUT_CEILING_FALLBACK;
+    if (/v4/.test(model)) return 384000;
+    if (/deepseek-(?:chat|reasoner)|deepseek[-_ ]?v3(?:\.0)?(?:$|[-_ ])/.test(model)) return LLM_OUTPUT_CEILING_FALLBACK;
+    return 0;
   }
-  // 小米 MiMo（mimo-v2.5-pro 等，多为带思维链的推理模型，max_tokens 需同时容纳 reasoning + 正文，
-  // 旧 fallback 8000 会让长会议纪要严重缩水/截断）：给 16000。
-  if (/mimo/.test(model)) return 16000;
-  // 其它确认支持 ≥16K 输出的国产模型（MiniMax abab / 阶跃 step / 文心 4 / 混元）。
-  // 通义千问 / GLM / Kimi / Doubao 上限不一，仍走下方安全回退。
-  if (/minimax|abab|step-[12]|ernie-4|hunyuan/.test(model)) return 16000;
+  // MiMo、Qwen、GLM、Kimi、Doubao 以及未知模型的输出能力由实际端点决定，
+  // 不再凭模型名猜一个过低的上限。
+  if (/mimo|qwen|glm|kimi|doubao|ernie|hunyuan|minimax|abab|step-/.test(model)) return 0;
   // Claude / Anthropic（含 opus/sonnet/haiku/fable 命名）。⚠️旧 3.5 上限只有 8192，必须先判，
   // 否则会被下面的 sonnet/haiku 分支抢先误给 48000 → 旧 3.5 超限 400。
   if (/claude|anthropic|opus|sonnet|haiku|fable/.test(model)) {
@@ -322,10 +322,11 @@ export function getLlmOutputCeiling(settings) {
     if (/sonnet|haiku/.test(model)) return 48000;                  // 真实 64K
     return 32000;                                                  // 其它/未来 Claude：保守，仍远低于 64K+
   }
-  // OpenAI GPT-4o / 4.1 / 4-turbo：16384 → 留冗余给 15000。裸 gpt-4（8192）落入下面安全回退。
+  // OpenAI GPT-4o / 4.1 / 4-turbo：16384；裸 gpt-4 仍按旧模型处理。
   if (/gpt-4o|gpt-4\.1|gpt-4-turbo/.test(model)) return 15000;
-  // 通义千问 / GLM / Kimi / Doubao / 本地 / 其它一律回退安全值（多为 8K，超限多半 400，宁少勿超）。
-  return LLM_OUTPUT_CEILING_FALLBACK;
+  if (/^gpt-4(?:$|[-_ ])/.test(model)) return LLM_OUTPUT_CEILING_FALLBACK;
+  // 本地模型、网关自定义模型和未来模型：0 表示不做客户端猜测。
+  return 0;
 }
 
 // 录音长度分档（单一来源）：输出 token 配额（下方 getBriefingMergeDesiredTokens）与篇幅策略指令
@@ -344,18 +345,20 @@ export function classifyBriefingLength(stats) {
 }
 
 export function getBriefingMergeDesiredTokens(stats) {
+  const transcriptChars = Math.max(0, Number(stats && stats.transcriptChars) || 0);
+  const durationMs = Math.max(0, Number(stats && stats.durationMs) || 0);
   switch (classifyBriefingLength(stats)) {
-    case "ultra": return BRIEFING_MERGE_MAX_TOKENS_ULTRA;
-    case "long": return BRIEFING_MERGE_MAX_TOKENS_LONG;
-    case "medium": return BRIEFING_MERGE_MAX_TOKENS_MEDIUM;
-    default: return BRIEFING_MERGE_MAX_TOKENS_SHORT;
+    case "ultra": return Math.min(BRIEFING_MERGE_TARGET_MAX_TOKENS, Math.max(BRIEFING_MERGE_MAX_TOKENS_ULTRA, Math.ceil(transcriptChars / 2), Math.ceil(durationMs / 3600000 * 16000)));
+    case "long": return Math.min(BRIEFING_MERGE_TARGET_MAX_TOKENS, Math.max(BRIEFING_MERGE_MAX_TOKENS_LONG, Math.ceil(transcriptChars / 2), Math.ceil(durationMs / 3600000 * 16000)));
+    case "medium": return Math.min(BRIEFING_MERGE_TARGET_MAX_TOKENS, Math.max(BRIEFING_MERGE_MAX_TOKENS_MEDIUM, Math.ceil(transcriptChars / 2), Math.ceil(durationMs / 3600000 * 16000)));
+    default: return Math.min(BRIEFING_MERGE_TARGET_MAX_TOKENS, Math.max(BRIEFING_MERGE_MAX_TOKENS_SHORT, Math.ceil(transcriptChars / 2), Math.ceil(durationMs / 3600000 * 16000)));
   }
 }
 
 export function getBriefingMergeMaxTokens(stats, settings) {
   const desired = getBriefingMergeDesiredTokens(stats);
-  const ceiling = settings ? getLlmOutputCeiling(settings) : LLM_OUTPUT_CEILING_FALLBACK;
-  return Math.min(desired, ceiling);
+  const ceiling = settings ? getLlmOutputCeiling(settings) : 0;
+  return ceiling > 0 ? Math.min(desired, ceiling) : desired;
 }
 
 export const BRIEFING_MERGE_MAX_TOKENS_SHORT = 4096;
@@ -364,7 +367,11 @@ export const BRIEFING_MERGE_MAX_TOKENS_MEDIUM = 8192;
 
 export const BRIEFING_MERGE_MAX_TOKENS_LONG = 16000;
 
-export const BRIEFING_MERGE_MAX_TOKENS_ULTRA = 32000;
+export const BRIEFING_MERGE_MAX_TOKENS_ULTRA = 48000;
+
+// 这是需求目标的防失控上界，不是模型兼容上限。已知旧模型会在上面的 ceiling 中单独限额，
+// 新模型则按材料体量请求，服务端若仍拒绝会走输出预算降档。
+export const BRIEFING_MERGE_TARGET_MAX_TOKENS = 128000;
 
 export const LLM_OUTPUT_CEILING_FALLBACK = 8000;
 

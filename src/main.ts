@@ -30,7 +30,7 @@ import { SETTINGS_SCHEMA_VERSION, LEGACY_VOCABULARY_FILE, normalizeLexVoiceSetti
 import type { LexVoiceSettings, QueueTask, RecordingSession } from "./shared/types";
 
 declare const LEXVOICE_BUILD_VERSION: string;
-import { applyLlmProfileToWorkingConfig, getLlmOutputCeiling, getBriefingMergeDesiredTokens, getBriefingMergeMaxTokens, LLM_OUTPUT_CEILING_FALLBACK, classifyBriefingLength } from "./llm/config";
+import { applyLlmProfileToWorkingConfig, getLlmOutputCeiling, getBriefingMergeDesiredTokens, getBriefingMergeMaxTokens, classifyBriefingLength } from "./llm/config";
 import { getThinkingControl } from "./llm/thinking";
 import { DashScopeStreamingClient, OpenAIRealtimeTranscriptionClient, OpenAIRealtimeTranslationClient, PcmStreamEncoder } from "./asr/clients";
 import { MODE_META, FRONTMATTER_SCHEMA, MODE_PREFIX_TO_KEY } from "./shared/catalog-modes";
@@ -968,20 +968,8 @@ const MEETING_INTERACTION_MAX_TOKENS = 320;
 const MEETING_INTERACTION_CONCEPT_MAX_TOKENS = 700;
 const MEETING_INTERACTION_IMPORTANT_MAX_TOKENS = 500;
 
-// 最终纪要（merge）max_tokens：按内容长度自适应放大「期望值」，再用「当前模型的安全输出上限」钳制。
-// 之前固定封顶 8000 是基于过时认知（以为各家上限都 ≈8192）。实测现行上限：DeepSeek V4 系列 384K、
-// Claude Opus/Fable 128K、Sonnet 64K、GPT-4o 16K；旧 DeepSeek-V3/chat、Claude 3.5 才是 8192。
-// 策略：期望值按长度分档放大，但绝不拉满模型上限——按已知上限留 ~15% 冗余取一个安全值，
-// 既让大模型的长会能产出完整纪要，又不会在小/旧模型上把 max_tokens 设过头被 API 拒成 400。
-// 真正超长、单次仍装不下的会议由分段整理+拼接兜底（见 mergeAndPolishLongSession），不靠无限抬上限。
-// 未知/本地模型保守上限：很多本地或小模型真实上限只有 4096/8192，且超限多半 400。8000 是历史默认、已验证安全。
-
-// 返回当前 LLM 的「安全可用输出上限」（已留冗余，非模型真实极限）。仅用于钳制 merge 的 max_tokens。
-// 名称匹配保守：拿不准就回退到安全值，宁可少给也不要因设过头而整篇 merge 失败。
-
-// 内容期望值（未钳制）：merge 想要多少 token 才能不截断地写完。也用来判断是否需要分段（超过模型上限即需要）。
-
-// 实际下发的 max_tokens = min(内容期望, 模型安全上限)。第二参可传 settings 启用模型上限钳制（缺省回退安全值）。
+// 最终纪要（merge）max_tokens：按材料体量计算需求；只有明确识别为旧模型时才钳制。
+// 新模型、网关模型和本地模型不再套用历史 8K 默认值，服务端若拒绝会由 llm/core.ts 有界降档。
 
 function buildSourceAwareOutlineInstruction(captureMode, modeKey) {
   const mode = normalizeAudioInputMode(captureMode || "mic");
@@ -6349,7 +6337,12 @@ function splitSegmentsIntoGroups(segments, targetChars) {
 async function cleanTranscript(plugin, segments, ceiling) {
   const list = Array.isArray(segments) ? segments.filter(s => s && String(s.text || "").trim()) : [];
   if (!list.length) return { text: "", truncated: false };
-  const safeCeiling = Math.max(2048, Number(ceiling) || getLlmOutputCeiling(plugin.settings));
+  const modelCeiling = Number(ceiling) || 0;
+  const inputChars = list.reduce((sum, segment) => sum + String((segment && segment.text) || "").length, 0);
+  // 未知/新模型不再回退到 2048/8000；按本次清稿输入体量给出需求值，真实拒绝时再由请求层降档。
+  const safeCeiling = modelCeiling > 0
+    ? Math.max(2048, modelCeiling)
+    : Math.min(32000, Math.max(12000, Math.ceil(inputChars / 2)));
   const targetChars = Math.min(24000, Math.max(6000, Math.floor(safeCeiling * 1.5)));
   const groups = splitSegmentsIntoGroups(list, targetChars);
   const runGroup = async (g, partIndex, partTotal) => {
@@ -6414,7 +6407,13 @@ function renderLongSessionRawFallbackGroup(group, partIndex) {
 // 超长会议分段整理 + 拼接：当单次输出装不下完整纪要时，按时间切成多段分别整理，再拼成一篇。
 // 仅在 desired > ceiling 的超长场景触发（见 mergeAndPolish 的 shouldChunk）。返回 null 表示无法分段、退回单次。
 async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, originalFrontmatter, repolishOptions, ceiling) {
-  const safeCeiling = Math.max(2048, Number(ceiling) || LLM_OUTPUT_CEILING_FALLBACK);
+  const desiredForSession = getBriefingMergeDesiredTokens({
+    durationMs: getSegmentsDurationMs(segments),
+    transcriptChars: (segments || []).reduce((sum, segment) => sum + String((segment && segment.text) || "").length, 0),
+    segmentCount: (segments || []).length,
+  });
+  const modelCeiling = Number(ceiling) || 0;
+  const safeCeiling = modelCeiling > 0 ? Math.max(2048, modelCeiling) : Math.max(8192, desiredForSession);
   // 每组转写字符目标：组产出纪要 token ≈ 0.25×字符数，要落在 ceiling 内 → 字符目标 ≈ 3.2×ceiling（留余量给截断检测）。
   // 再加绝对上限 36000：确保「内容真的多」的超长会议无论模型 ceiling 多高都能切成多组、逐段充分整理，
   // 而不是因 ceiling 偏高（如 MiMo 16K → 旧公式 56000）导致 targetChars 过大、切不出多组又退回单次。
@@ -6551,7 +6550,9 @@ async function mergeAndPolish(plugin, segments, mode, recruitContext, sessionMet
     transcriptChars: joined.length,
     segmentCount: segments.length,
   });
-  if (mode !== "recruit" && !isRecruitTextImport && !preSummarized && segments.length >= 2 && mergeDesired >= mergeCeiling * 1.5) {
+  const inputNeedsChunking = joined.length >= 240000;
+  const modelNeedsChunking = mergeCeiling > 0 && mergeDesired >= mergeCeiling * 1.5;
+  if (mode !== "recruit" && !isRecruitTextImport && !preSummarized && segments.length >= 2 && (modelNeedsChunking || inputNeedsChunking)) {
     try {
       const chunked = await mergeAndPolishLongSession(plugin, segments, mode, computedMeta, originalFrontmatter, repolishOptions, mergeCeiling);
       if (chunked != null) return chunked;
