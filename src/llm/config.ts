@@ -300,32 +300,9 @@ function llmPresetEndpointMatches(preset, endpoint) {
 }
 
 export function getLlmOutputCeiling(settings) {
-  // 这里只保留「明确知道是旧模型」的兼容上限。
-  // 新模型/中转模型不再因为名字无法识别而被一刀切到 8000；请求如果真的超出服务端能力，
-  // 由 llm/core.ts 根据实际 400 响应做有限次自适应降档。
-  const model = String((settings && settings.llmModel) || "").toLowerCase();
-  if (!model) return 0;
-  // DeepSeek V4 官方输出上限为 384K；这里不再用旧版 8K 兼容值限制它。
-  if (/deepseek/.test(model)) {
-    if (/v4/.test(model)) return 384000;
-    if (/deepseek-(?:chat|reasoner)|deepseek[-_ ]?v3(?:\.0)?(?:$|[-_ ])/.test(model)) return LLM_OUTPUT_CEILING_FALLBACK;
-    return 0;
-  }
-  // MiMo、Qwen、GLM、Kimi、Doubao 以及未知模型的输出能力由实际端点决定，
-  // 不再凭模型名猜一个过低的上限。
-  if (/mimo|qwen|glm|kimi|doubao|ernie|hunyuan|minimax|abab|step-/.test(model)) return 0;
-  // Claude / Anthropic（含 opus/sonnet/haiku/fable 命名）。⚠️旧 3.5 上限只有 8192，必须先判，
-  // 否则会被下面的 sonnet/haiku 分支抢先误给 48000 → 旧 3.5 超限 400。
-  if (/claude|anthropic|opus|sonnet|haiku|fable/.test(model)) {
-    if (/3-5|3\.5/.test(model)) return LLM_OUTPUT_CEILING_FALLBACK; // claude-3-5-sonnet / 3.5-haiku = 8192
-    if (/opus|fable/.test(model)) return 96000;                    // 真实 128K
-    if (/sonnet|haiku/.test(model)) return 48000;                  // 真实 64K
-    return 32000;                                                  // 其它/未来 Claude：保守，仍远低于 64K+
-  }
-  // OpenAI GPT-4o / 4.1 / 4-turbo：16384；裸 gpt-4 仍按旧模型处理。
-  if (/gpt-4o|gpt-4\.1|gpt-4-turbo/.test(model)) return 15000;
-  if (/^gpt-4(?:$|[-_ ])/.test(model)) return LLM_OUTPUT_CEILING_FALLBACK;
-  // 本地模型、网关自定义模型和未来模型：0 表示不做客户端猜测。
+  // 保留旧导出名，避免外部调用方断裂；真正的能力上限由
+  // src/llm/output-budget.ts 在服务端明确拒绝后按 endpoint + model 记忆。
+  // 这里永远不再根据模型名称猜测上限。
   return 0;
 }
 
@@ -355,9 +332,9 @@ export function getBriefingMergeDesiredTokens(stats) {
   }
 }
 
-export function getBriefingMergeMaxTokens(stats, settings) {
+export function getBriefingMergeMaxTokens(stats, settings, runtimeCeiling = 0) {
   const desired = getBriefingMergeDesiredTokens(stats);
-  const ceiling = settings ? getLlmOutputCeiling(settings) : 0;
+  const ceiling = Number(runtimeCeiling) > 0 ? Math.floor(Number(runtimeCeiling)) : 0;
   return ceiling > 0 ? Math.min(desired, ceiling) : desired;
 }
 
@@ -372,8 +349,6 @@ export const BRIEFING_MERGE_MAX_TOKENS_ULTRA = 48000;
 // 这是需求目标的防失控上界，不是模型兼容上限。已知旧模型会在上面的 ceiling 中单独限额，
 // 新模型则按材料体量请求，服务端若仍拒绝会走输出预算降档。
 export const BRIEFING_MERGE_TARGET_MAX_TOKENS = 128000;
-
-export const LLM_OUTPUT_CEILING_FALLBACK = 8000;
 
 export function normalizeSchemeAsrSnapshot(asr) {
   if (!asr || typeof asr !== "object") return undefined;

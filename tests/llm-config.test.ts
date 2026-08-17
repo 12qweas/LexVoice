@@ -17,9 +17,9 @@ describe("LLM 输出预算策略", () => {
     expect(getBriefingMergeMaxTokens(stats)).toBe(desired);
   });
 
-  it("只对明确识别的旧模型保留兼容上限", () => {
-    expect(getLlmOutputCeiling({ llmModel: "deepseek-chat" })).toBe(8000);
-    expect(getLlmOutputCeiling({ llmModel: "deepseek-v4-pro" })).toBe(384000);
-    expect(getLlmOutputCeiling({ llmModel: "gpt-4" })).toBe(8000);
+  it("不再根据模型名称猜测输出上限", () => {
+    expect(getLlmOutputCeiling({ llmModel: "deepseek-chat" })).toBe(0);
+    expect(getLlmOutputCeiling({ llmModel: "deepseek-v4-pro" })).toBe(0);
+    expect(getLlmOutputCeiling({ llmModel: "gpt-4" })).toBe(0);
   });
 });

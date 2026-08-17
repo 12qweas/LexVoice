@@ -4,7 +4,8 @@ vi.mock("obsidian", () => ({
   requestUrl: vi.fn(),
 }));
 
-import { fetchLlmModelList, getLlmConfigIssue, getNextLlmOutputBudget, isLlmOutputBudgetError, isTransientLlmError, readLlmSseStream, requestLlmChatCompletion, requestLlmChatCompletionViaObsidian } from "../src/llm/core";
+import { fetchLlmModelList, getLlmConfigIssue, getNextLlmOutputBudget, isLlmContextLimitError, isLlmOutputBudgetError, isLlmOutputParameterError, isTransientLlmError, readLlmSseStream, requestLlmChatCompletion, requestLlmChatCompletionViaObsidian } from "../src/llm/core";
+import { applyLearnedLlmCapability, getEffectiveLlmOutputBudget, getLearnedLlmOutputCeiling, getLearnedLlmOutputParameter, rememberLlmOutputCeiling, resetLearnedLlmCapabilities } from "../src/llm/output-budget";
 import { DashScopeStreamingClient, OpenAIRealtimeTranscriptionClient, OpenAIRealtimeTranslationClient } from "../src/asr/clients";
 import { assertSafeServiceEndpoint, canOmitServiceApiKey, getServiceEndpointSecurityIssue, isLocalLlmEndpoint, isSharedAddressSpaceHost } from "../src/shared/util-llm-endpoint";
 
@@ -149,6 +150,38 @@ describe("LLM transient error classification", () => {
 });
 
 describe("LLM 输出预算兼容", () => {
+  it("上下文超限和输出预算拒绝分开处理", () => {
+    const contextError = { status: 400, message: "maximum context length exceeded" };
+    expect(isLlmContextLimitError(contextError)).toBe(true);
+    expect(isLlmOutputBudgetError(contextError)).toBe(false);
+    expect(isLlmOutputBudgetError({ status: 400, message: "max_tokens is too large" })).toBe(true);
+  });
+
+  it("只在服务端明确要求时切换 max_completion_tokens", () => {
+    expect(isLlmOutputParameterError({
+      status: 400,
+      message: "max_tokens is not supported for this model; use max_completion_tokens instead",
+    })).toBe(true);
+    expect(isLlmOutputParameterError({ status: 400, message: "max_tokens is too large" })).toBe(false);
+  });
+
+  it("记忆的是端点实际能力，不按模型名称预置", () => {
+    resetLearnedLlmCapabilities();
+    const settings = { llmEndpoint: "https://llm.example/v1", llmModel: "future-model" };
+    expect(getLearnedLlmOutputCeiling(settings)).toBe(0);
+    expect(getLearnedLlmOutputParameter(settings)).toBe("max_tokens");
+  });
+
+  it("能力缓存只会收紧，不会因一次较小成功请求误判上限", () => {
+    resetLearnedLlmCapabilities();
+    const settings = { llmEndpoint: "https://llm.example/v1", llmModel: "future-model" };
+    rememberLlmOutputCeiling(settings, 64000);
+    expect(getEffectiveLlmOutputBudget(settings, { payload: { max_tokens: 128000 } })).toBe(64000);
+    expect(applyLearnedLlmCapability(settings, { max_tokens: 128000 }).max_tokens).toBe(64000);
+    rememberLlmOutputCeiling(settings, 128000);
+    expect(getLearnedLlmOutputCeiling(settings)).toBe(64000);
+  });
+
   it("只把明确的输出预算错误识别为可降档", () => {
     expect(isLlmOutputBudgetError({ status: 400, message: "max_tokens is too large" })).toBe(true);
     expect(isLlmOutputBudgetError({ status: 400, message: "invalid api key" })).toBe(false);

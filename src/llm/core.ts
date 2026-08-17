@@ -8,6 +8,13 @@ import { extractLlmContent } from '../shared/util-json';
 import { diagnosticError } from '../shared/util-key-diag';
 import { withPromiseTimeout, getHeaderValue, parseRetryAfterMs, parseRequestUrlJson, getRequestUrlText } from '../shared/util-http';
 import { LlmRequestQueue } from './request-queue';
+import {
+  applyLearnedLlmCapability,
+  getEffectiveLlmOutputBudget,
+  getLlmOutputBudgetFromOptions,
+  rememberLlmOutputCeiling,
+  rememberLlmOutputParameter,
+} from './output-budget';
 export { LlmRequestQueue } from './request-queue';
 
 type LlmHttpError = Error & {
@@ -275,7 +282,7 @@ export async function requestLlmChatCompletion(plugin, messages, options) {
     temperature: undefined,
   };
   if (!isMoonshotKimiModel(endpoint, llmModel)) basePayload.temperature = 0.3;
-  const payload = Object.assign(basePayload, options && options.payload ? options.payload : {});
+  const payload = applyLearnedLlmCapability(plugin.settings, Object.assign(basePayload, options && options.payload ? options.payload : {}));
   // 思考档：default 不动请求；fast 关思维链 / reasoning 显式开——仅对已核实可控的服务注入对应参数，其它不动。
   try { applyThinkingParam(payload, (options && options.thinkingMode) || plugin.settings.thinkingMode, endpoint, llmModel); } catch { /* intentionally empty */ }
   payload.stream = streamWanted;
@@ -551,40 +558,87 @@ export function isLlmNonRetryableError(error) {
   return isLlmConfigError(error) || isLlmServiceBlockedError(error);
 }
 
+export function isLlmContextLimitError(error) {
+  const status = Number(error && error.status) || 0;
+  if (![400, 413].includes(status)) return false;
+  const message = String((error && (error.statusDetail || error.message)) || error || "");
+  return /context(?:\s|[_-])?(?:length|window|limit)|maximum\s+context|prompt\s+(?:is\s+)?too\s+long|input\s+(?:is\s+)?too\s+long|too\s+many\s+(?:input\s+)?tokens|上下文(?:过长|超限)|输入(?:过长|超限)/i.test(message);
+}
+
 // 只有服务端明确说输出预算不被接受时才降档；普通上下文超限、鉴权失败和网络错误不走这条路径。
 // 这样新模型可以先按实际需求请求更大的输出，旧模型仍能在真实拒绝后兼容，而不是事先被模型名猜测绑死。
 export function isLlmOutputBudgetError(error) {
   const status = Number(error && error.status) || 0;
   if (status !== 400) return false;
   const message = String((error && (error.statusDetail || error.message)) || error || "");
+  if (isLlmContextLimitError(error) && !/max[_ -]?tokens|max(?:imum)?[_ -]?(?:completion|output)[_ -]?tokens|output[_ -]?token/i.test(message)) return false;
   return /max[_ -]?tokens|max(?:imum)?[_ -]?(?:completion|output)[_ -]?tokens|output[_ -]?token(?:s)?|too many tokens|token limit|生成长度|输出长度|输出 token/i.test(message);
+}
+
+export function isLlmOutputParameterError(error) {
+  const status = Number(error && error.status) || 0;
+  if (status !== 400) return false;
+  const message = String((error && (error.statusDetail || error.message)) || error || "");
+  const mentionsMaxTokens = /max[_ -]?tokens/i.test(message);
+  const rejectsParameter = /unsupported|not supported|unknown|unrecognized|unexpected|not allowed|does not accept|不支持|未知参数/i.test(message);
+  const looksLikeValueLimit = /too large|too many|maximum|limit|超过上限|长度过大|数量过多/i.test(message);
+  return mentionsMaxTokens && rejectsParameter && !looksLikeValueLimit;
 }
 
 const OUTPUT_BUDGET_FALLBACKS = [128000, 64000, 32000, 16000, 8192, 4096];
 
 export function getNextLlmOutputBudget(options) {
-  const requested = Number(options && options.payload && options.payload.max_tokens);
+  const requested = getLlmOutputBudgetFromOptions(options);
   if (!Number.isFinite(requested) || requested <= 4096) return 0;
   return OUTPUT_BUDGET_FALLBACKS.find((value) => value < requested) || 4096;
 }
 
 export async function requestLlmChatCompletionWithBudgetFallback(plugin, messages, options) {
   let currentOptions = options || {};
+  let parameterFallbackUsed = false;
+  let budgetFallbackUsed = false;
   for (let attempt = 0; attempt < OUTPUT_BUDGET_FALLBACKS.length; attempt++) {
     try {
-      return await requestLlmChatCompletion(plugin, messages, currentOptions);
+      const effectiveBudget = getEffectiveLlmOutputBudget(plugin && plugin.settings, currentOptions);
+      const result = await requestLlmChatCompletion(plugin, messages, currentOptions);
+      // 只有“服务端拒绝较大预算后降档成功”才记忆上限。
+      // 普通成功请求不能证明这是服务端的最大能力，否则一次 48K 成功会错误封顶后续 128K 请求。
+      if (budgetFallbackUsed && effectiveBudget > 0) rememberLlmOutputCeiling(plugin && plugin.settings, effectiveBudget);
+      if (parameterFallbackUsed) {
+        rememberLlmOutputParameter(plugin && plugin.settings, "max_completion_tokens");
+      }
+      return result;
     } catch (error) {
+      if (isLlmOutputParameterError(error) && !parameterFallbackUsed) {
+        const requested = getLlmOutputBudgetFromOptions(currentOptions);
+        parameterFallbackUsed = true;
+        await logLlmRequestDiagnostic(plugin, "warn", "llm.output_parameter_fallback", "服务端不接受 max_tokens，已切换为 max_completion_tokens 重试", {
+          requested,
+          attempt: attempt + 1,
+        });
+        const payload = Object.assign({}, currentOptions.payload || {});
+        if (payload.max_tokens != null && payload.max_completion_tokens == null) {
+          payload.max_completion_tokens = payload.max_tokens;
+          delete payload.max_tokens;
+        }
+        currentOptions = Object.assign({}, currentOptions, { payload });
+        continue;
+      }
       if (!isLlmOutputBudgetError(error)) throw error;
       const nextBudget = getNextLlmOutputBudget(currentOptions);
       if (!nextBudget) throw error;
-      const requested = Number(currentOptions && currentOptions.payload && currentOptions.payload.max_tokens) || 0;
+      budgetFallbackUsed = true;
+      const requested = getLlmOutputBudgetFromOptions(currentOptions);
       await logLlmRequestDiagnostic(plugin, "warn", "llm.output_budget_fallback", "服务端拒绝当前输出预算，已按实际能力降档重试", {
         requested,
         retryBudget: nextBudget,
         attempt: attempt + 1,
       });
+      const payload = Object.assign({}, currentOptions.payload || {});
+      if (payload.max_completion_tokens != null) payload.max_completion_tokens = nextBudget;
+      else payload.max_tokens = nextBudget;
       currentOptions = Object.assign({}, currentOptions, {
-        payload: Object.assign({}, currentOptions.payload || {}, { max_tokens: nextBudget }),
+        payload,
       });
     }
   }
@@ -724,6 +778,14 @@ export async function callLlmWithContinuation(plugin, system, user, options, opt
 export async function callBriefingMergeLlm(plugin, system, user, options, diagCtx) {
   const { text, finishReason, continuations } = await callLlmWithContinuation(plugin, system, user, options, { maxContinuations: 3 });
   const truncated = isTruncatedFinishReason(finishReason);
+  if (!String(text || "").trim()) {
+    try {
+      await logLlmRequestDiagnostic(plugin, "warn", "llm.merge_empty_output", "大模型请求完成但没有返回可见正文", Object.assign({
+        finishReason: finishReason || "",
+        continuations,
+      }, diagCtx || {}));
+    } catch { /* intentionally empty */ }
+  }
   if (continuations > 0) {
     try {
       await logLlmRequestDiagnostic(plugin, "info", "llm.merge_continued", "输出被截断后自动续写拼接", Object.assign({

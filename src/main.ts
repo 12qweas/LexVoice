@@ -22,7 +22,7 @@ import { getFrontmatterTags, readFileFrontmatter, upsertFrontmatterInMarkdown, L
 import { PEOPLE_SUGGESTION_CACHE_LIMIT, splitPersonFieldValue, normalizePersonLookupText, loadPeopleDirectory, buildPeopleContextForLlm, ensurePeopleNoteRelatedBaseSection, formatPeopleBaseYaml, formatPeopleNoteMarkdown, mergeUniqueStrings, normalizePeopleSuggestion, normalizePeopleSuggestionIgnores, isPeopleSuggestionIgnored, addPeopleSuggestionIgnore, removePeopleSuggestionIgnores, getPeopleSuggestionCacheKey, normalizePeopleSuggestionCache, makePeopleSuggestionCacheRecord, isPeopleSuggestionCacheRecordCurrent, peopleSuggestionRecordToSuggestion, peopleSuggestionIgnoreRecordToSuggestion, findMatchingPersonEntry, arePeopleSuggestionsRelated, mergePeopleSuggestions, mergeSourceNoteRelatedPeopleFrontmatter, mergePersonFrontmatter, generatePeopleDirectorySuggestions, normalizePersonNameForEmail, parsePeopleFromOutput, personEntryFromFrontmatter } from "./people";
 import { getSedimentTodoId, getSedimentCardId, getSedimentHotwordId, getSedimentPersonId, withSedimentCandidateIds, removeSedimentGroupDone, sanitizeSedimentText, normalizeSedimentTodoSubtasks, normalizeSedimentExtractionModel, appendSedimentPreExtractionInstruction, stripSedimentPreExtractionBlocks, extractSedimentPreExtractionBlock, splitOutSedimentBlock, appendSedimentPreExtractionBlock, upsertSedimentPreExtractionBlockInFile, generateSedimentObjects, writeSedimentObjectCards } from "./sediment";
 import { createVocabularyGroups, parseVocabularyGroups, flattenVocabularyGroups, countVocabularyGroups, normalizeVocabularyInput, mergeVocabularyGroups, isStructuredVocabularyMarkdown, loadVocabularyGroups, formatVocabularyMarkdown, applyVocabularyCorrections } from "./vocabulary";
-import { logLlmRequestDiagnostic, getLlmConfigIssue, isLlmConfigError, isLlmServiceBlockedError, isLlmNonRetryableError, formatLlmConfigIssue, formatLlmFailureIssue, callLlm, callBriefingMergeLlm, stripModeSuggestionBlocks } from "./llm/core";
+import { logLlmRequestDiagnostic, getLlmConfigIssue, isLlmConfigError, isLlmServiceBlockedError, isLlmNonRetryableError, isLlmContextLimitError, formatLlmConfigIssue, formatLlmFailureIssue, callLlm, callBriefingMergeLlm, stripModeSuggestionBlocks } from "./llm/core";
 import { DEFAULT_DAILY_MEETING_OVERVIEW_HEADING, DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE, DEFAULT_SETTINGS } from "./shared/defaults";
 // 设置序列化层已抽到独立模块（src/shared/settings-io.ts）并由 round-trip 测试覆盖（tests/settings-io.test.ts）。
 // 这里 import 回来，保持原有调用点用裸名引用不变。
@@ -30,7 +30,8 @@ import { SETTINGS_SCHEMA_VERSION, LEGACY_VOCABULARY_FILE, normalizeLexVoiceSetti
 import type { LexVoiceSettings, QueueTask, RecordingSession } from "./shared/types";
 
 declare const LEXVOICE_BUILD_VERSION: string;
-import { applyLlmProfileToWorkingConfig, getLlmOutputCeiling, getBriefingMergeDesiredTokens, getBriefingMergeMaxTokens, classifyBriefingLength } from "./llm/config";
+import { applyLlmProfileToWorkingConfig, getBriefingMergeDesiredTokens, getBriefingMergeMaxTokens, classifyBriefingLength } from "./llm/config";
+import { getLearnedLlmOutputCeiling } from "./llm/output-budget";
 import { getThinkingControl } from "./llm/thinking";
 import { DashScopeStreamingClient, OpenAIRealtimeTranscriptionClient, OpenAIRealtimeTranslationClient, PcmStreamEncoder } from "./asr/clients";
 import { MODE_META, FRONTMATTER_SCHEMA, MODE_PREFIX_TO_KEY } from "./shared/catalog-modes";
@@ -5609,7 +5610,7 @@ function mergeLeadingFrontmatterIntoDocument(documentText, generatedMarkdown) {
   const current = splitLeadingFrontmatter(documentText || "");
   return {
     content: generated.frontmatter.trimEnd() + "\n\n" + current.body.replace(/^\n+/, ""),
-    body: generated.body.trim() || "_[无输出]_",
+    body: generated.body.trim() || buildEmptyLlmOutputFallback(),
   };
 }
 
@@ -6180,7 +6181,7 @@ async function polishTranscript(plugin, transcript, mode, recruitContext, sessio
     durationMs: getSessionMetaDurationMs(sessionMeta),
     transcriptChars: transcript.length,
     segmentCount: 1,
-  }, plugin.settings);
+  }, plugin.settings, getLearnedLlmOutputCeiling(plugin.settings));
   const metaPrefix = buildSessionMetaPrefix(sessionMeta, mode);
   if (metaPrefix) userPrompt = metaPrefix + "\n\n---\n\n" + userPrompt;
   const meetingWorkbenchPrompt = buildMeetingWorkbenchPrompt(sessionMeta && sessionMeta.meetingWorkbench);
@@ -6366,7 +6367,7 @@ async function cleanTranscript(plugin, segments, ceiling) {
   for (let i = 0; i < groups.length; i++) {
     const r = await runGroup(groups[i], i + 1, groups.length);
     if (r.truncated) anyTruncated = true;
-    parts.push(r.text || "_[本部分无可整理内容]_");
+    parts.push(r.text || renderLongSessionRawFallbackGroup(groups[i], i + 1));
   }
   return { text: parts.join("\n\n"), truncated: anyTruncated };
 }
@@ -6398,15 +6399,19 @@ function renderLongSessionRawFallbackGroup(group, partIndex) {
     const segEnd = Math.max(segStart, Number(seg && seg.endOffsetMs) || segStart);
     const audioOffset = Math.max(0, Number(seg && seg.audioStartOffsetMs) || segStart);
     const anchor = seg && seg.audioName ? ` ${getAudioTimeLink(seg.audioName, audioOffset)}` : "";
-    const text = String((seg && seg.text) || "").trim() || "_[本段无可用转写]_";
+    const text = String((seg && seg.text) || "").trim() || "（本段未获得可用转写内容）";
     return `### 段落 ${index + 1} · ${formatElapsed(segStart)}–${formatElapsed(segEnd)}${anchor}\n\n${text}`;
   }).join("\n\n");
-  return `## 第 ${partIndex} 部分 · ${start}–${end}（原始转写保底）\n\n${segments || "_[本部分无可用转写]_"}`;
+  return `## 第 ${partIndex} 部分 · ${start}–${end}（原始转写保底）\n\n${segments || "（本部分没有可保留的原始转写片段）"}`;
+}
+
+function buildEmptyLlmOutputFallback() {
+  return "> [!warning] AI 整理未完成\n> 未获得可用的整理正文；原始转写仍保留在当前笔记中，可以稍后从处理进度中重试。";
 }
 
 // 超长会议分段整理 + 拼接：当单次输出装不下完整纪要时，按时间切成多段分别整理，再拼成一篇。
 // 仅在 desired > ceiling 的超长场景触发（见 mergeAndPolish 的 shouldChunk）。返回 null 表示无法分段、退回单次。
-async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, originalFrontmatter, repolishOptions, ceiling) {
+async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, originalFrontmatter, repolishOptions, ceiling, forceChunk = false) {
   const desiredForSession = getBriefingMergeDesiredTokens({
     durationMs: getSegmentsDurationMs(segments),
     transcriptChars: (segments || []).reduce((sum, segment) => sum + String((segment && segment.text) || "").length, 0),
@@ -6417,7 +6422,9 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
   // 每组转写字符目标：组产出纪要 token ≈ 0.25×字符数，要落在 ceiling 内 → 字符目标 ≈ 3.2×ceiling（留余量给截断检测）。
   // 再加绝对上限 36000：确保「内容真的多」的超长会议无论模型 ceiling 多高都能切成多组、逐段充分整理，
   // 而不是因 ceiling 偏高（如 MiMo 16K → 旧公式 56000）导致 targetChars 过大、切不出多组又退回单次。
-  const targetChars = Math.min(36000, Math.max(8000, Math.floor(safeCeiling * 3.2)));
+  const targetChars = forceChunk
+    ? Math.min(24000, Math.max(8000, Math.floor(safeCeiling * 1.8)))
+    : Math.min(36000, Math.max(8000, Math.floor(safeCeiling * 3.2)));
   const groups = splitSegmentsIntoGroups(segments, targetChars);
   if (groups.length < 2) return null; // 切不出多组 → 退回单次
   await logLlmRequestDiagnostic(plugin, "info", "llm.merge_long_session_chunked", "超长会议启用分段整理+拼接", {
@@ -6472,7 +6479,12 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
     for (const p of (pp.people || [])) allPeople.push(p);
     for (const p of (tt.people || [])) allPeople.push(p);
     for (const t of (tt.tags || [])) allTags.push(t);
-    partBodies.push(`## 第 ${i + 1} 部分 · ${start}–${end}\n\n${body || "_[本部分无可整理内容]_"}`);
+    if (!body) {
+      rawFallbackFromPart = rawFallbackFromPart || i + 1;
+      partBodies.push(renderLongSessionRawFallbackGroup(g, i + 1));
+      continue;
+    }
+    partBodies.push(`## 第 ${i + 1} 部分 · ${start}–${end}\n\n${body}`);
   }
   // 顶部总览：拼各部分小结
   const overviewLines = partSummaries.length
@@ -6537,14 +6549,15 @@ async function mergeAndPolish(plugin, segments, mode, recruitContext, sessionMet
   }
   const isRecruitTextImport = mode === "recruit" && computedMeta && computedMeta.source === "text-import";
   // 自适应 max_tokens：让长会真正能产出更长纪要，而不是被 API 默认上限（~4096）一刀切。
+  const runtimeCeiling = getLearnedLlmOutputCeiling(plugin.settings);
   const briefingMergeMaxTokens = getBriefingMergeMaxTokens({
     durationMs: getSegmentsDurationMs(segments) || getSessionMetaDurationMs(computedMeta),
     transcriptChars: joined.length,
     segmentCount: segments.length,
-  }, plugin.settings);
+  }, plugin.settings, runtimeCeiling);
   // 超长会议工程兜底：当「内容期望输出」明显超过「模型安全上限」（单次必然截断）时，按时间分段整理再拼接，
   // 而不是把 max_tokens 抬过模型上限被拒。仅普通纪要模式触发；招聘评估是整体研判、文本导入已预压缩，不分段。
-  const mergeCeiling = getLlmOutputCeiling(plugin.settings);
+  const mergeCeiling = runtimeCeiling;
   const mergeDesired = getBriefingMergeDesiredTokens({
     durationMs: getSegmentsDurationMs(segments) || getSessionMetaDurationMs(computedMeta),
     transcriptChars: joined.length,
@@ -6625,7 +6638,36 @@ async function mergeAndPolish(plugin, segments, mode, recruitContext, sessionMet
   userPrompt = appendSedimentPreExtractionInstruction(userPrompt);
   // 流式：merge 是最长、最贵、跑一次的调用。流式 + 空闲超时确保服务端只要在持续输出就不会被
   // 客户端总超时 abort，避免"扣了钱却因超时拿不到结果"的浪费（符合总纲：不因工程缺陷浪费）。
-  const { text: raw, truncated } = await callBriefingMergeLlm(plugin, sys, userPrompt, { stream: true, payload: { max_tokens: briefingMergeMaxTokens } }, { mode, segmentCount: segments.length, transcriptChars: joined.length });
+  let mergeResult;
+  try {
+    mergeResult = await callBriefingMergeLlm(plugin, sys, userPrompt, { stream: true, payload: { max_tokens: briefingMergeMaxTokens } }, { mode, segmentCount: segments.length, transcriptChars: joined.length });
+  } catch (e) {
+    // 上下文限制不是普通网络重试问题：把同一份超长 prompt 再发一遍只会重复失败或重复计费。
+    // 第一次明确收到上下文超限后，立即切换到时间分段路径；分段失败的部分由原始转写保底。
+    if (isLlmContextLimitError(e) && mode !== "recruit" && !isRecruitTextImport && segments.length >= 2) {
+      await logLlmRequestDiagnostic(plugin, "warn", "llm.merge_context_chunk_retry", "单次整理上下文超限，已切换为分段整理", {
+        mode,
+        segmentCount: segments.length,
+        transcriptChars: joined.length,
+        error: diagnosticError(e),
+      });
+      const chunked = await mergeAndPolishLongSession(plugin, segments, mode, computedMeta, originalFrontmatter, repolishOptions, runtimeCeiling, true);
+      if (chunked != null) return chunked;
+    }
+    throw e;
+  }
+  const { text: raw, truncated } = mergeResult;
+  if (!String(raw || "").trim()) {
+    const fallback = renderLongSessionRawFallbackGroup(segments, 1);
+    const warning = buildEmptyLlmOutputFallback();
+    await logLlmRequestDiagnostic(plugin, "warn", "llm.merge_raw_transcript_fallback", "AI 整理没有正文，已保留原始转写", {
+      mode,
+      segmentCount: segments.length,
+      transcriptChars: joined.length,
+    });
+    const fallbackOutput = postProcessBriefingOutput(fallback, mode, computedMeta, originalFrontmatter, frontmatterBaseModeKey(plugin, mode), warning);
+    return fallbackOutput;
+  }
   const sedimentPreExtraction = extractSedimentPreExtractionBlock(raw);
   const auditedOutput = appendEntityEvidenceWarning(sedimentPreExtraction.cleaned, joined);
   // 截断告警 + 文本导入预压缩告警合并成顶部 notice（都属"纪要可能不完整/有损"，一起提示）。
@@ -18890,11 +18932,12 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
       return `${head}\n\n${body}\n`;
     }).join("\n");
 
-    const polishedParts = splitLeadingFrontmatter(polished || "_[无输出]_");
+    const emptyBriefingFallback = buildEmptyLlmOutputFallback();
+    const polishedParts = splitLeadingFrontmatter(polished || emptyBriefingFallback);
     const polishedFrontmatter = polishedParts.frontmatter ? polishedParts.frontmatter.trimEnd() : "";
     // 把沉淀元数据注释从正文末尾拆出来，稍后挪到整篇笔记最末尾（不再夹在正文与原始材料之间）。
     const sediment = splitOutSedimentBlock(polishedParts.body);
-    const polishedBody = sediment.body.trim() || "_[无输出]_";
+    const polishedBody = sediment.body.trim() || emptyBriefingFallback;
 
     const content = [
       polishedFrontmatter || null,
@@ -18945,11 +18988,12 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
     if (!(file instanceof obsidian.TFile)) return;
     const totalMs = session.segments.length ? session.segments[session.segments.length - 1].endOffsetMs : 0;
     const meta = getModeMeta(this.settings, session.mode);
-    const polishedParts = splitLeadingFrontmatter(polished || "_[无输出]_");
+    const emptyBriefingFallback = buildEmptyLlmOutputFallback();
+    const polishedParts = splitLeadingFrontmatter(polished || emptyBriefingFallback);
     const polishedFrontmatter = polishedParts.frontmatter ? polishedParts.frontmatter.trimEnd() : "";
     // 沉淀元数据从正文拆出，挪到本块最末尾，避免夹在正文与原始材料之间。
     const sediment = splitOutSedimentBlock(polishedParts.body);
-    const polishedBody = sediment.body.trim() || "_[无输出]_";
+    const polishedBody = sediment.body.trim() || emptyBriefingFallback;
     const textImport = isTextImportSession(session);
     const realtimeOutlineBlock = buildRealtimeOutlineDetails(session);
     const playbackTimelineBlock = buildPlaybackTimelineDetails(session);
@@ -20416,7 +20460,7 @@ ${source}`;
     const fileStem = sanitizeFilename(`${id}`) || id;
     const fileName = `${fileStem}.md`;
     const versionParts = splitLexVoiceVersionPayload(versionInput.body);
-    const body = versionParts.body.trim() || "_[无输出]_";
+    const body = versionParts.body.trim() || buildEmptyLlmOutputFallback();
     const frontmatter = versionParts.frontmatter;
     const meta = {
       id,
@@ -20504,7 +20548,7 @@ ${source}`;
       created: version && version.meta ? version.meta.createdAt : new Date().toISOString(),
     });
     const yaml = obsidian.stringifyYaml(derivedFm);
-    const body = String(version && version.body || "_[无输出]_").trim() || "_[无输出]_";
+    const body = String(version && version.body || buildEmptyLlmOutputFallback()).trim() || buildEmptyLlmOutputFallback();
     const heading = /^#\s/m.test(body) ? "" : `# ${prefix} · ${sourceFile.basename}\n\n`;
     const backlink = `> [!info] 基于原始转写重新生成 · 原始纪要：[[${sourceFile.basename}]]`;
     const content = `---\n${yaml.trimEnd()}\n---\n\n${heading}${backlink}\n\n${body}\n`;
@@ -20687,10 +20731,10 @@ ${source}`;
       const latestSourceContent = await this.app.vault.read(dailyTargetFile);
       const versionLabel = `${meta.prefix}${preferenceLabel}`;
       const versionStyle = repolishOptions && repolishOptions.label ? repolishOptions.label : "";
-      const versionBody = stripModeSuggestionBlocks(polished || "_[无输出]_").trim();
+      const versionBody = stripModeSuggestionBlocks(polished || buildEmptyLlmOutputFallback()).trim();
       const versionParts = splitLexVoiceVersionPayload(versionBody);
       const fallbackVersion = {
-        body: versionParts.body.trim() || "_[无输出]_",
+        body: versionParts.body.trim() || buildEmptyLlmOutputFallback(),
         frontmatter: versionParts.frontmatter || "",
         meta: {
           sourceId: getLexVoiceSourceIdFromMarkdown(latestSourceContent, dailyTargetFile),
@@ -20780,9 +20824,10 @@ ${source}`;
     const { tail: rawTail, withoutRaw } = extractAllRawBlocksFromText(cur);
     const beforeParts = splitLeadingFrontmatter(withoutRaw);
     const beforeBody = beforeParts.body.replace(/^\n+/, "");
-    const polishedParts = splitLeadingFrontmatter(stripModeSuggestionBlocks(polished || "_[无输出]_").trim());
+    const emptyBriefingFallback = buildEmptyLlmOutputFallback();
+    const polishedParts = splitLeadingFrontmatter(stripModeSuggestionBlocks(polished || emptyBriefingFallback).trim());
     const polishedFrontmatter = polishedParts.frontmatter ? polishedParts.frontmatter.trimEnd() : "";
-    const polishedBody = polishedParts.body.trim() || "_[无输出]_";
+    const polishedBody = polishedParts.body.trim() || emptyBriefingFallback;
 
     const titleMatch = beforeBody.match(/^#\s+[^\n]+\n*/);
     const titleBlock = titleMatch ? titleMatch[0].replace(/\n*$/, "\n") : "";
@@ -20866,7 +20911,7 @@ ${source}`;
       this.updateBusyStatus();
       new obsidian.Notice("LexVoice：正在从母本逐字稿生成清稿…");
       taskMeter = this.beginTaskMeter();
-      const { text: cleaned, truncated } = await cleanTranscript(this, segments, getLlmOutputCeiling(this.settings));
+      const { text: cleaned, truncated } = await cleanTranscript(this, segments, getLearnedLlmOutputCeiling(this.settings));
       if (!cleaned) throw new Error("模型没有返回可用清稿");
       const warn = truncated
         ? "> [!warning] 清稿可能被截断：部分内容或因模型输出上限未完整。建议换更大输出上限的模型后重新生成。\n\n"

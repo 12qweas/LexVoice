@@ -1,6 +1,7 @@
 const VERSION_FRONTMATTER_START = "<!-- lexvoice-version-frontmatter-start";
 const VERSION_FRONTMATTER_END = "lexvoice-version-frontmatter-end -->";
 const ACTIVE_VERSION_PATTERN = /<!--\s*lexvoice-active-version-start\s*-->[\s\S]*?<!--\s*lexvoice-active-version-end\s*-->/;
+const EMPTY_VERSION_BODY_FALLBACK = "> [!warning] AI 整理未完成\n> 当前版本没有可显示的整理正文；原始转写仍保留在母本中。";
 
 export function splitLeadingFrontmatter(markdown: string): { frontmatter: string; body: string } {
   const text = String(markdown || "").replace(/^\uFEFF/, "");
@@ -48,7 +49,7 @@ export function splitLexVoiceVersionPayload(content: string): { frontmatter: str
 
 export function buildLexVoiceVersionPayload(frontmatter: string, body: string): string {
   const yaml = getFrontmatterYaml(frontmatter);
-  const cleanBody = splitLexVoiceVersionPayload(body).body.trim() || "_[无输出]_";
+  const cleanBody = splitLexVoiceVersionPayload(body).body.trim() || EMPTY_VERSION_BODY_FALLBACK;
   if (!yaml) return cleanBody;
   return [
     VERSION_FRONTMATTER_START,
