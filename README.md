@@ -2,13 +2,15 @@
 
 
 
-> 中文说明见官网https://lexvoice.cn/zh/
+> [中文说明](https://lexvoice.cn/zh/)
 
-LexVoice is an Obsidian **desktop** plugin for recording audio, transcribing speech, building a live outline while you record, and turning meetings into reusable Markdown — todos, learning cards, people records, and ASR hotwords.
+LexVoice is an Obsidian plugin for recording audio, transcribing speech, building a live outline while you record, and turning meetings into reusable Markdown — todos, learning cards, people records, and ASR hotwords.
 
 It is **not** a hosted cloud service and ships **no API keys**. You connect your own speech-to-text (ASR) service and, optionally, your own large language model (LLM). Recordings stay in your vault; nothing is uploaded to any LexVoice server (there is none).
 
 LexVoice started as a plain record → transcribe → summarize plugin. But the valuable part of a meeting is rarely the raw transcript — it is *who said what, what to do next, what you learned, and the terms you will hear again*. So LexVoice was rebuilt from a transcription tool into a **meeting workbench**: recording is just the entry point; the live outline, the sediment review, and the object library are the point.
+
+LexVoice supports desktop and mobile Obsidian workflows. Mobile recording uses the device microphone. System audio, virtual audio devices, multichannel capture, and desktop device diagnostics require the desktop app.
 
 ## Features
 
@@ -28,6 +30,17 @@ Mark only (no AI call):
 - `/todo` — type `/<action>` to capture an explicit todo candidate.
 
 Half-width and full-width symbols are both accepted. In-meeting notes are fed into the final summarization prompt as clearly-labeled "live supplementary material", never mixed into the raw transcript.
+
+### Ask this note
+Ask follow-up questions when the final notes miss a detail or you want to revisit a specific part of the discussion. LexVoice answers from both the organized note and the preserved raw transcript. Useful answers can be written back to one compact **Ask this note** section in the Markdown file.
+
+### Long meetings & recovery
+In standard meeting and learning-note modes, long recordings are organized in recoverable parts instead of relying on one all-or-nothing LLM response. LexVoice builds a global topic map, saves each completed part as a local checkpoint, and assembles the final note in time order.
+
+If a request is interrupted or a model reaches its output limit, completed work is reused and only unfinished parts are retried. The raw transcript remains available, and an incomplete result is shown as **partially completed** rather than being saved as an empty note.
+
+### Task progress
+The processing panel separates transcription, AI organization, and Markdown writing. It shows the active stage, recent activity, failures, and retry or cancel actions. Failed transcription and failed AI organization remain distinct so you can resume from the step that actually failed.
 
 ### Sediment workflow
 After each note, AI splits the content into four candidate groups you review assembly-line style — keep / merge / ignore:
@@ -49,9 +62,13 @@ Edit owner, due date and sub-tasks inline at the candidate stage — no dialogs.
 
 ### Recording reliability
 - Level meters before and after recording show whether the mic and system audio are actually working.
-- "Real microphone protection" avoids mistaking virtual devices (CABLE Output, BlackHole, VoiceMeeter, Stereo Mix) for a real microphone.
+- Audio inputs remain user-selectable; virtual or remote device names are shown as guidance rather than being selected or rejected automatically.
 - A device check in settings diagnoses "recorded but silent" problems.
+- Compatible independent multichannel input can be detected and transcribed by channel, with speaker labels that can be mapped to names. Separation stays off when independent channels cannot be verified.
 - Deleting a transcript offers to delete its audio file too.
+
+### Quick dictation
+Use **Quick dictation** for short speech-to-text input into the current editor or a configured note. It is deliberately lightweight and does **not** save an audio recording. Use meeting recording when the audio itself must be retained.
 
 ### Export
 From one set of notes you can generate an HTML report, an HTML slide deck, an editable `.pptx`, or an `.eml` email draft — same content, different skins.
@@ -61,7 +78,7 @@ From one set of notes you can generate an HTML report, an HTML slide deck, an ed
 </p>
 
 ### Note list
-The sidebar lists recent notes on a timeline (default: this week), filterable by template, with the open note highlighted.
+The sidebar can organize recent notes by folder or by time. Folder groups can be collapsed, the open note is highlighted, and search and template filters remain available in either view.
 
 ## Basic usage
 
@@ -69,9 +86,10 @@ The sidebar lists recent notes on a timeline (default: this week), filterable by
 2. Choose a template and an audio input.
 3. Start recording; check that the level meter reacts.
 4. Watch the live outline; add in-meeting notes if needed.
-5. Stop recording and wait for the final notes.
-6. Open **Sediment** and review people, todos, learning cards, and hotwords.
-7. If you need to share, generate an HTML report, slides, PPTX, or an email draft.
+5. Stop recording and follow transcription and AI organization in **Task progress**.
+6. Ask follow-up questions from **Ask this note**, or retry only the failed stage if processing was interrupted.
+7. Open **Sediment** and review people, todos, learning cards, and hotwords.
+8. If you need to share, generate an HTML report, slides, PPTX, or an email draft.
 
 <p align="center">
   <img width="720" alt="LexVoice in the Obsidian sidebar" src="https://github.com/user-attachments/assets/f29b528a-f219-4404-92b4-0639e354d17e" />
@@ -83,15 +101,19 @@ Default folders (all configurable in settings):
 |---|---|
 | Recordings | `LexVoice/录音` |
 | Transcribed notes | `LexVoice/转写纪要` |
+| Meeting materials | `LexVoice/会议资料` |
+| People | `LexVoice/人员` |
 | Learning cards | `LexVoice/学习卡片` |
-| Todo cards | `LexVoice/待办` |
+| Todo cards | `LexVoice/待办卡片` |
+| Views | `LexVoice/视图` |
+| HTML reports | `LexVoice/HTML报告` |
 | Email drafts | `LexVoice/邮件草稿` |
 | Glossary | `LexVoice/词汇表.md` |
 
 ## Requirements
 
 Required:
-- Obsidian desktop
+- Obsidian 1.10.0 or later
 - A speech-to-text service (cloud API or local)
 - A vault folder for recordings and notes
 
@@ -124,13 +146,17 @@ However, if you use a **cloud** ASR or LLM provider, the relevant audio, transcr
 
 ## Installation
 
+From the Obsidian Community plugins directory:
+
+1. Open **Settings → Community plugins → Browse**.
+2. Search for **LexVoice**, then choose **Install** and **Enable**.
+3. Open LexVoice settings and configure your transcription service and audio input.
+
 Manual install:
 
-1. Quit Obsidian.
-2. Copy `main.js`, `manifest.json`, and `styles.css` into `<your vault>/.obsidian/plugins/lexvoice/`.
-3. Reopen Obsidian.
-4. Settings → Community plugins → enable **LexVoice**.
-5. Open the LexVoice settings tab and configure your transcription service and audio input first.
+1. Download `main.js`, `manifest.json`, and `styles.css` from the same GitHub Release.
+2. Copy them into `<your vault>/.obsidian/plugins/lexvoice/`.
+3. Reload Obsidian and enable **LexVoice** under Community plugins.
 
 ## License & credits
 
