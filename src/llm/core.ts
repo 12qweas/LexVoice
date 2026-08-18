@@ -585,7 +585,9 @@ export function isLlmOutputParameterError(error) {
   return mentionsMaxTokens && rejectsParameter && !looksLikeValueLimit;
 }
 
+// 这些值只用于服务端明确拒绝预算后的兼容重试，不是正常输出的全局上限。
 const OUTPUT_BUDGET_FALLBACKS = [384000, 256000, 192000, 128000, 64000, 32000, 16000, 8192, 4096];
+const MAX_OUTPUT_BUDGET_ATTEMPTS = OUTPUT_BUDGET_FALLBACKS.length + 2;
 
 export function getNextLlmOutputBudget(options) {
   const requested = getLlmOutputBudgetFromOptions(options);
@@ -597,7 +599,8 @@ export async function requestLlmChatCompletionWithBudgetFallback(plugin, message
   let currentOptions = options || {};
   let parameterFallbackUsed = false;
   let budgetFallbackUsed = false;
-  for (let attempt = 0; attempt < OUTPUT_BUDGET_FALLBACKS.length; attempt++) {
+  // 覆盖首次请求、一次参数名兼容切换，以及全部有限降档，不会无限重试。
+  for (let attempt = 0; attempt < MAX_OUTPUT_BUDGET_ATTEMPTS; attempt++) {
     try {
       const effectiveBudget = getEffectiveLlmOutputBudget(plugin && plugin.settings, currentOptions);
       const result = await requestLlmChatCompletion(plugin, messages, currentOptions);

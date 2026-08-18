@@ -306,14 +306,19 @@ export function getLlmOutputCeiling(settings) {
   return 0;
 }
 
+function normalizeBriefingMetric(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+}
+
 // 录音长度分档（单一来源）：输出 token 配额（下方 getBriefingMergeDesiredTokens）与篇幅策略指令
 // （main.ts buildAdaptiveBriefingLengthInstruction）共用，避免两处各写一份阈值导致漂移。
 // 阈值较早期下调过一档（段数 48/24/12 → 36/18/9，时长/字符同比例下调），让中长会议更早拿到
 // 更高的 token 配额和更强的"必须全程覆盖"展开指令——这是长会议纪要不被压缩的关键前置条件。
 export function classifyBriefingLength(stats) {
-  const durationMs = Math.max(0, Number(stats && stats.durationMs) || 0);
-  const transcriptChars = Math.max(0, Number(stats && stats.transcriptChars) || 0);
-  const segmentCount = Math.max(0, Number(stats && stats.segmentCount) || 0);
+  const durationMs = normalizeBriefingMetric(stats && stats.durationMs);
+  const transcriptChars = normalizeBriefingMetric(stats && stats.transcriptChars);
+  const segmentCount = normalizeBriefingMetric(stats && stats.segmentCount);
   const hours = durationMs / 3600000;
   if (hours >= 3 || transcriptChars >= 90000 || segmentCount >= 36) return "ultra";
   if (hours >= 1.5 || transcriptChars >= 45000 || segmentCount >= 18) return "long";
@@ -322,14 +327,21 @@ export function classifyBriefingLength(stats) {
 }
 
 export function getBriefingMergeDesiredTokens(stats) {
-  const transcriptChars = Math.max(0, Number(stats && stats.transcriptChars) || 0);
-  const durationMs = Math.max(0, Number(stats && stats.durationMs) || 0);
+  const transcriptChars = normalizeBriefingMetric(stats && stats.transcriptChars);
+  const durationMs = normalizeBriefingMetric(stats && stats.durationMs);
+  let baseTokens = BRIEFING_MERGE_MAX_TOKENS_SHORT;
   switch (classifyBriefingLength(stats)) {
-    case "ultra": return Math.min(BRIEFING_MERGE_TARGET_MAX_TOKENS, Math.max(BRIEFING_MERGE_MAX_TOKENS_ULTRA, Math.ceil(transcriptChars / 2), Math.ceil(durationMs / 3600000 * 16000)));
-    case "long": return Math.min(BRIEFING_MERGE_TARGET_MAX_TOKENS, Math.max(BRIEFING_MERGE_MAX_TOKENS_LONG, Math.ceil(transcriptChars / 2), Math.ceil(durationMs / 3600000 * 16000)));
-    case "medium": return Math.min(BRIEFING_MERGE_TARGET_MAX_TOKENS, Math.max(BRIEFING_MERGE_MAX_TOKENS_MEDIUM, Math.ceil(transcriptChars / 2), Math.ceil(durationMs / 3600000 * 16000)));
-    default: return Math.min(BRIEFING_MERGE_TARGET_MAX_TOKENS, Math.max(BRIEFING_MERGE_MAX_TOKENS_SHORT, Math.ceil(transcriptChars / 2), Math.ceil(durationMs / 3600000 * 16000)));
+    case "ultra": baseTokens = BRIEFING_MERGE_MAX_TOKENS_ULTRA; break;
+    case "long": baseTokens = BRIEFING_MERGE_MAX_TOKENS_LONG; break;
+    case "medium": baseTokens = BRIEFING_MERGE_MAX_TOKENS_MEDIUM; break;
   }
+  // 正常预算只由材料体量和用户要求决定，不再套用全局输出上限。
+  // 服务端若明确拒绝该预算，请求层会按实际能力降档并记忆 endpoint + model 的运行时上限。
+  return Math.max(
+    baseTokens,
+    Math.ceil(transcriptChars / 2),
+    Math.ceil(durationMs / 3600000 * 16000),
+  );
 }
 
 export function getBriefingMergeMaxTokens(stats, settings, runtimeCeiling = 0) {
@@ -345,10 +357,6 @@ export const BRIEFING_MERGE_MAX_TOKENS_MEDIUM = 8192;
 export const BRIEFING_MERGE_MAX_TOKENS_LONG = 16000;
 
 export const BRIEFING_MERGE_MAX_TOKENS_ULTRA = 48000;
-
-// 这是极端长材料的防失控上界，不是模型兼容上限，也不参与模型名称判断。
-// 现代服务端可以先按材料体量请求更大的输出；实际不支持时由请求层依据明确错误降档。
-export const BRIEFING_MERGE_TARGET_MAX_TOKENS = 384000;
 
 export function normalizeSchemeAsrSnapshot(asr) {
   if (!asr || typeof asr !== "object") return undefined;

@@ -22,4 +22,14 @@ describe("LLM 输出预算策略", () => {
     expect(getLlmOutputCeiling({ llmModel: "deepseek-v4-pro" })).toBe(0);
     expect(getLlmOutputCeiling({ llmModel: "gpt-4" })).toBe(0);
   });
+
+  it("超长材料的目标预算不再被 384K 全局截断", () => {
+    const stats = { durationMs: 30 * 60 * 60 * 1000, transcriptChars: 1000000, segmentCount: 360 };
+    expect(getBriefingMergeDesiredTokens(stats)).toBe(500000);
+    expect(getBriefingMergeMaxTokens(stats)).toBe(500000);
+  });
+
+  it("异常统计值不会生成无限预算", () => {
+    expect(getBriefingMergeDesiredTokens({ durationMs: Infinity, transcriptChars: NaN, segmentCount: Infinity })).toBe(4096);
+  });
 });

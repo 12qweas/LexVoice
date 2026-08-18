@@ -189,6 +189,7 @@ describe("LLM 输出预算兼容", () => {
   });
 
   it("输出预算按有限阶梯降档，不无限重试", () => {
+    expect(getNextLlmOutputBudget({ payload: { max_tokens: 600000 } })).toBe(384000);
     expect(getNextLlmOutputBudget({ payload: { max_tokens: 128000 } })).toBe(64000);
     expect(getNextLlmOutputBudget({ payload: { max_tokens: 8192 } })).toBe(4096);
     expect(getNextLlmOutputBudget({ payload: { max_tokens: 4096 } })).toBe(0);
