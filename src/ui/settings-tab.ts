@@ -19,7 +19,6 @@ import { isRecruitFeatureUnlocked } from '../recruit';
 import { LEXVOICE_UPDATE_REPO_URL, audioInputModeLabel, countKnowledgeExtractionHistory, enumerateAudioDevices, isVirtualCableLabel, lexvoiceConfirm, lexvoicePromptText, normalizeAudioInputMode, openLexVoiceExternalUrl, openLexVoicePickListModal, pluginBasePath, resolveUpdateRawBases, trashLexVoiceFile } from './helpers';
 import { PeopleHotwordsConsentModal, PromptTemplateModal, QueueModal, VirtualCableSetupModal } from './modals';
 import {
-  DEFAULT_SPEAKER_CHANNELS,
   MAX_SPEAKER_CHANNELS,
   buildMicrophoneAudioConstraints,
   configureMicrophoneTrackChannels,
@@ -44,7 +43,7 @@ async function recordChannelProbe(stream, durationMs = 5000) {
     };
     recorder.onerror = (event) => {
       if (timer) window.clearTimeout(timer);
-      reject(event && event.error ? event.error : new Error("录音采样失败"));
+      reject(event.error instanceof Error ? event.error : new Error("录音采样失败"));
     };
     recorder.onstop = () => {
       if (timer) window.clearTimeout(timer);
@@ -1057,7 +1056,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     saveBtn.onclick = async () => {
       const name = await lexvoicePromptText(this.app, "配置名称", "如 MiMo / DeepSeek + 硅基流动 / 本地模型");
       if (name === null) return;
-      const trimmed = String(name || "").trim();
+      const trimmed = typeof name === "string" ? name.trim() : "";
       if (!trimmed) { new obsidian.Notice("名字不能为空"); return; }
       const id = `llm-${genId()}`;
       const scheme = {

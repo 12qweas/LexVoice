@@ -6,10 +6,11 @@ import * as obsidian from "obsidian";
 import { normalizeRealtimeOutlineList, parseRecruitRealtimeOutlineProtocol, buildRecruitRealtimeOutlineFallback, buildRecruitRealtimeOutlineMemory, advanceRealtimeOutlineCursor, hashRealtimeOutlineText, getRealtimeOutlineAnchorTime, cleanRealtimeOutlineItemText, makeRealtimeOutlineNode, parseRealtimeOutlineStateFromMarkdown, selectIncrementalRealtimeOutlineSegments, repairRealtimeOutlineAnchors, mergeStableRealtimeOutlineNodes, normalizeOutlineMarkdownForDisplay, validateRealtimeOutlineMarkdown, mergeCoverageNoRegress, deriveFollowupCards, findLowEvidenceEntities, sanitizeProjectFolderName, recolorReportHtml, desensitizeResumeText } from "./outline-text";
 import { drainRealtimeOutlineBacklog } from "./outline-finalizer";
 import { LexVoiceSettingTab } from "./ui/settings-tab";
+import { getDesktopModule, getDesktopProcess } from "./shared/desktop-runtime";
 import { pickReportAccentColor, AudioTimeModal, PeopleDirectorySuggestionModal, QueueModal, VirtualCableSetupModal, RecruitContextModal, ImportTextModal, ImportAudioModal, BubbleWidget } from "./ui/modals";
-import { resolveUpdateRawBase, resolveUpdateRawBases, resolveUpdateVersionedBases, stripLexVoiceFrontmatterSimple, getRecentNoteProcessingState, lexvoiceConfirm, enumerateAudioDevices, trashLexVoiceFile, pluginBasePath, normalizeAudioInputMode, audioInputModeLabel } from "./ui/helpers";
+import { stripLexVoiceFrontmatterSimple, getRecentNoteProcessingState, lexvoiceConfirm, enumerateAudioDevices, trashLexVoiceFile, normalizeAudioInputMode, audioInputModeLabel } from "./ui/helpers";
 import { isKnownPolishMode, makeCustomPromptModeId, getCustomPromptModeTemplate, getCustomPromptModeTemplates, getBuiltInVisiblePolishModeKeys, getVisiblePolishModeKeys, getModeMeta, getEffectivePolishMode, getVisibleModeEntries, sanitizePromptTemplate } from "./shared/mode-meta";
-import { compareVersions, isLexVoiceMobileRuntime } from "./shared/util-platform";
+import { isLexVoiceMobileRuntime } from "./shared/util-platform";
 import { UpdateService } from "./update-service";
 import { normalizeKnowledgeExtractionHistory } from "./shared/util-knowledge";
 import { listJDProjects } from "./recruit/jd-projects";
@@ -30,7 +31,7 @@ import { SETTINGS_SCHEMA_VERSION, LEGACY_VOCABULARY_FILE, normalizeLexVoiceSetti
 import type { LexVoiceSettings, QueueTask, RecordingSession } from "./shared/types";
 
 declare const LEXVOICE_BUILD_VERSION: string;
-import { applyLlmProfileToWorkingConfig, getBriefingMergeDesiredTokens, getBriefingMergeMaxTokens, classifyBriefingLength } from "./llm/config";
+import { applyLlmProfileToWorkingConfig, getBriefingMergeMaxTokens, classifyBriefingLength } from "./llm/config";
 import { getLearnedLlmOutputCeiling } from "./llm/output-budget";
 import { getThinkingControl } from "./llm/thinking";
 import { DashScopeStreamingClient, OpenAIRealtimeTranscriptionClient, OpenAIRealtimeTranslationClient, PcmStreamEncoder } from "./asr/clients";
@@ -53,14 +54,11 @@ import { RealtimeOutlineCoordinator, runInOutlineSessionTail } from "./outline-c
 import { buildLexVoiceVersionPayload, replaceExistingLexVoiceActiveVersionBlock, replaceLeadingFrontmatter, sanitizeLexVoiceActiveVersionBody, splitLeadingFrontmatter, splitLexVoiceVersionPayload } from "./version-content";
 import { getRecentNoteParentPath, getRecentNotePathRelativeToRoot, getRecentNoteTopLevelFolder, normalizeRecentNoteRoot, normalizeRecentNoteRoots, isPathUnderRecentNoteRoots } from "./recent-note-paths";
 import {
-  appendActivityEvent,
-  audioImportStageFromWorkProgress,
   buildAudioImportStages,
   classifyActivityRequest,
   getDominantActivityLiveness,
   normalizeAudioImportStage,
   summarizeActivityRequests,
-  upsertActivityRequest,
 } from "./shared/activity-progress";
 import { TaskActivityStore, getTaskErrorHint, getTaskErrorMessage } from "./shared/task-activity";
 import {
@@ -89,10 +87,16 @@ const QUICK_INTERIM_CUTS_MS = [10 * 1000, 60 * 1000, 3 * 60 * 1000];
 
 
 const SHORT_RECORDING_FILTER_MS = 3000;
-const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const UPDATE_PLUGIN_FILES = ["manifest.json", "main.js", "styles.css", "README.md"];
 const KNOWLEDGE_EXTRACTION_BATCH_LIMIT = 20;
 const SEGMENT_CACHE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+function primitiveText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  return "";
+}
 
 // 「一个 Key 通用」供应商：同一把 Key 同时支持语音转写 + 大模型对话。首页快速配置一处填 Key + 选供应商即可两边都配好。
 // asrProvider 对应 transcribeProviders 里的 id；llmPreset 对应 LLM_SERVICE_PRESETS 里的 id。
@@ -2857,7 +2861,7 @@ function getAudioDurationMs(blob) {
   return new Promise((resolve) => {
     try {
       const url = URL.createObjectURL(blob);
-      const audio = activeDocument.createElement("audio");
+      const audio = activeWindow.createEl("audio");
       audio.preload = "metadata";
       const cleanup = () => { try { URL.revokeObjectURL(url); } catch { /* intentionally empty */ } };
       audio.addEventListener("loadedmetadata", () => {
@@ -3511,7 +3515,9 @@ class QuickDictationController {
       try { void this.plugin.logDiagnostic("error", "quickdict.land_failed", "听写结果落字失败", { toEditor, chars: finalText.length }); } catch { /* intentionally empty */ }
       this._setState("idle");
     }
-    console.log(`[LexVoice] 快速口述耗时：转写 ${transcribeMs}ms / 整理 ${cleanMs}ms`, cleanErr || "");
+    try {
+      void this.plugin.logDiagnostic("info", "quickdict.timing", "即时听写处理完成", { transcribeMs, cleanMs });
+    } catch { /* diagnostics must not affect dictation */ }
     // 成功：不弹条幅，由胶囊「已写入」态表达；整理失败：弹一条通知 + 写诊断日志（已兜底落原文）。
     if (!cleanedOk) {
       new obsidian.Notice("大模型整理失败，已置入转写原文");
@@ -3737,19 +3743,8 @@ class RecorderService {
       source.connect(analyser);
     }
     if (ctx.state === "suspended" && ctx.resume) {
-      ctx.resume().then(
-        () => console.log(`[LexVoice][meter] ${kind} AudioContext resumed`),
-        (e) => console.warn(`[LexVoice][meter] ${kind} AudioContext resume 失败`, e)
-      );
+      ctx.resume().catch((e) => console.warn(`[LexVoice][meter] ${kind} AudioContext resume 失败`, e));
     }
-    const tracks = stream.getAudioTracks();
-    console.log(`[LexVoice][meter] ${kind} 已挂载：`, {
-      label,
-      ctxState: ctx.state,
-      sampleRate: ctx.sampleRate,
-      trackCount: tracks.length,
-      tracks: tracks.map(t => ({ label: t.label, enabled: t.enabled, muted: t.muted, readyState: t.readyState })),
-    });
     return {
       kind,
       icon,
@@ -3831,10 +3826,7 @@ class RecorderService {
         if (meter.context && meter.context.state === "suspended" && meter.context.resume) {
           meter._resumeAttempts = (meter._resumeAttempts || 0) + 1;
           if (meter._resumeAttempts <= 30 || meter._resumeAttempts % 60 === 0) {
-            meter.context.resume().then(
-              () => console.log(`[LexVoice][meter] ${meter.kind} 重新 resume 成功（尝试 ${meter._resumeAttempts}）`),
-              () => { /* intentionally empty */ }
-            );
+            meter.context.resume().catch(() => { /* retry on the next meter tick */ });
           }
         }
         meter.analyser.getByteTimeDomainData(meter.timeData);
@@ -5175,7 +5167,7 @@ function extractRoleMappingFromFrontmatter(frontmatter) {
       if (!channel) continue;
       const personName = item && typeof item === "object"
         ? String(item.personName || item.name || "").trim()
-        : String(item || "").trim();
+        : primitiveText(item).trim();
       if (!personName) continue;
       // 历史笔记可能写成「说话人 N」（带空格），两种写法都要能替换。
       for (const from of [speakerLabelForChannel(channel), `说话人 ${channel}`]) {
@@ -5203,21 +5195,6 @@ function applyRoleMappingToSegments(segments, mapping) {
     return Object.assign({}, s, { text });
   });
 }
-
-// 在 frontmatter 字符串里把"代号 → 真名"项替换为单纯"真名"，让重整后的 yaml 干净
-function rewriteFrontmatterRoleMappings(frontmatterText, mapping) {
-  if (!frontmatterText || !mapping || !mapping.length) return frontmatterText;
-  let next = frontmatterText;
-  for (const m of mapping) {
-    // 转义 from 用于正则
-    const escFrom = m.from.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
-    // 匹配 "<from> [→/->/=>] <to>" 整个片段（保留前后空白），替换为 to
-    const re = new RegExp(escFrom + "\\s*(?:→|=>|->)\\s*" + m.to.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&"), "g");
-    next = next.replace(re, m.to);
-  }
-  return next;
-}
-
 
 function extractLexVoiceSessionId(content, fallback) {
   const match = String(content || "").match(/<!--\s*lexvoice-session:([^>\s]+)\s*-->/);
@@ -5771,7 +5748,11 @@ function postProcessBriefingOutput(rawOutput, mode, sessionMeta, originalFrontma
     // 兜底：手动拼
     yamlBlock = Object.entries(ordered).map(([k, v]) => {
       if (Array.isArray(v)) return k + ":\n" + v.map(x => "  - " + String(x)).join("\n");
-      return k + ": " + String(v == null ? "" : v);
+      if (v === null || v === undefined) return k + ": ";
+      if (typeof v === "string" || typeof v === "number" || typeof v === "boolean" || typeof v === "bigint") {
+        return k + ": " + String(v);
+      }
+      return k + ": " + JSON.stringify(v);
     }).join("\n") + "\n";
   }
   // topNotice（如截断告警）插在 frontmatter 之后、正文之前——保证 frontmatter 不被破坏、告警最显眼。
@@ -6405,7 +6386,7 @@ function getBriefingCheckpointStore(plugin) {
   if (!plugin._briefingCheckpointStore) {
     plugin._briefingCheckpointStore = new BriefingCheckpointStore(
       plugin.app.vault.adapter,
-      String(plugin.app.vault.configDir || ".obsidian"),
+      plugin.app.vault.configDir,
       String(plugin.manifest && plugin.manifest.id || "lexvoice"),
     );
   }
@@ -8883,7 +8864,7 @@ class OutlineView extends obsidian.ItemView {
     if (this.inlineTodoEditor && this.inlineTodoEditor._anchor === fieldEl) return;
     this.closeInlineTodoEditor();
     const todoId = getSedimentTodoId(raw);
-    const input = activeDocument.createElement("input");
+    const input = activeWindow.createEl("input");
     input.type = "text";
     input.className = "lexvoice-todo-inline-input is-owner";
     input.placeholder = "搜索或输入新名字";
@@ -9433,7 +9414,7 @@ class OutlineView extends obsidian.ItemView {
     const renames = [];
     for (const [rawFrom, rawTo] of Object.entries(renameMap)) {
       const from = String(rawFrom || "").trim();
-      const to = String(rawTo || "").trim();
+      const to = primitiveText(rawTo).trim();
       if (!committedTerms.has(to)) continue;
       // 跳过 1 字词（无词边界，易误伤其它词）；from === to 不可能出现（updateSedimentHotwordTerm 已取消该映射）。
       if (!from || !to || from === to || from.length < 2) continue;
@@ -10832,12 +10813,12 @@ class OutlineView extends obsidian.ItemView {
 
   addOutlineMiniWave(parent, cls = "", titleLi = null) {
     if (!parent && !titleLi) return null;
-    const wave = activeDocument.createElement("span");
+    const wave = activeWindow.createSpan();
     wave.className = `lexvoice-outline-mini-wave ${cls}`.trim();
     if (titleLi) this.appendOutlineTitleAdornment(titleLi, wave);
     else parent.appendChild(wave);
     for (let i = 0; i < 4; i++) {
-      const bar = activeDocument.createElement("span");
+      const bar = activeWindow.createSpan();
       bar.className = "lexvoice-outline-mini-wave-bar";
       bar.style.animationDelay = `${i * 0.15}s`;
       wave.appendChild(bar);
@@ -10884,7 +10865,7 @@ class OutlineView extends obsidian.ItemView {
     if ((isRecording || isPaused) && current) {
       for (const item of currentItems) item.addClass("is-generating");
       if (!current.querySelector(".lexvoice-outline-live-badge")) {
-        const badge = activeDocument.createElement("span");
+        const badge = activeWindow.createSpan();
         badge.className = "lexvoice-outline-live-badge";
         badge.textContent = isPaused ? "已暂停" : "正在生成";
         this.appendOutlineTitleAdornment(current, badge);
@@ -10893,7 +10874,7 @@ class OutlineView extends obsidian.ItemView {
     if (viewingItem) {
       viewingItem.addClass("is-viewing");
       if (!viewingItem.querySelector(".lexvoice-outline-viewing-icon")) {
-        const icon = activeDocument.createElement("span");
+        const icon = activeWindow.createSpan();
         icon.className = "lexvoice-outline-viewing-icon";
         try { obsidian.setIcon(icon, "eye"); } catch { icon.textContent = "查看"; }
         this.appendOutlineTitleAdornment(viewingItem, icon);
@@ -11275,7 +11256,7 @@ class OutlineView extends obsidian.ItemView {
 
     // 模板（常驻显示——最常切换的"录音整理成什么"）
     const modeRow = controls.createDiv({ cls: "lexvoice-outline-control-row" });
-    modeRow.createEl("span", { cls: "lexvoice-outline-control-label", text: "模板" });
+    modeRow.createSpan({ cls: "lexvoice-outline-control-label", text: "模板" });
     const currentMode = getEffectivePolishMode(this.plugin.settings, this.plugin.settings.polishMode);
     mkSelect(modeRow, {
       current: currentMode,
@@ -11290,7 +11271,7 @@ class OutlineView extends obsidian.ItemView {
 
     // 音频输入（常驻，和模板并列——最常跟着录音场景切换：会议 / 视频 / 纯麦）
     const capRow = controls.createDiv({ cls: "lexvoice-outline-control-row" });
-    capRow.createEl("span", { cls: "lexvoice-outline-control-label", text: "音频" });
+    capRow.createSpan({ cls: "lexvoice-outline-control-label", text: "音频" });
     const capOpts = isMobile
       ? [["mic", "仅麦克风（手机端）"]]
       : [
@@ -11337,7 +11318,7 @@ class OutlineView extends obsidian.ItemView {
     // API 方案快捷切换：复用设置页「API 方案」(llmProfiles)，侧边栏一键切换整套「转写 + AI 整理」配置。
     const schemeProfiles = Array.isArray(this.plugin.settings.llmProfiles) ? this.plugin.settings.llmProfiles : [];
     const schemeRow = moreBody.createDiv({ cls: "lexvoice-outline-control-row lexvoice-outline-scheme-row" });
-    schemeRow.createEl("span", { cls: "lexvoice-outline-control-label", text: "方案" });
+    schemeRow.createSpan({ cls: "lexvoice-outline-control-label", text: "方案" });
     mkSelect(schemeRow, {
       current: this.plugin.settings.activeLlmProfile || "",
       items: [{ value: "", label: schemeProfiles.length ? "临时配置（未保存）" : "未保存方案 · 去设置添加" }]
@@ -11400,7 +11381,7 @@ class OutlineView extends obsidian.ItemView {
     // 整理偏好（左半）：复用右键「重新整理为」预设，读写同一个 repolishPreference。
     // 侧边栏只保留最小正交集合；其余预设留在右键高级菜单。主表 REPOLISH_PREFERENCE_PRESETS 不删 key，避免已存值变孤儿。
     const prefCell = pairRow.createDiv({ cls: "lexvoice-outline-pair-cell" });
-    prefCell.createEl("span", { cls: "lexvoice-outline-control-label", text: "偏好" });
+    prefCell.createSpan({ cls: "lexvoice-outline-control-label", text: "偏好" });
     const SIDEBAR_PREF_KEYS = ["detailed", "concise", "structured", "natural", "expanded"];
     const curPref = this.plugin.settings.repolishPreference || "";
     // 不放"无特殊偏好"项：未选偏好时触发器留空（blankWhenUnset）。菜单只列 5 个正交预设。
@@ -11420,7 +11401,7 @@ class OutlineView extends obsidian.ItemView {
     // 思考档（右半）：默认 / 快速 / 推理。仅当前 AI 整理服务支持调节时可选，否则灰掉。
     const thinkCtrl = getThinkingControl(this.plugin.settings.llmEndpoint, this.plugin.settings.llmModel);
     const thinkCell = pairRow.createDiv({ cls: "lexvoice-outline-pair-cell" });
-    thinkCell.createEl("span", { cls: "lexvoice-outline-control-label", text: "思考" });
+    thinkCell.createSpan({ cls: "lexvoice-outline-control-label", text: "思考" });
     mkSelect(thinkCell, {
       current: this.plugin.settings.thinkingMode || "auto",
       items: [
@@ -11938,7 +11919,7 @@ class OutlineView extends obsidian.ItemView {
     } else if (recordingIssue && recordingIssue.kind === "service") {
       this.renderServiceOutlineFallback(body);
     } else {
-      const emptyEl = body.createEl("div", { cls: "lexvoice-outline-empty" });
+      const emptyEl = body.createDiv({ cls: "lexvoice-outline-empty" });
       if (!(session.segments.length > 0)) {
         emptyEl.setText("录音开始且产出第一段后可生成大纲。");
       } else if (session && session.mode === "recruit") {
@@ -12349,7 +12330,7 @@ class OutlineView extends obsidian.ItemView {
       if (!def) continue;
       textNode.nodeValue = raw.slice(match[0].length);
       if (match[2] === "麦克风") continue;
-      const chip = activeDocument.createElement("span");
+      const chip = activeWindow.createSpan();
       chip.className = `lexvoice-outline-source-chip ${def.cls}`;
       chip.setAttribute("title", def.title);
       chip.setAttribute("aria-label", def.title);
@@ -13280,7 +13261,7 @@ class OutlineView extends obsidian.ItemView {
     const hasResume = !!(ctx.resume && ctx.resume.trim());
     // 「对象」做成与 模板/音频 同构的字段行：左标签 + 卡片（标题 + 铅笔，下面一行状态 chip）。
     const row = parent.createDiv({ cls: "lexvoice-outline-control-row lexvoice-recruit-row" });
-    row.createEl("span", { cls: "lexvoice-outline-control-label", text: "对象" });
+    row.createSpan({ cls: "lexvoice-outline-control-label", text: "对象" });
     const card = row.createDiv({ cls: "lexvoice-recruit-card" });
     const head = card.createDiv({ cls: "lexvoice-recruit-card-head" });
     const title = head.createSpan({ cls: "lexvoice-recruit-card-title" });
@@ -14315,12 +14296,12 @@ class LexVoicePlugin extends obsidian.Plugin {
       rendererResidentBytes: 0,
     };
     try {
-      const memory = globalThis.performance && globalThis.performance.memory;
+      const memory = activeWindow.performance && activeWindow.performance["memory"];
       result.jsHeapUsedBytes = Math.max(0, Number(memory && memory.usedJSHeapSize) || 0);
       result.jsHeapTotalBytes = Math.max(0, Number(memory && memory.totalJSHeapSize) || 0);
     } catch { /* unsupported runtime */ }
     try {
-      const processApi = globalThis.process;
+      const processApi = getDesktopProcess();
       if (processApi && typeof processApi.getProcessMemoryInfo === "function") {
         const info = await processApi.getProcessMemoryInfo();
         // Electron 返回 KB；诊断统一换算为 bytes。
@@ -16211,7 +16192,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       renderRealtimeOutlineStateMarkdown({ version: 1, nodes: mergedOutlineNodes })
     );
     const newTranscriptChars = (Array.isArray(windowed.newSegments) ? windowed.newSegments : [])
-      .reduce((sum, segment) => sum + String((segment && segment.text) || "").trim().length, 0);
+      .reduce((sum, segment) => sum + primitiveText(segment && segment.text).trim().length, 0);
     let semanticChanged = existingRenderedOutline !== mergedRenderedOutline;
     if (
       validation.ok
@@ -17613,7 +17594,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       }
     }
     if (deleted || failed) {
-      console.info("[LexVoice] expired segment cache cleanup", { folderPath, deleted, skipped, failed });
+      await this.logDiagnostic("info", "segment_cache.cleanup", "已清理过期转写分段", { folderPath, deleted, skipped, failed });
     }
     return { deleted, skipped, failed };
   }
@@ -17939,12 +17920,11 @@ class LexVoicePlugin extends obsidian.Plugin {
       source: (seg && seg.source) || session.captureMode || "mic",
     });
 
-    let retryTask = null;
     if (err && !isStreamingProvider) {
       // 流式 provider(endpoint 是 wss://)的失败段不入 transcribe 重试队列——重试走 HTTP 必然再失败、
       // 把任务卡在 failed 永远清不掉。流式无法离线重切重传，留在笔记里标失败即可。
       if (err.asrDeferred || isTransientAsrError(err)) session.hasDeferredAsrJobs = true;
-      retryTask = await this.keepLiveSegmentQueueTaskForRetry(session, Object.assign({}, seg, {
+      await this.keepLiveSegmentQueueTaskForRetry(session, Object.assign({}, seg, {
         segmentAudioPath,
         segmentAudioName,
         segmentIndex,
@@ -17993,7 +17973,7 @@ class LexVoicePlugin extends obsidian.Plugin {
 
   async finalizeSession(session: RecordingSession) {
     if (!session || session.finalized) return;
-    if (session.finalizePromise) return session.finalizePromise;
+    if (session.finalizePromise !== null && session.finalizePromise !== undefined) return session.finalizePromise;
     const finalizePromise = (async () => {
       try {
         await this._finalizeSessionImpl(session);
@@ -18862,8 +18842,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       const adapter = this.app.vault.adapter;
       const fullPath = adapter && typeof adapter.getFullPath === "function" ? adapter.getFullPath(path) : "";
       if (!fullPath) return false;
-      // eslint-disable-next-line @typescript-eslint/no-require-imports -- Desktop-only system open uses Electron shell when available; non-desktop returns false.
-      const electron = require("electron");
+      const electron = getDesktopModule("electron");
       if (electron && electron.shell && typeof electron.shell.openPath === "function") {
         electron.shell.openPath(fullPath);
         return true;
@@ -18924,7 +18903,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     let contentHtml = "";
     const renderComponent = new obsidian.Component();
     try {
-      const el = activeDocument.createElement("article");
+      const el = activeWindow.createEl("article");
       if (obsidian.MarkdownRenderer && typeof obsidian.MarkdownRenderer.render === "function") {
         await obsidian.MarkdownRenderer.render(this.app, markdown, el, file.path, renderComponent);
       }
@@ -18960,14 +18939,12 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
   async printHtmlToPdfBuffer(html) {
     let BrowserWindow = null;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports -- Hidden BrowserWindow PDF rendering is a desktop-only Electron capability.
-      const electron = require("electron");
+      const electron = getDesktopModule("electron");
       BrowserWindow = electron && (electron.BrowserWindow || (electron.remote && electron.remote.BrowserWindow));
     } catch { /* intentionally empty */ }
     if (!BrowserWindow) {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports -- @electron/remote is a compatibility fallback for older desktop Obsidian builds.
-        const remote = require("@electron/remote");
+        const remote = getDesktopModule("@electron/remote");
         BrowserWindow = remote && remote.BrowserWindow;
       } catch { /* intentionally empty */ }
     }
@@ -19139,10 +19116,8 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
   // 整页不截断 PDF：隐藏窗口量内容真实尺寸 → 注入 @page 为整页全高 + preferCSSPageSize → 单页长 PDF（非 A4 分页，不截断）。
   async printHtmlToSinglePagePdfBuffer(html) {
     let BrowserWindow = null;
-    // eslint-disable-next-line @typescript-eslint/no-require-imports -- Hidden BrowserWindow PDF rendering is a desktop-only Electron capability.
-    try { const e = require("electron"); BrowserWindow = e && (e.BrowserWindow || (e.remote && e.remote.BrowserWindow)); } catch { /* intentionally empty */ }
-    // eslint-disable-next-line @typescript-eslint/no-require-imports -- @electron/remote is a compatibility fallback for older desktop Obsidian builds.
-    if (!BrowserWindow) { try { BrowserWindow = require("@electron/remote").BrowserWindow; } catch { /* intentionally empty */ } }
+    try { const e = getDesktopModule("electron"); BrowserWindow = e && (e.BrowserWindow || (e.remote && e.remote.BrowserWindow)); } catch { /* intentionally empty */ }
+    if (!BrowserWindow) { try { BrowserWindow = getDesktopModule("@electron/remote")?.BrowserWindow; } catch { /* intentionally empty */ } }
     if (!BrowserWindow) throw new Error("当前 Obsidian 环境不支持自动生成 PDF");
     const win = new BrowserWindow({ show: false, width: 1024, height: 1400, webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true } });
     // 超时兜底：渲染进程崩溃/卡死时这些 await 可能永不 settle，不加超时会让用户卡在"正在渲染…"且无法取消。
@@ -21682,7 +21657,13 @@ ${source}`;
 
   async importTextFiles(paths, modeOverride) {
     if (!paths || !paths.length) return;
-    const uniquePaths = Array.from(new Set(paths.map(p => obsidian.normalizePath(String(p || ""))).filter(Boolean))).sort();
+    const uniquePathSet = new Set<string>();
+    for (const pathValue of paths) {
+      if (typeof pathValue !== "string") continue;
+      const normalizedPath = obsidian.normalizePath(pathValue);
+      if (normalizedPath) uniquePathSet.add(normalizedPath);
+    }
+    const uniquePaths = Array.from(uniquePathSet).sort();
     const sources = [];
     for (const textPath of uniquePaths) {
       const file = this.app.vault.getAbstractFileByPath(textPath);
@@ -22206,7 +22187,6 @@ ${source}`;
       }
     }
     if (migrated > 0) {
-      console.log(`[LexVoice] queue rename migrate: ${migrated} task(s) ${oldNorm} -> ${newNorm}`);
       try { void (this.saveAll || this.saveSettings).call(this); } catch (e) {
         console.warn("[LexVoice] queue migrate save failed", e);
       }
@@ -22224,7 +22204,6 @@ ${source}`;
     );
     const removed = before - this.queue.tasks.length;
     if (removed > 0) {
-      console.log(`[LexVoice] queue delete cleanup: removed ${removed} orphan task(s) for ${norm}`);
       try { void (this.saveAll || this.saveSettings).call(this); } catch (e) {
         console.warn("[LexVoice] queue delete cleanup save failed", e);
       }

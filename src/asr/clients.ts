@@ -2,6 +2,7 @@
 // @ts-nocheck — JS 风格协议类（构造器赋值、无 TS 字段声明）；已用 tsc 确认无漏引用(TS2304=0)，余者皆类字段类型噪音，故与 main.ts 同档跳过。
 // 由 main.ts 抽出（模块化拆解，提升工程稳定性；纯搬迁、零行为改动）。
 import { assertSafeServiceEndpoint } from '../shared/util-llm-endpoint';
+import * as NodeWebSocketModule from 'ws';
 
 export class DashScopeStreamingClient {
   constructor(opts) {
@@ -26,8 +27,7 @@ export class DashScopeStreamingClient {
     if (!this.apiKey) throw new Error("DashScope API Key 未配置");
     let WSCtor = null;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports -- Desktop realtime ASR needs Node ws headers; browser WebSocket cannot set Authorization headers.
-      const wsModule = require("ws");
+      const wsModule = NodeWebSocketModule;
       WSCtor = wsModule && (wsModule.WebSocket || wsModule.default || wsModule);
     } catch { /* intentionally empty */ }
     if (!WSCtor) WSCtor = window.WebSocket;
@@ -176,8 +176,7 @@ export class OpenAIRealtimeTranscriptionClient {
     if (!this.apiKey) throw new Error("OpenAI API Key 未配置");
     let WSCtor = null;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports -- Desktop realtime ASR needs Node ws headers; browser WebSocket cannot set Authorization headers.
-      const wsModule = require("ws");
+      const wsModule = NodeWebSocketModule;
       WSCtor = wsModule && (wsModule.WebSocket || wsModule.default || wsModule);
     } catch { /* intentionally empty */ }
     if (!WSCtor) WSCtor = window.WebSocket;
@@ -323,8 +322,7 @@ export class OpenAIRealtimeTranslationClient {
     if (!this.apiKey) throw new Error("OpenAI API Key 未配置");
     let WSCtor = null;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports -- Desktop realtime translation needs Node ws headers; browser WebSocket cannot set Authorization headers.
-      const wsModule = require("ws");
+      const wsModule = NodeWebSocketModule;
       WSCtor = wsModule && (wsModule.WebSocket || wsModule.default || wsModule);
     } catch { /* intentionally empty */ }
     if (!WSCtor) WSCtor = window.WebSocket;
@@ -511,11 +509,6 @@ export class PcmStreamEncoder {
 }
 
 export function lexvoiceArrayBufferToBase64(ab) {
-  try {
-    if (typeof Buffer !== "undefined" && Buffer.from) {
-      return Buffer.from(ab).toString("base64");
-    }
-  } catch { /* intentionally empty */ }
   const bytes = new Uint8Array(ab);
   let bin = "";
   const chunk = 0x8000;

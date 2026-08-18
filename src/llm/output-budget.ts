@@ -13,11 +13,11 @@ type LlmCapability = {
 const capabilities = new Map<string, LlmCapability>();
 
 function normalizeEndpoint(endpoint: unknown) {
-  return String(endpoint || "").trim().replace(/\/+$/, "").toLowerCase();
+  return (typeof endpoint === "string" ? endpoint : "").trim().replace(/\/+$/, "").toLowerCase();
 }
 
 function normalizeModel(model: unknown) {
-  return String(model || "").trim().toLowerCase();
+  return (typeof model === "string" ? model : "").trim().toLowerCase();
 }
 
 export function getLlmCapabilityKey(endpoint: unknown, model: unknown) {

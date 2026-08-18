@@ -33,8 +33,14 @@ function finiteChannelCount(value: unknown, fallback = 1): number {
   return Number.isFinite(count) && count > 0 ? Math.floor(count) : fallback;
 }
 
+function optionalString(value: unknown): string {
+  return typeof value === "string" || typeof value === "number"
+    ? String(value).trim()
+    : "";
+}
+
 export function normalizeAudioChannelMode(value: unknown): AudioChannelMode {
-  const mode = String(value || "").trim().toLowerCase();
+  const mode = optionalString(value).toLowerCase();
   if (mode === "mono" || mode === "multichannel") return mode;
   return "auto";
 }
@@ -82,16 +88,16 @@ export function speakerLabelForChannel(channel: number): string {
 }
 
 export function readAudioTrackChannelInfo(track: MediaStreamTrack | null | undefined): AudioChannelInfo {
-  const settings = track && typeof track.getSettings === "function"
-    ? track.getSettings() as ExtendedTrackSettings
-    : {} as ExtendedTrackSettings;
-  let capabilities = {} as ExtendedTrackCapabilities;
+  const settings: ExtendedTrackSettings = track && typeof track.getSettings === "function"
+    ? track.getSettings()
+    : {};
+  let capabilities: ExtendedTrackCapabilities = {};
   try {
     capabilities = track && typeof track.getCapabilities === "function"
-      ? track.getCapabilities() as ExtendedTrackCapabilities
-      : {} as ExtendedTrackCapabilities;
+      ? track.getCapabilities()
+      : {};
   } catch {
-    capabilities = {} as ExtendedTrackCapabilities;
+    capabilities = {};
   }
   const channelCount = clampSpeakerChannelCount(settings.channelCount);
   const maxChannelCount = clampSpeakerChannelCount(capabilities.channelCount?.max || channelCount);
@@ -184,10 +190,10 @@ export function resolveAudioChannelRuntimeMode(options: {
   const mode = normalizeAudioChannelMode(options.channelMode);
   if (mode === "mono") return "mono";
   if (mode === "multichannel") return "multichannel";
-  if (options.usedMultichannel && String(options.separation || "") === "separated") {
+  if (options.usedMultichannel && optionalString(options.separation) === "separated") {
     return "multichannel";
   }
-  const separation = String(options.separation || "");
+  const separation = optionalString(options.separation);
   if (separation === "single" || separation === "duplicated") return "mono";
   // Auto mode should only switch to multichannel on explicit evidence.
   // Inconclusive/ambiguous results are treated as provisional to avoid
@@ -211,8 +217,8 @@ export function buildSpeakerMappings(
       id,
       channel,
       label: speakerLabelForChannel(channel),
-      personName: String(item.personName || item.name || "").trim() || undefined,
-      personPath: String(item.personPath || item.path || "").trim() || undefined,
+      personName: optionalString(item.personName) || optionalString(item.name) || undefined,
+      personPath: optionalString(item.personPath) || optionalString(item.path) || undefined,
     };
   }
   return mappings;
@@ -237,9 +243,11 @@ export function normalizeSpeakerMappings(
   const maxChannel = speakerIds.reduce((max, id) => Math.max(max, Number(id.slice(4)) || 1), 1);
   const mappings = buildSpeakerMappings(maxChannel, raw);
   const allowed = new Set(speakerIds);
-  return Object.fromEntries(
-    Object.entries(mappings).filter(([id]) => allowed.has(id as SpeakerId)),
-  ) as Record<SpeakerId, SpeakerMapping>;
+  const filtered: Record<SpeakerId, SpeakerMapping> = {};
+  for (const [id, mapping] of Object.entries(mappings)) {
+    if (allowed.has(id as SpeakerId)) filtered[id as SpeakerId] = mapping;
+  }
+  return filtered;
 }
 
 export function replaceSpeakerDisplayName(

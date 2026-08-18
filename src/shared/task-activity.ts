@@ -80,7 +80,43 @@ const ACTIVE_STATUSES = new Set<TaskActivityStatus>([
 ]);
 
 function cleanText(value: unknown): string {
-  return String(value ?? "").trim();
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value).trim();
+  }
+  return "";
+}
+
+function isTaskActivityEvent(value: unknown): value is TaskActivityEvent {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const event = value as Record<string, unknown>;
+  return typeof event.id === "string"
+    && typeof event.at === "number"
+    && typeof event.type === "string"
+    && typeof event.label === "string"
+    && typeof event.detail === "string";
+}
+
+function normalizeTaskActivityStatus(value: unknown): TaskActivityStatus {
+  return typeof value === "string" && (ACTIVE_STATUSES.has(value as TaskActivityStatus) || TERMINAL_STATUSES.has(value as TaskActivityStatus))
+    ? value as TaskActivityStatus
+    : "queued";
+}
+
+function normalizeTaskActivityErrorKind(value: unknown): TaskActivityErrorKind | "" {
+  if (typeof value !== "string") return "";
+  const kinds: TaskActivityErrorKind[] = [
+    "configuration",
+    "authentication",
+    "rate-limit",
+    "timeout",
+    "network",
+    "empty-result",
+    "missing-input",
+    "cancelled",
+    "internal",
+  ];
+  return kinds.includes(value as TaskActivityErrorKind) ? value as TaskActivityErrorKind : "";
 }
 
 function finiteTimestamp(value: unknown): number {
@@ -165,20 +201,17 @@ export function appendTaskActivityEvent(
     detail: cleanText(event.detail),
   };
   const previous = Array.isArray(events)
-    ? events.filter((item): item is TaskActivityEvent => (
-      !!item
-      && typeof item === "object"
-      && typeof (item as TaskActivityEvent).at === "number"
-    ))
+    ? events.filter(isTaskActivityEvent)
     : [];
   return previous.concat(next).slice(-Math.max(1, Math.floor(limit)));
 }
 
 export function createTaskActivity(input: TaskActivityInput, now = Date.now()): TaskActivity {
   const startedAt = finiteTimestamp(input.startedAt) || now;
-  const status = (input.status || "queued") as TaskActivityStatus;
+  const status = normalizeTaskActivityStatus(input.status);
   const error = cleanText(input.error);
-  const errorKind = (input.errorKind || (error ? classifyTaskError(error) : "")) as TaskActivityErrorKind | "";
+  const errorKind = normalizeTaskActivityErrorKind(input.errorKind)
+    || (error ? classifyTaskError(error) : "");
   return {
     id: cleanText(input.id),
     kind: cleanText(input.kind) || "task",
@@ -211,11 +244,11 @@ export function patchTaskActivity(
   patch: Partial<TaskActivity>,
   now = Date.now(),
 ): TaskActivity {
-  const nextStatus = (patch.status || current.status) as TaskActivityStatus;
-  const hasError = Object.prototype.hasOwnProperty.call(patch, "error");
+  const nextStatus = normalizeTaskActivityStatus(patch.status ?? current.status);
+  const hasError = "error" in patch;
   const error = hasError ? cleanText(patch.error) : current.error;
   const errorKind = patch.errorKind !== undefined
-    ? patch.errorKind
+    ? normalizeTaskActivityErrorKind(patch.errorKind)
     : error
       ? classifyTaskError(error)
       : "";

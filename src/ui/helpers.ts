@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- LexVoice's settings/data layer is intentionally dynamically typed (files use @ts-nocheck and read untyped JSON from loadData); these type-only rules yield no actionable findings here and are tracked for incremental typing */
 // 由 main.ts 抽出（模块化拆解，提升工程稳定性；纯搬迁、零行为改动）。
 import * as obsidian from "obsidian";
+import { getDesktopModule } from "../shared/desktop-runtime";
 export {
   LEXVOICE_UPDATE_REPO_URL,
   LEXVOICE_UPDATE_BRANCH,
@@ -208,8 +209,9 @@ export function openLexVoiceExternalUrl(url) {
   // 桌面端优先走 Electron shell.openExternal —— 强制用系统默认浏览器，
   // 避免在 Obsidian 内嵌 webview 打开外部链接。
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports -- Desktop Obsidian exposes Electron shell at runtime; mobile/browser fallback uses window.open.
-    const electron = require("electron");
+    const electron = getDesktopModule<{
+      shell?: { openExternal?: (target: string) => void };
+    }>("electron");
     if (electron && electron.shell && typeof electron.shell.openExternal === "function") {
       electron.shell.openExternal(url);
       return;

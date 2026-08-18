@@ -481,7 +481,7 @@ export function parseRecruitQualitiesFromOutput(text) {
     if (src) {
       for (const [k, v] of Object.entries(src)) {
         const name = String(k || "").trim();
-        const verdict = String(v || "").trim();
+        const verdict = typeof v === "string" ? v.trim() : "";
         if (name && /^(达到|未达|本场未验证)$/.test(verdict)) qualities[name] = verdict;
       }
     }

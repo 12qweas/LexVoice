@@ -57,7 +57,7 @@ export function normalizeAsrConcurrency(value) {
 
 export const IMPORT_AUDIO_CHUNK_SAMPLE_RATE = 16000;
 
-export async function decodeAudioBlob(blob) {
+export async function decodeAudioBlob(blob: Blob): Promise<AudioBuffer> {
   const AudioContextCtor = window.AudioContext || window["webkitAudioContext"];
   if (!AudioContextCtor) throw new Error("当前环境不支持音频解码");
   const ctx = new AudioContextCtor();

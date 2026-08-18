@@ -1,5 +1,5 @@
 export function normalizeRecentNoteRoot(value: unknown): string {
-  const root = String(value ?? "")
+  const root = (typeof value === "string" ? value : "")
     .trim()
     .replace(/\\/g, "/")
     .replace(/^\.\/+/, "")

@@ -23,7 +23,7 @@ export function normalizeKnowledgeExtractionHistory(value) {
         out[key] = {
           mtime: Number(raw.mtime) || 0,
           size: Number(raw.size) || 0,
-          scannedAt: String(raw.scannedAt || ""),
+          scannedAt: typeof raw.scannedAt === "string" ? raw.scannedAt : "",
         };
       } else {
         out[key] = { mtime: Number(raw) || 0, size: 0, scannedAt: "" };

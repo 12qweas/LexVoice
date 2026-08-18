@@ -25,6 +25,10 @@ describe("RealtimeOutlineCoordinator", () => {
       evaluate: overrides.evaluate || (() => ({ ready: true })),
       execute,
       onFailure: overrides.onFailure,
+    }, {
+      now: () => Date.now(),
+      setTimeout: (callback, delayMs) => setTimeout(callback, delayMs) as unknown as number,
+      clearTimeout: handle => clearTimeout(handle),
     });
     return { coordinator, execute, setSessionId: (value: string) => { sessionId = value; } };
   }

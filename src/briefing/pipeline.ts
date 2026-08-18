@@ -28,7 +28,7 @@ export type BriefingPartCheckpoint = {
   summary: string;
   people: string[];
   tags: string[];
-  sedimentObjects: unknown | null;
+  sedimentObjects: unknown;
   finishReason: string;
   attempts: number;
   usage: BriefingUsage;
@@ -79,7 +79,11 @@ export const EMPTY_BRIEFING_USAGE: BriefingUsage = {
 };
 
 function cleanText(value: unknown): string {
-  return String(value ?? "").trim();
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value).trim();
+  }
+  return "";
 }
 
 function finiteNonNegative(value: unknown): number {
@@ -88,7 +92,12 @@ function finiteNonNegative(value: unknown): number {
 }
 
 export function stableBriefingHash(value: unknown): string {
-  const text = String(value ?? "");
+  let text = "";
+  if (typeof value === "string") text = value;
+  else {
+    try { text = JSON.stringify(value) ?? ""; }
+    catch { text = ""; }
+  }
   let hash = 2166136261;
   for (let index = 0; index < text.length; index += 1) {
     hash ^= text.charCodeAt(index);

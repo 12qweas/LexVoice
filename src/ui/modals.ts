@@ -14,6 +14,7 @@ import { mimeFromExt } from '../shared/util-audio';
 import { listJDProjects } from '../recruit/jd-projects';
 import { getBuiltInVisiblePolishModeKeys, getCustomPromptModeTemplates, getEffectivePolishMode, getModeMeta, getVisibleModeEntries, isCustomPromptModeTemplate, makeCustomPromptModeId, sanitizePromptTemplate, setLexVoiceModePillIcon } from '../shared/mode-meta';
 import { getActivityStagePosition } from '../shared/activity-progress';
+import { getDesktopProcess } from '../shared/desktop-runtime';
 
 export function pickReportAccentColor(app, defaultHex) {
   return new Promise((resolve) => {
@@ -1035,7 +1036,7 @@ export class VirtualCableSetupModal extends obsidian.Modal {
     this.activePlatform = this.detectPlatform();
   }
   detectPlatform() {
-    const p = (typeof process !== "undefined" && process.platform) || "";
+    const p = getDesktopProcess()?.platform || "";
     if (p === "darwin") return "mac";
     if (p === "win32") return "win";
     return "linux";
@@ -2062,17 +2063,17 @@ export class ImportTextModal extends obsidian.Modal {
     const cb = row.createEl("input", { type: "checkbox", attr: { id } });
     const label = row.createEl("label", { attr: { for: id }, cls: "lexvoice-import-label" });
     const nameRow = label.createDiv({ cls: "lexvoice-import-name-row" });
-    nameRow.createEl("span", { cls: "lexvoice-import-name", text: file.basename });
+    nameRow.createSpan({ cls: "lexvoice-import-name", text: file.basename });
     if (item && item.badge) {
-      nameRow.createEl("span", {
+      nameRow.createSpan({
         cls: `lexvoice-import-badge lexvoice-import-badge-${item.category || "external"}`,
         text: item.badge,
         attr: item.statusTitle ? { title: item.statusTitle } : {},
       });
     }
-    label.createEl("div", { cls: "lexvoice-import-meta", text: this.formatFileMeta(file) });
+    label.createDiv({ cls: "lexvoice-import-meta", text: this.formatFileMeta(file) });
     if (item && item.reason) {
-      label.createEl("div", { cls: "lexvoice-import-reason", text: item.reason });
+      label.createDiv({ cls: "lexvoice-import-reason", text: item.reason });
     }
     this.fileCheckboxes.set(file.path, cb);
     cb.onchange = () => {
@@ -2335,10 +2336,10 @@ export class ImportAudioModal extends obsidian.Modal {
     const cb = row.createEl("input", { type: "checkbox", attr: { id: cbId } });
     const lbl = row.createEl("label", { attr: { for: cbId }, cls: "lexvoice-import-label" });
     const name = options.seg ? `seg${pad(options.seg)} · ${file.name}` : file.name;
-    lbl.createEl("div", { cls: "lexvoice-import-name", text: name });
-    lbl.createEl("div", { cls: "lexvoice-import-meta", text: this.formatFileMeta(file) });
+    lbl.createDiv({ cls: "lexvoice-import-name", text: name });
+    lbl.createDiv({ cls: "lexvoice-import-meta", text: this.formatFileMeta(file) });
     if (file.stat.size > 25 * 1024 * 1024) {
-      lbl.createEl("div", { cls: "lexvoice-import-warn", text: "文件超过 25 MB，多数转写 API 会拒绝。建议先降码率。" });
+      lbl.createDiv({ cls: "lexvoice-import-warn", text: "文件超过 25 MB，多数转写 API 会拒绝。建议先降码率。" });
     }
     this.fileCheckboxes.set(file.path, cb);
     cb.onchange = () => {

@@ -46,10 +46,12 @@ type PendingRequest = {
   reject?: (reason?: unknown) => void;
 };
 
+type TimerHandle = number;
+
 type TimerApi = {
   now: () => number;
-  setTimeout: (callback: () => void, delayMs: number) => unknown;
-  clearTimeout: (handle: unknown) => void;
+  setTimeout: (callback: () => void, delayMs: number) => TimerHandle;
+  clearTimeout: (handle: TimerHandle) => void;
 };
 
 type CoordinatorHooks = {
@@ -68,18 +70,18 @@ export function runInOutlineSessionTail<T>(
   session: OutlineSessionTail,
   task: () => Promise<T>
 ): Promise<T> {
-  const previous = session._outlineGenTail || Promise.resolve();
+  const previous = session._outlineGenTail ?? Promise.resolve();
   const run = Promise.resolve(previous)
     .catch(() => undefined)
     .then(task);
-  session._outlineGenTail = run.then(() => undefined, () => undefined);
+  session._outlineGenTail = run.then<void>(() => undefined, () => undefined);
   return run;
 }
 
 const DEFAULT_TIMER_API: TimerApi = {
   now: () => Date.now(),
-  setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
-  clearTimeout: (handle) => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>),
+  setTimeout: (callback, delayMs) => window.setTimeout(callback, delayMs),
+  clearTimeout: (handle) => window.clearTimeout(handle),
 };
 
 function requestPriority(request: OutlineCoordinatorRequest): number {
@@ -90,7 +92,7 @@ function requestPriority(request: OutlineCoordinatorRequest): number {
 
 function errorText(error: unknown): string {
   if (error instanceof Error) return error.message;
-  return String(error || "");
+  return typeof error === "string" ? error : "";
 }
 
 function mergeBackgroundRequest(
@@ -111,7 +113,7 @@ export class RealtimeOutlineCoordinator {
   private readonly hooks: CoordinatorHooks;
   private readonly timerApi: TimerApi;
   private pending: PendingRequest[] = [];
-  private timer: unknown = null;
+  private timer: TimerHandle | null = null;
   private runningItem: PendingRequest | null = null;
   private runningAbort: AbortController | null = null;
   private seq = 0;

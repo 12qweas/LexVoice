@@ -52,7 +52,7 @@ export class LlmRequestQueue {
       };
       if (signal) {
         const onAbort = () => {
-          const index = this.items.indexOf(item as LlmQueueItem);
+          const index = this.items.indexOf(item);
           if (index < 0) return;
           this.items.splice(index, 1);
           item.detachAbort?.();
@@ -61,7 +61,7 @@ export class LlmRequestQueue {
         signal.addEventListener("abort", onAbort, { once: true });
         item.detachAbort = () => signal.removeEventListener("abort", onAbort);
       }
-      this.items.push(item as LlmQueueItem);
+      this.items.push(item);
       this.pump();
     });
   }

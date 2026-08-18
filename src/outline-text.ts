@@ -158,16 +158,24 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
 }
 
+function stringValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  return "";
+}
+
 // 把一个片段在"第 2 个及以后的锚点"前切开——应对模型把多个一级条目排在一起、中间却没用任何破折号分隔的情况。
 // 锚点 [[file|HH:MM]] 是最可靠的结构信号，据它硬切能保证一级条目至少能分开（时间轴 rail 不会糊成一条）。
 export function splitRealtimeOutlineAtEmbeddedAnchors(segment: unknown): string[] {
-  const s = String(segment || "");
+  const s = stringValue(segment);
   const re = new RegExp(REALTIME_OUTLINE_ANCHOR_GLOBAL_RE.source, "g");
-  const idxs = [];
-  let m;
+  const idxs: number[] = [];
+  let m: RegExpExecArray | null;
   while ((m = re.exec(s))) idxs.push(m.index);
   if (idxs.length <= 1) return [s];
-  const out = [];
+  const out: string[] = [];
   let start = 0;
   for (let i = 1; i < idxs.length; i++) { out.push(s.slice(start, idxs[i])); start = idxs[i]; }
   out.push(s.slice(start));
@@ -179,10 +187,10 @@ export function splitRealtimeOutlineAtEmbeddedAnchors(segment: unknown): string[
 // ② 再把任何内部还嵌着 ≥2 个锚点的片段在锚点前硬切；
 // ③ 按锚点重建父子：带锚点的段 = 一级条目，其后无锚点的段 = 它的子要点（缩进两格）。
 export function normalizeRealtimeOutlineList(outline: unknown): string {
-  const src = String(outline || "");
+  const src = stringValue(outline);
   if (!src.trim()) return src;
   const lines = src.replace(/\r\n/g, "\n").split("\n");
-  const out = [];
+  const out: string[] = [];
   for (const rawLine of lines) {
     let line = rawLine;
     // 模型偶尔会把协议里的 Markdown 列表改成标题、编号或 Unicode
@@ -201,7 +209,7 @@ export function normalizeRealtimeOutlineList(outline: unknown): string {
     const hasDash = REALTIME_OUTLINE_INLINE_SEP_RE.test(body);
     // 既没破折号分隔、锚点也不超过 1 个 → 不是连排，原样保留。
     if (!hasDash && anchorCount <= 1) { out.push(`${indent}- ${body}`); continue; }
-    let parts = hasDash ? body.split(REALTIME_OUTLINE_INLINE_SEP_SPLIT_RE) : [body];
+    let parts: string[] = hasDash ? body.split(REALTIME_OUTLINE_INLINE_SEP_SPLIT_RE) : [body];
     parts = parts.flatMap(splitRealtimeOutlineAtEmbeddedAnchors).map(s => s.trim()).filter(Boolean);
     if (parts.length <= 1) { out.push(line); continue; }
     if (indent) {
@@ -234,7 +242,7 @@ const RECRUIT_OUTLINE_CHILD_LABELS: ReadonlyArray<{ pattern: RegExp; prefix: str
 ];
 
 function normalizeRecruitOutlineBody(raw: unknown): string {
-  return String(raw || "")
+  return stringValue(raw)
     .replace(/\*\*/g, "")
     .replace(/^>\s*/, "")
     .trim();
@@ -242,7 +250,7 @@ function normalizeRecruitOutlineBody(raw: unknown): string {
 
 function matchRecruitOutlineChild(raw: unknown): string {
   const body = normalizeRecruitOutlineBody(raw);
-  const explicitIcon = /^([❓💬🤖⛏])\s*(.+)$/.exec(body);
+  const explicitIcon = /^([❓💬🤖⛏])\s*(.+)$/u.exec(body);
   if (explicitIcon) {
     const text = cleanRealtimeOutlineItemText(explicitIcon[2], 120);
     return text ? `${explicitIcon[1]} ${text}` : "";
@@ -260,7 +268,7 @@ function matchRecruitOutlineChild(raw: unknown): string {
 // from legacy XML/Markdown responses. Arbitrary prose is ignored so a model
 // preamble cannot masquerade as a valid interview outline.
 export function parseRecruitRealtimeOutlineProtocol(input: unknown): RecruitRealtimeOutlineProtocolResult {
-  let source = String(input || "").replace(/\r\n/g, "\n").trim();
+  let source = stringValue(input).replace(/\r\n/g, "\n").trim();
   if (!source) return { outline: "", memory: "", protocolMatched: false };
 
   const taggedOutline = source.match(/<lexvoice-outline\b[^>]*>([\s\S]*?)(?:<\/lexvoice-outline>|$)/i);
@@ -367,8 +375,8 @@ export function buildRecruitRealtimeOutlineFallback(
   segments: readonly (RealtimeOutlineSegmentLike | null | undefined)[] | null | undefined,
   opts: RecruitRealtimeOutlineFallbackOptions = {},
 ): string {
-  const source = (Array.isArray(segments) ? segments : [])
-    .filter((segment): segment is RealtimeOutlineSegmentLike => !!segment && !!String(segment.text || "").trim());
+  const source = (segments ?? [])
+    .filter((segment): segment is RealtimeOutlineSegmentLike => !!segment && !!stringValue(segment.text).trim());
   const maxNodes = Math.max(1, Math.min(6, Math.floor(Number(opts.maxNodes) || 6)));
   const groupSize = Math.max(1, Math.ceil(source.length / maxNodes));
   const lines: string[] = [];
@@ -385,7 +393,7 @@ export function buildRecruitRealtimeOutlineFallback(
     lines.push(`- 面试片段 ${rangeLabel}（待复核）`);
     for (const segment of group) {
       const excerpt = cleanRealtimeOutlineItemText(
-        String(segment.text || "").replace(/\s+/g, " "),
+        stringValue(segment.text).replace(/\s+/g, " "),
         110,
       );
       if (excerpt) lines.push(`  - 💬 ${excerpt}`);
@@ -408,7 +416,7 @@ export function advanceRealtimeOutlineCursor(
 }
 
 export function hashRealtimeOutlineText(text: unknown): string {
-  const src = String(text || "");
+  const src = stringValue(text);
   let h = 2166136261;
   for (let i = 0; i < src.length; i++) {
     h ^= src.charCodeAt(i);
@@ -418,12 +426,12 @@ export function hashRealtimeOutlineText(text: unknown): string {
 }
 
 export function getRealtimeOutlineAnchorTime(anchor: unknown): string {
-  const match = String(anchor || "").match(/\|(\d{1,2}:\d{2}(?::\d{2})?)\]\]/);
+  const match = stringValue(anchor).match(/\|(\d{1,2}:\d{2}(?::\d{2})?)\]\]/);
   return match ? match[1] : "";
 }
 
 export function cleanRealtimeOutlineItemText(text: unknown, maxChars = 120): string {
-  let value = String(text || "")
+  let value = stringValue(text)
     .replace(/\[\[[^\]]+\|\d{1,2}:\d{2}(?::\d{2})?\]\]/g, "")
     // 剥掉行尾未闭合的残缺锚点（如 "[[lex-202"）——模型截断/流式半写时会漏出 [[ 却没有闭合 ]]，
     // 不清掉会当成正文渲染成一条乱码节点。只匹配"尾部不含 ]"的片段，绝不会碰到完整 [[x|MM:SS]]。
@@ -456,7 +464,7 @@ export function makeRealtimeOutlineNode(
   children: unknown,
   index: unknown,
 ): RealtimeOutlineNode | null {
-  const safeAnchor = String(anchor || "").trim();
+  const safeAnchor = stringValue(anchor).trim();
   const safeTitle = cleanRealtimeOutlineItemText(title, 90);
   if (!safeTitle) return null;
   const safeChildren: string[] = [];
@@ -466,7 +474,7 @@ export function makeRealtimeOutlineNode(
     if (text && !safeChildren.includes(text)) safeChildren.push(text);
     if (safeChildren.length >= REALTIME_OUTLINE_STATE_MAX_CHILDREN) break;
   }
-  const idSeed = [safeAnchor, safeTitle, index || 0].join("|");
+  const idSeed = [safeAnchor, safeTitle, stringValue(index) || "0"].join("|");
   return {
     id: `rt-${hashRealtimeOutlineText(idSeed)}`,
     anchor: safeAnchor,
@@ -477,7 +485,7 @@ export function makeRealtimeOutlineNode(
 }
 
 export function parseRealtimeOutlineStateFromMarkdown(markdown: unknown): RealtimeOutlineNode[] {
-  const lines = String(markdown || "").split(/\r?\n/);
+  const lines = stringValue(markdown).split(/\r?\n/);
   const nodes: RealtimeOutlineNode[] = [];
   let current: RealtimeOutlineNode | null = null;
   for (const raw of lines) {
@@ -512,7 +520,7 @@ export function parseRealtimeOutlineStateFromMarkdown(markdown: unknown): Realti
 function clipRecruitOutlineMemoryText(text: unknown, maxChars: unknown): string {
   const max = Math.max(1, Math.floor(Number(maxChars) || 0));
   const cleaned = cleanRealtimeOutlineItemText(
-    String(text || "").replace(/^(?:❓|💬|🤖|⛏)\s*/u, ""),
+    stringValue(text).replace(/^(?:❓|💬|🤖|⛏)\s*/u, ""),
     max + 1,
   );
   if (cleaned.length <= max) return cleaned;
@@ -545,7 +553,7 @@ function buildRecruitOutlineMemoryNodeLine(node: RealtimeOutlineNode): string {
 // Recruitment memory is derived only from committed nodes. Older topics remain
 // as a compact index while recent topics keep evidence and follow-up details.
 export function buildRecruitRealtimeOutlineMemory(
-  nodesOrMarkdown: readonly RealtimeOutlineNode[] | unknown,
+  nodesOrMarkdown: unknown,
   opts: RecruitRealtimeOutlineMemoryOptions = {},
 ): string {
   const sourceNodes = Array.isArray(nodesOrMarkdown)
@@ -605,7 +613,7 @@ export function selectIncrementalRealtimeOutlineSegments<T extends RealtimeOutli
   segments: readonly (T | null | undefined)[] | null | undefined,
   opts: SelectIncrementalRealtimeOutlineOptions = {},
 ): IncrementalRealtimeOutlineSelection<T> {
-  const source: readonly (T | null | undefined)[] = Array.isArray(segments) ? segments : [];
+  const source: readonly (T | null | undefined)[] = segments ?? [];
   const totalSegmentCount = source.length;
   const maxSegments = Math.max(1, Math.floor(Number(opts.maxSegments) || 10));
   const maxChars = Math.max(200, Math.floor(Number(opts.maxChars) || 6000));
@@ -617,17 +625,17 @@ export function selectIncrementalRealtimeOutlineSegments<T extends RealtimeOutli
     .map((segment, sourceIndex) => ({ segment, sourceIndex }))
     .filter((entry): entry is { segment: T; sourceIndex: number } => {
       const segment = entry.segment;
-      return !!segment && !!String(segment.text || "").trim();
+      return !!segment && !!stringValue(segment.text).trim();
     });
   const previous = valid.filter(({ sourceIndex }) => sourceIndex < sinceCount).slice(-lookbackCount);
   const pending = valid.filter(({ sourceIndex }) => sourceIndex >= sinceCount);
   const selectedEntries: Array<{ segment: T; sourceIndex: number }> = previous.slice();
   const selectedNewEntries: Array<{ segment: T; sourceIndex: number }> = [];
-  let chars = selectedEntries.reduce((sum, item) => sum + String(item.segment.text || "").trim().length, 0);
+  let chars = selectedEntries.reduce((sum, item) => sum + stringValue(item.segment.text).trim().length, 0);
 
   for (const item of pending) {
     if (selectedEntries.length >= maxSegments) break;
-    const chunkChars = String(item.segment.text || "").trim().length;
+    const chunkChars = stringValue(item.segment.text).trim().length;
     if (selectedNewEntries.length > 0 && chars + chunkChars > maxChars) break;
     selectedEntries.push(item);
     selectedNewEntries.push(item);
@@ -665,7 +673,7 @@ export function selectIncrementalRealtimeOutlineSegments<T extends RealtimeOutli
 function renderRealtimeOutlineNodesMarkdown(
   nodes: readonly RealtimeOutlineNode[] | null | undefined,
 ): string {
-  return (Array.isArray(nodes) ? nodes : []).map((node) => {
+  return (nodes ?? []).map((node) => {
     const head = `- ${node.anchor ? `${node.anchor} ` : ""}${node.title}`.trimEnd();
     const children = (Array.isArray(node.children) ? node.children : [])
       .map((child: string) => `  - ${child}`);
@@ -682,7 +690,7 @@ export function repairRealtimeOutlineAnchors(
   markdown: unknown,
   opts: RepairRealtimeOutlineAnchorsOptions = {},
 ): RepairRealtimeOutlineAnchorsResult {
-  const source = String(markdown || "").trim();
+  const source = stringValue(markdown).trim();
   const nodes = parseRealtimeOutlineStateFromMarkdown(source);
   if (!nodes.length) {
     return { outline: source, repairedCount: 0, restoredCount: 0, unresolvedCount: 0 };
@@ -695,10 +703,10 @@ export function repairRealtimeOutlineAnchors(
     if (key && node.anchor && !previousByTitle.has(key)) previousByTitle.set(key, node.anchor);
   }
 
-  const anchorSources = (Array.isArray(opts.anchorSources) ? opts.anchorSources : [])
+  const anchorSources = (opts.anchorSources ?? [])
     .map((item, index) => ({
-      anchor: String(item && item.anchor || "").trim(),
-      index: Number.isFinite(Number(item && item.index)) ? Number(item.index) : index,
+      anchor: stringValue(item.anchor).trim(),
+      index: Number.isFinite(Number(item.index)) ? Number(item.index) : index,
     }))
     .filter((item) => REALTIME_OUTLINE_ANCHOR_RE.test(item.anchor))
     .sort((a, b) => a.index - b.index);
@@ -869,7 +877,7 @@ export function normalizeOutlineMarkdownForDisplay(
 ): string {
   const attachUntimed = !!(opts && opts.attachUntimed);
   const preserveUntimedTopLevel = !!(opts && opts.preserveUntimedTopLevel);
-  const src = String(text || "").trim();
+  const src = stringValue(text).trim();
   if (!src) return "";
   const lines = src.split(/\r?\n/);
   const hasTimedTopLevel = lines.some((line) => {
@@ -997,11 +1005,11 @@ export function deriveFollowupCards(
     if (!status) continue; // covered 或无效状态 → 不产卡
     const rule = rules[key] || {};
     const vagueHits = Array.isArray(item.vague_hits) ? item.vague_hits.filter(Boolean) : [];
-    const missingWhat = (item.missing_what == null ? "" : String(item.missing_what)).trim();
+    const missingWhat = stringValue(item.missing_what).trim();
     const reason = missingWhat
-      || (vagueHits.length ? `提到「${vagueHits.join("、")}」但不够具体` : (status === "missing" ? "尚未谈到" : "提到但不够具体"));
-    const question = ((item.followup_question == null ? "" : String(item.followup_question)).trim())
-      || ((rule.fallback == null ? "" : String(rule.fallback)).trim());
+      || (vagueHits.length ? `提到「${vagueHits.map(stringValue).filter(Boolean).join("、")}」但不够具体` : (status === "missing" ? "尚未谈到" : "提到但不够具体"));
+    const question = stringValue(item.followup_question).trim()
+      || stringValue(rule.fallback).trim();
     cards.push({
       key,
       name: meta.name || key,
@@ -1026,8 +1034,8 @@ export function validateRealtimeOutlineMarkdown(
   outline: unknown,
   opts: ValidateRealtimeOutlineOptions = {},
 ): RealtimeOutlineValidationResult {
-  const text = String(outline || "").trim();
-  const previousOutline = String(opts.previousOutline || "").trim();
+  const text = stringValue(outline).trim();
+  const previousOutline = stringValue(opts.previousOutline).trim();
   if (!text) {
     return previousOutline ? { ok: false, reason: "empty_outline" } : { ok: true, reason: "" };
   }
@@ -1122,8 +1130,8 @@ export function findLowEvidenceEntities(
 // 从 markdown 正文里抽取某标题（如 "## 岗位描述"）下的一段：取该标题之后、
 // 直到下一个"同级或更高级标题"或文件尾。找不到该标题返回 ""（回退策略由调用方决定）。
 export function extractMarkdownSection(md: unknown, heading: unknown): string {
-  const text = String(md || "");
-  const h = String(heading || "").trim();
+  const text = stringValue(md);
+  const h = stringValue(heading).trim();
   if (!h) return "";
   const headLevel = (h.match(/^#+/) || [""])[0].length || 0;
   const headBody = h.replace(/^#+\s*/, "").trim();
@@ -1152,10 +1160,10 @@ export function serializeRequiredQualities(qualities: unknown): string {
   const clean: Array<{ name: string; def: string; signal: string }> = [];
   for (const q of list) {
     if (!isObjectRecord(q)) continue;
-    const name = String(q.素质 != null ? q.素质 : (q.name != null ? q.name : "")).trim();
+    const name = stringValue(q.素质 ?? q.name).trim();
     if (!name) continue;
-    const def = String(q.定义 != null ? q.定义 : (q.definition != null ? q.definition : "")).trim();
-    const signal = String(q.信号 != null ? q.信号 : (q.signal != null ? q.signal : "")).trim();
+    const def = stringValue(q.定义 ?? q.definition).trim();
+    const signal = stringValue(q.信号 ?? q.signal).trim();
     clean.push({ name, def, signal });
   }
   if (!clean.length) return "";
@@ -1173,7 +1181,7 @@ export function serializeRequiredQualities(qualities: unknown): string {
 // 顺序要点：先替身份证（18 位）再替手机号——否则身份证里出生年份段（如 "1990…"）会被
 // 手机号正则先吃掉一截，导致身份证整体匹配不到而漏网；手机号再加数字边界，避免吃到长串数字的子段。
 export function desensitizeResumeText(text: unknown): string {
-  return String(text || "")
+  return stringValue(text)
     .replace(/\d{6}(?:19|20)\d{2}(?:0\d|1[0-2])(?:[0-2]\d|3[01])\d{3}[\dXx]/g, "[身份证]")
     .replace(/(?<!\d)1[3-9]\d{9}(?!\d)/g, "[手机号]")
     .replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, "[邮箱]");
@@ -1181,7 +1189,7 @@ export function desensitizeResumeText(text: unknown): string {
 
 // 项目（招聘岗位）文件夹名净化：替换 Windows/Obsidian 非法字符为短横，去首尾点和空白，空名兜底。
 export function sanitizeProjectFolderName(name: unknown): string {
-  const cleaned = String(name || "")
+  const cleaned = stringValue(name)
     .replace(/[\\/:*?"<>|]/g, "-")
     .replace(/\s+/g, " ")
     .trim()
@@ -1201,7 +1209,7 @@ export const REPORT_BASE_ACCENT_HEX = "#E85F28";
 
 // hex → 色相(0-360)。非法返回 null。3 位/6 位都认。
 export function hexToHue(hex: unknown): number | null {
-  let h = String(hex || "").trim().replace(/^#/, "");
+  let h = stringValue(hex).trim().replace(/^#/, "");
   if (h.length === 3) h = h.split("").map(c => c + c).join("");
   if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
   const r = parseInt(h.slice(0, 2), 16) / 255;
@@ -1236,7 +1244,7 @@ export function recolorReportHtml(
   targetHex: unknown,
   baseHex: unknown = REPORT_BASE_ACCENT_HEX,
 ): string {
-  const s = String(html || "");
+  const s = stringValue(html);
   if (!s) return s;
   const delta = reportHueDelta(targetHex, baseHex);
   if (!delta) return s;

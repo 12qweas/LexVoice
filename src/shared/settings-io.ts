@@ -74,7 +74,7 @@ function firstString(fallback: string, ...values: unknown[]): string {
 }
 
 function normalizeAudioChannelMode(value: unknown): PluginSettings["audioChannelMode"] {
-  const mode = String(value || "").trim();
+  const mode = typeof value === "string" ? value.trim() : "";
   return AUDIO_CHANNEL_MODES.includes(mode as typeof AUDIO_CHANNEL_MODES[number])
     ? mode as PluginSettings["audioChannelMode"]
     : "auto";

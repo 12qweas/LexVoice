@@ -57,6 +57,32 @@ export interface ActivityRequestState {
   error: string;
 }
 
+const ACTIVITY_REQUEST_STATUSES = new Set<ActivityRequestStatus>([
+  "pending",
+  "requesting",
+  "streaming",
+  "retry-wait",
+  "failed",
+  "done",
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeActivityRequestStatus(value: unknown): ActivityRequestStatus {
+  return typeof value === "string" && ACTIVITY_REQUEST_STATUSES.has(value as ActivityRequestStatus)
+    ? value as ActivityRequestStatus
+    : "pending";
+}
+
+function isActivityStage(value: unknown): value is ActivityStage {
+  if (!isRecord(value)) return false;
+  return typeof value.id === "string"
+    && typeof value.label === "string"
+    && (value.status === "done" || value.status === "active" || value.status === "pending");
+}
+
 const AUDIO_IMPORT_STAGE_DEFINITIONS: ReadonlyArray<{
   id: AudioImportStageId;
   label: string;
@@ -69,7 +95,7 @@ const AUDIO_IMPORT_STAGE_DEFINITIONS: ReadonlyArray<{
 ];
 
 export function normalizeAudioImportStage(value: unknown): AudioImportStageId {
-  const phase = String(value || "").trim().toLowerCase();
+  const phase = typeof value === "string" ? value.trim().toLowerCase() : "";
   if (phase === "transcribing" || phase === "transcribe") return "transcribe";
   if (phase === "persisting" || phase === "persist" || phase === "write-transcript") return "persist";
   if (phase === "organizing" || phase === "organize" || phase === "ai") return "organize";
@@ -78,7 +104,7 @@ export function normalizeAudioImportStage(value: unknown): AudioImportStageId {
 }
 
 export function audioImportStageFromWorkProgress(value: unknown): AudioImportStageId {
-  const stage = String(value || "").trim().toLowerCase();
+  const stage = typeof value === "string" ? value.trim().toLowerCase() : "";
   if (stage === "write-note" || stage === "done") return "write";
   return "organize";
 }
@@ -108,11 +134,12 @@ export function getActivityStagePosition(stages: unknown): {
   if (!Array.isArray(stages) || stages.length === 0) {
     return { current: 0, total: 0, completed: 0 };
   }
-  const activeIndex = stages.findIndex((item) => item && item.status === "active");
-  const completed = stages.filter((item) => item && item.status === "done").length;
+  const validStages = stages.filter(isActivityStage);
+  const activeIndex = validStages.findIndex((item) => item.status === "active");
+  const completed = validStages.filter((item) => item.status === "done").length;
   return {
-    current: activeIndex >= 0 ? activeIndex + 1 : Math.min(stages.length, completed),
-    total: stages.length,
+    current: activeIndex >= 0 ? activeIndex + 1 : Math.min(validStages.length, completed),
+    total: validStages.length,
     completed,
   };
 }
@@ -120,6 +147,24 @@ export function getActivityStagePosition(stages: unknown): {
 function toFiniteTimestamp(value: unknown): number {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function normalizeStoredActivityRequest(value: unknown): ActivityRequestState | null {
+  if (!isRecord(value) || typeof value.key !== "string" || !value.key.trim()) return null;
+  return {
+    key: value.key,
+    chunkIndex: Math.max(0, Math.floor(Number(value.chunkIndex) || 0)),
+    chunkCount: Math.max(0, Math.floor(Number(value.chunkCount) || 0)),
+    status: normalizeActivityRequestStatus(value.status),
+    attempt: Math.max(0, Math.floor(Number(value.attempt) || 0)),
+    maxAttempts: Math.max(0, Math.floor(Number(value.maxAttempts) || 0)),
+    startedAt: toFiniteTimestamp(value.startedAt),
+    updatedAt: toFiniteTimestamp(value.updatedAt),
+    deadlineAt: toFiniteTimestamp(value.deadlineAt),
+    retryAt: toFiniteTimestamp(value.retryAt),
+    receivedChars: Math.max(0, Math.floor(Number(value.receivedChars) || 0)),
+    error: typeof value.error === "string" ? value.error : "",
+  };
 }
 
 export function appendActivityEvent(
@@ -157,7 +202,7 @@ export function upsertActivityRequest(
   limit = 200,
 ): ActivityRequestState[] {
   const list = Array.isArray(requests)
-    ? requests.filter((item): item is ActivityRequestState => !!item && typeof item === "object" && !!item.key)
+    ? requests.map(normalizeStoredActivityRequest).filter((item): item is ActivityRequestState => item !== null)
     : [];
   const now = toFiniteTimestamp(patch.updatedAt) || Date.now();
   const index = list.findIndex((item) => item.key === patch.key);
@@ -169,7 +214,7 @@ export function upsertActivityRequest(
     key: patch.key,
     chunkIndex: Math.max(0, Math.floor(Number(patch.chunkIndex ?? previous?.chunkIndex) || 0)),
     chunkCount: Math.max(0, Math.floor(Number(patch.chunkCount ?? previous?.chunkCount) || 0)),
-    status: (patch.status || previous?.status || "pending") as ActivityRequestStatus,
+    status: normalizeActivityRequestStatus(patch.status ?? previous?.status),
     attempt: Math.max(0, Math.floor(Number(patch.attempt ?? previous?.attempt) || 0)),
     maxAttempts: Math.max(0, Math.floor(Number(patch.maxAttempts ?? previous?.maxAttempts) || 0)),
     startedAt: toFiniteTimestamp(patch.startedAt)
@@ -235,7 +280,9 @@ export function summarizeActivityRequests(
     done: 0,
   };
   if (!Array.isArray(requests)) return summary;
-  for (const request of requests) {
+  for (const rawRequest of requests) {
+    const request = normalizeStoredActivityRequest(rawRequest);
+    if (!request) continue;
     summary[classifyActivityRequest(request, now)] += 1;
   }
   return summary;

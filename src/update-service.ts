@@ -78,9 +78,11 @@ function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === "object" && error !== null && "message" in error) {
     const message = error.message;
-    if (message) return String(message);
+    if (typeof message === "string" && message) return message;
   }
-  return String(error);
+  if (typeof error === "string") return error;
+  if (typeof error === "number" || typeof error === "boolean" || typeof error === "bigint") return String(error);
+  return "未知错误";
 }
 
 function parseRemoteManifest(text: string): { id: string; version: string } {

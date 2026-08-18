@@ -46,7 +46,8 @@ function isAbortError(error: unknown): boolean {
   return !!error
     && typeof error === "object"
     && "name" in error
-    && String((error as { name?: unknown }).name || "") === "AbortError";
+    && typeof error.name === "string"
+    && error.name === "AbortError";
 }
 
 export async function drainRealtimeOutlineBacklog(
@@ -102,7 +103,7 @@ export async function drainRealtimeOutlineBacklog(
       } catch (error) {
         if (isAbortError(error)) throw error;
         lastError = error;
-        const failure = {
+        const failure: OutlineDrainFailure = {
           batchIndex: completedBatches,
           attemptIndex,
           beforeCommittedCount,
