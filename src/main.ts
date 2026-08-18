@@ -13942,6 +13942,13 @@ class LexVoicePlugin extends obsidian.Plugin {
       ? saved.schemaVersion
       : 0;
     let shouldSave = savedVersion !== SETTINGS_SCHEMA_VERSION;
+    // installedUpdateVersion 既记录内置更新器刚写入的待生效版本，也应在插件真正加载后
+    // 与 manifest 对齐。否则通过 Obsidian 社区目录更新时，这个字段会永久停留在旧版本。
+    const runningVersion = String(this.manifest && this.manifest.version || "").trim();
+    if (runningVersion && this.settings.installedUpdateVersion !== runningVersion) {
+      this.settings.installedUpdateVersion = runningVersion;
+      shouldSave = true;
+    }
     try {
       if (await this.migrateDefaultVocabularyFileLocation(saved)) shouldSave = true;
     } catch (e) {

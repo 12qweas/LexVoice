@@ -235,8 +235,38 @@ describe("最终纪要截断恢复", () => {
         finishReason: "stop",
         truncated: false,
         continuations: 1,
+        continuationAttempts: 1,
       });
       expect(fetchMock).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("空续写只计尝试次数并记录明确诊断", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: "" }, finish_reason: "length" }] }),
+    }));
+    vi.stubGlobal("window", {
+      fetch: fetchMock,
+      setTimeout: globalThis.setTimeout.bind(globalThis),
+      clearTimeout: globalThis.clearTimeout.bind(globalThis),
+    });
+    try {
+      const logDiagnostic = vi.fn(async () => undefined);
+      const result = await callLlmWithContinuation({
+        settings: {
+          llmEndpoint: "https://api.deepseek.com",
+          llmApiKey: "test-key",
+          llmModel: "deepseek-v4-flash",
+          thinkingMode: "reasoning",
+        },
+        logDiagnostic,
+      }, "system", "user", { stream: false, thinkingMode: "reasoning" }, { maxContinuations: 1 });
+
+      expect(result).toMatchObject({ text: "", truncated: true, continuations: 0, continuationAttempts: 1 });
+      expect(logDiagnostic.mock.calls.map((call) => call[1])).toContain("llm.continuation_empty");
     } finally {
       vi.unstubAllGlobals();
     }

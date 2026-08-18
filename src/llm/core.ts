@@ -732,6 +732,7 @@ export async function callLlmWithContinuation(plugin, system, user, options, opt
   let text = String(first.text || "");
   let finishReason = first.finishReason;
   let continuations = 0;
+  let continuationAttempts = 0;
   // 推理 token 耗尽但没有可见正文时，不能拿空 assistant 消息续写；先用 fast 档重跑一次原始请求。
   // 这是针对推理模型的恢复分支，正常有正文的截断不改变原有续写行为。
   if (isTruncatedFinishReason(finishReason) && !text.trim() && effectiveOptions.thinkingMode !== "fast") {
@@ -742,12 +743,17 @@ export async function callLlmWithContinuation(plugin, system, user, options, opt
       effectiveOptions = fastOptions;
       text = String(first.text || "");
       finishReason = first.finishReason;
-    } catch {
+    } catch (error) {
+      try {
+        await logLlmRequestDiagnostic(plugin, "warn", "llm.empty_truncated_fast_retry_failed", "关闭深度思考后的空正文恢复请求失败", {
+          error: diagnosticError(error),
+        });
+      } catch { /* intentionally empty */ }
       // 继续走有界的空正文恢复；失败时由上层保留原始转写并报告原因。
     }
   }
-  while (isTruncatedFinishReason(finishReason) && continuations < maxContinuations) {
-    continuations++;
+  while (isTruncatedFinishReason(finishReason) && continuationAttempts < maxContinuations) {
+    continuationAttempts++;
     const messages = text.trim()
       ? [
         { role: "system", content: system },
@@ -762,7 +768,14 @@ export async function callLlmWithContinuation(plugin, system, user, options, opt
     let data;
     try {
       data = await requestLlmChatCompletionWithBudgetFallback(plugin, messages, effectiveOptions);
-    } catch {
+    } catch (error) {
+      try {
+        await logLlmRequestDiagnostic(plugin, "warn", "llm.continuation_failed", "截断续写请求失败，已保留现有正文", {
+          attempt: continuationAttempts,
+          hadVisibleText: !!text.trim(),
+          error: diagnosticError(error),
+        });
+      } catch { /* intentionally empty */ }
       break; // 续写失败就用已有内容，不让整体失败
     }
     const piece = stripModeSuggestionBlocks(extractLlmContent(data).trim());
@@ -771,21 +784,32 @@ export async function callLlmWithContinuation(plugin, system, user, options, opt
         plugin.addTaskMeter(messages.reduce((n, m) => n + String(m.content || "").length, 0), piece.length, (data && data.usage) || null);
       }
     } catch { /* intentionally empty */ }
-    if (!piece) break;
+    if (!piece) {
+      try {
+        await logLlmRequestDiagnostic(plugin, "warn", "llm.continuation_empty", "截断续写仍未返回可见正文", {
+          attempt: continuationAttempts,
+          finishReason: extractLlmFinishReason(data),
+          hadVisibleText: !!text.trim(),
+        });
+      } catch { /* intentionally empty */ }
+      break;
+    }
     text = stitchContinuation(text, piece);
+    continuations++;
     finishReason = extractLlmFinishReason(data);
   }
-  return { text, finishReason, truncated: isTruncatedFinishReason(finishReason), continuations };
+  return { text, finishReason, truncated: isTruncatedFinishReason(finishReason), continuations, continuationAttempts };
 }
 
 export async function callBriefingMergeLlm(plugin, system, user, options, diagCtx) {
-  const { text, finishReason, continuations } = await callLlmWithContinuation(plugin, system, user, options, { maxContinuations: 3 });
+  const { text, finishReason, continuations, continuationAttempts } = await callLlmWithContinuation(plugin, system, user, options, { maxContinuations: 3 });
   const truncated = isTruncatedFinishReason(finishReason);
   if (!String(text || "").trim()) {
     try {
       await logLlmRequestDiagnostic(plugin, "warn", "llm.merge_empty_output", "大模型请求完成但没有返回可见正文", Object.assign({
         finishReason: finishReason || "",
         continuations,
+        continuationAttempts,
       }, diagCtx || {}));
     } catch { /* intentionally empty */ }
   }
@@ -799,7 +823,7 @@ export async function callBriefingMergeLlm(plugin, system, user, options, diagCt
   if (truncated) {
     try {
       await logLlmRequestDiagnostic(plugin, "warn", "llm.merge_truncated", "最终纪要在多次续写后仍疑似被输出长度上限截断", Object.assign({
-        finishReason, outputChars: text.length, continuations,
+        finishReason, outputChars: text.length, continuations, continuationAttempts,
       }, diagCtx || {}));
     } catch { /* intentionally empty */ }
   }
