@@ -183,6 +183,7 @@ export function accumulateLlmSseDataLine(line, state) {
   if (data === "[DONE]") { state.done = true; return false; }
   let obj;
   try { obj = JSON.parse(data); } catch { return false; }
+  if (obj && obj.usage) state.usage = obj.usage;
   const choice = obj && obj.choices && obj.choices[0];
   if (choice && choice.finish_reason) state.finishReason = String(choice.finish_reason);
   const piece = choice && ((choice.delta && choice.delta.content) || (choice.message && choice.message.content));
@@ -191,7 +192,7 @@ export function accumulateLlmSseDataLine(line, state) {
 }
 
 export async function readLlmSseStream(res, onActivity) {
-  const state = { content: "", done: false, finishReason: "" };
+  const state = { content: "", done: false, finishReason: "", usage: null };
   let raw = "";
   // 环境不支持流式 reader：退回整体读取后按 SSE 文本逐行解析。
   if (!res.body || typeof res.body.getReader !== "function") {
@@ -248,17 +249,17 @@ export async function readLlmSseStream(res, onActivity) {
 }
 
 export function finalizeLlmSseContent(state, raw) {
-  if (state.content) return { content: state.content, finishReason: state.finishReason || "" };
+  if (state.content) return { content: state.content, finishReason: state.finishReason || "", usage: state.usage || null };
   const trimmed = String(raw || "").trim();
   if (trimmed.startsWith("{")) {
     try {
       const obj = JSON.parse(trimmed);
       const c = obj && obj.choices && obj.choices[0];
       const msg = c && ((c.message && c.message.content) || (c.delta && c.delta.content));
-      if (msg) return { content: msg, finishReason: (c && c.finish_reason) ? String(c.finish_reason) : "" };
+      if (msg) return { content: msg, finishReason: (c && c.finish_reason) ? String(c.finish_reason) : "", usage: obj.usage || null };
     } catch { /* intentionally empty */ }
   }
-  return { content: state.content, finishReason: state.finishReason || "" };
+  return { content: state.content, finishReason: state.finishReason || "", usage: state.usage || null };
 }
 
 export async function requestLlmChatCompletion(plugin, messages, options) {
@@ -427,9 +428,9 @@ export async function requestLlmChatCompletion(plugin, messages, options) {
       }
       if (streamWanted) {
         armTimer(); // 给"首个 token 到达"一个完整的空闲窗口
-        const { content, finishReason } = await readLlmSseStream(res, armTimer);
+        const { content, finishReason, usage } = await readLlmSseStream(res, armTimer);
         // 透传 finish_reason，让上层能检测"length"截断（流式重包此前会把它丢掉 → 截断无从察觉）。
-        return { choices: [{ message: { role: "assistant", content }, finish_reason: finishReason || null }] };
+        return { choices: [{ message: { role: "assistant", content }, finish_reason: finishReason || null }], usage: usage || undefined };
       }
       return await res.json();
     } catch (e) {
@@ -722,6 +723,30 @@ function stitchContinuation(a, b) {
   return head + tail;
 }
 
+function normalizeLlmUsage(usage) {
+  const raw = usage && typeof usage === "object" ? usage : {};
+  const promptTokens = Math.max(0, Number(raw.prompt_tokens ?? raw.input_tokens) || 0);
+  const completionTokens = Math.max(0, Number(raw.completion_tokens ?? raw.output_tokens) || 0);
+  const reasoningTokens = Math.max(0, Number(
+    raw.reasoning_tokens
+      ?? (raw.completion_tokens_details && raw.completion_tokens_details.reasoning_tokens)
+      ?? (raw.output_tokens_details && raw.output_tokens_details.reasoning_tokens),
+  ) || 0);
+  const totalTokens = Math.max(0, Number(raw.total_tokens) || (promptTokens + completionTokens));
+  return { promptTokens, completionTokens, reasoningTokens, totalTokens };
+}
+
+function addLlmUsage(left, right) {
+  const a = left || normalizeLlmUsage(null);
+  const b = normalizeLlmUsage(right);
+  return {
+    promptTokens: a.promptTokens + b.promptTokens,
+    completionTokens: a.completionTokens + b.completionTokens,
+    reasoningTokens: a.reasoningTokens + b.reasoningTokens,
+    totalTokens: a.totalTokens + b.totalTokens,
+  };
+}
+
 // 截断自动续写：当一次输出因 finishReason==="length" 被截断时，用「assistant 预填 + 让它从断点续写」
 // 的方式再发请求，把多段拼成完整产物——不让偶发的模型输出上限决定内容完整性。
 // 工程兜底，与 mergeAndPolishLongSession 的「事前按时间分段」互补：那条防"明显超长"，这条防"偶发被切"。
@@ -731,6 +756,7 @@ export async function callLlmWithContinuation(plugin, system, user, options, opt
   let first = await callLlmWithMeta(plugin, system, user, effectiveOptions);
   let text = String(first.text || "");
   let finishReason = first.finishReason;
+  let usage = addLlmUsage(null, first.usage);
   let continuations = 0;
   let continuationAttempts = 0;
   // 推理 token 耗尽但没有可见正文时，不能拿空 assistant 消息续写；先用 fast 档重跑一次原始请求。
@@ -743,6 +769,7 @@ export async function callLlmWithContinuation(plugin, system, user, options, opt
       effectiveOptions = fastOptions;
       text = String(first.text || "");
       finishReason = first.finishReason;
+      usage = addLlmUsage(usage, first.usage);
     } catch (error) {
       try {
         await logLlmRequestDiagnostic(plugin, "warn", "llm.empty_truncated_fast_retry_failed", "关闭深度思考后的空正文恢复请求失败", {
@@ -779,6 +806,7 @@ export async function callLlmWithContinuation(plugin, system, user, options, opt
       break; // 续写失败就用已有内容，不让整体失败
     }
     const piece = stripModeSuggestionBlocks(extractLlmContent(data).trim());
+    usage = addLlmUsage(usage, data && data.usage);
     try {
       if (plugin && typeof plugin.addTaskMeter === "function") {
         plugin.addTaskMeter(messages.reduce((n, m) => n + String(m.content || "").length, 0), piece.length, (data && data.usage) || null);
@@ -798,11 +826,11 @@ export async function callLlmWithContinuation(plugin, system, user, options, opt
     continuations++;
     finishReason = extractLlmFinishReason(data);
   }
-  return { text, finishReason, truncated: isTruncatedFinishReason(finishReason), continuations, continuationAttempts };
+  return { text, finishReason, truncated: isTruncatedFinishReason(finishReason), continuations, continuationAttempts, usage };
 }
 
 export async function callBriefingMergeLlm(plugin, system, user, options, diagCtx) {
-  const { text, finishReason, continuations, continuationAttempts } = await callLlmWithContinuation(plugin, system, user, options, { maxContinuations: 3 });
+  const { text, finishReason, continuations, continuationAttempts, usage } = await callLlmWithContinuation(plugin, system, user, options, { maxContinuations: 3 });
   const truncated = isTruncatedFinishReason(finishReason);
   if (!String(text || "").trim()) {
     try {
@@ -827,7 +855,7 @@ export async function callBriefingMergeLlm(plugin, system, user, options, diagCt
       }, diagCtx || {}));
     } catch { /* intentionally empty */ }
   }
-  return { text, truncated, finishReason };
+  return { text, truncated, finishReason, usage };
 }
 
 export function stripModeSuggestionBlocks(text) {

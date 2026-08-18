@@ -199,9 +199,9 @@ describe("LLM 输出预算兼容", () => {
 describe("最终纪要截断恢复", () => {
   it("首次 length 且正文为空时关闭深度思考并继续恢复正文", async () => {
     const responses = [
-      { choices: [{ message: { content: "" }, finish_reason: "length" }] },
-      { choices: [{ message: { content: "" }, finish_reason: "length" }] },
-      { choices: [{ message: { content: "恢复后的完整正文" }, finish_reason: "stop" }] },
+      { choices: [{ message: { content: "" }, finish_reason: "length" }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, completion_tokens_details: { reasoning_tokens: 5 } } },
+      { choices: [{ message: { content: "" }, finish_reason: "length" }], usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14, completion_tokens_details: { reasoning_tokens: 4 } } },
+      { choices: [{ message: { content: "恢复后的完整正文" }, finish_reason: "stop" }], usage: { prompt_tokens: 12, completion_tokens: 6, total_tokens: 18 } },
     ];
     const fetchMock = vi.fn(async () => ({
       ok: true,
@@ -236,6 +236,12 @@ describe("最终纪要截断恢复", () => {
         truncated: false,
         continuations: 1,
         continuationAttempts: 1,
+        usage: {
+          promptTokens: 32,
+          completionTokens: 15,
+          reasoningTokens: 9,
+          totalTokens: 47,
+        },
       });
       expect(fetchMock).toHaveBeenCalledTimes(3);
     } finally {
@@ -282,6 +288,7 @@ describe("readLlmSseStream completion contract", () => {
     await expect(readLlmSseStream(res, () => {})).resolves.toEqual({
       content: "半截正文",
       finishReason: "aborted",
+      usage: null,
     });
   });
 
@@ -298,6 +305,23 @@ describe("readLlmSseStream completion contract", () => {
     await expect(readLlmSseStream(res, () => {})).resolves.toEqual({
       content: "完整正文",
       finishReason: "stop",
+      usage: null,
+    });
+  });
+
+  it("流式响应保留 token 与 reasoning 用量", async () => {
+    const res = {
+      body: null,
+      text: async () => [
+        'data: {"choices":[{"delta":{"content":"正文"}}]}',
+        'data: {"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":8,"total_tokens":28,"completion_tokens_details":{"reasoning_tokens":3}}}',
+        "data: [DONE]",
+      ].join("\n"),
+    };
+    await expect(readLlmSseStream(res, () => {})).resolves.toMatchObject({
+      content: "正文",
+      finishReason: "stop",
+      usage: { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 },
     });
   });
 });

@@ -78,6 +78,8 @@ import {
   speakerLabelForChannel,
 } from "./audio/channel-speakers";
 import { renderMultichannelAudioBufferSliceToWav, transcribeAudioByChannels } from "./asr/channel-transcription";
+import { BriefingCheckpointStore } from "./briefing/checkpoint-store";
+import { BriefingPipelineIncompleteError, assembleBriefingParts, buildProgrammaticTopicMap, createBriefingJobId, planBriefingParts, reconcileBriefingCheckpoint } from "./briefing/pipeline";
 
 
 
@@ -6372,22 +6374,146 @@ async function cleanTranscript(plugin, segments, ceiling) {
   return { text: parts.join("\n\n"), truncated: anyTruncated };
 }
 
-// 分段整理用的「部分」提示词：只产出本部分正文片段（无 YAML、无顶部总览），末尾给人物/标签/小结机器注释。
-function buildChunkMergePrompt(joinedChunk, partIndex, partTotal, timeRange) {
-  return `你正在整理一场超长会议/录音的**第 ${partIndex}/${partTotal} 部分**（时间段约 ${timeRange}）。请把这部分的分段转写整理成忠实、结构化的 Markdown 纪要**正文片段**。
+// 统一整理流水线的「正文部分」提示词。全局议题图只负责保持跨时段关系，正文事实仍以当前原始转写为准。
+function buildChunkMergePrompt(joinedChunk, partIndex, partTotal, timeRange, topicMap, modeGuidance) {
+  const topLevelRule = partTotal > 1
+    ? "- 只整理本部分，不复述其它部分；不要写 YAML frontmatter；不要写顶部总览/摘要 callout（顶部总览由程序统一生成）。"
+    : "- 这是唯一正文部分：按本模式要求输出完整成品正文；不要写 YAML frontmatter（由程序统一生成）。";
+  return `你正在整理一场会议/录音的**第 ${partIndex}/${partTotal} 部分**（时间段约 ${timeRange}）。请把这部分的分段转写整理成忠实、结构化的 Markdown 纪要正文。
 
 【最高优先级·忠实还原】本部分出现的所有事实、数字、判断、立场、待办、风险、关键原话一律保留，宁可写长也不要漏；只做无损整理（去口头禅、合并重复表述），不得以"概括/精炼"为名删除任何一条具体信息。禁止用"还讨论了 X""此外提到 Y"这类一句话带过本部分实际展开过的内容——该展开的要展开成完整段落。
 
 【硬性要求】
-- 只整理本部分，不复述其它部分；**不要**写 YAML frontmatter；**不要**写顶部总览/摘要 callout（顶部总览由程序统一生成）。
+${topLevelRule}
 - 用二级/三级标题组织本部分议题；按讨论实际推进顺序展开。
 - 待办用 \`- [ ] 事项：<动作>\`，能确定时再补 \`责任人：<人>\` 和 \`截止：<时间>\`；无法判断就直接省略该字段，不要写"未提及"。
 - 转写里没出现的人名/公司/数字一律不写，不编造。
 - 直接输出本部分正文 Markdown，无前言、无解释、无代码围栏。
 - 正文末尾追加三条机器注释（不渲染显示）：\`<!-- lexvoice-people: 本部分确实出现的人名，逗号分隔，没有就留空 -->\`、\`<!-- lexvoice-tags: 主题/xx 等多维标签，没有就留空 -->\`、\`<!-- lexvoice-part-summary: 本部分一句话小结 -->\`。
 
+【全程议题图·只用于理解跨时段关系】
+${topicMap || "（未生成；请严格按当前时段原始转写整理）"}
+
+【本模式的输出要求】
+${modeGuidance || "忠实、完整、结构清晰地整理当前时段。"}
+
 【本部分转写】
 ${joinedChunk}`;
+}
+
+function getBriefingCheckpointStore(plugin) {
+  if (!plugin._briefingCheckpointStore) {
+    plugin._briefingCheckpointStore = new BriefingCheckpointStore(
+      plugin.app.vault.adapter,
+      String(plugin.app.vault.configDir || ".obsidian"),
+      String(plugin.manifest && plugin.manifest.id || "lexvoice"),
+    );
+  }
+  return plugin._briefingCheckpointStore;
+}
+
+async function clearCommittedBriefingCheckpoint(plugin, meta) {
+  const id = String(meta && meta._briefingCheckpointId || "").trim();
+  if (!id) return;
+  try {
+    await getBriefingCheckpointStore(plugin).remove(id);
+    delete meta._briefingCheckpointId;
+  } catch (error) {
+    await logLlmRequestDiagnostic(plugin, "warn", "llm.briefing_checkpoint_cleanup_failed", "纪要已写入，但整理检查点未能清理", {
+      jobId: id,
+      error: diagnosticError(error),
+    });
+  }
+}
+
+function getBriefingPipelineTargetChars(plugin, repolishOptions) {
+  const detailLevel = String(repolishOptions && repolishOptions.detailLevel || "");
+  if (detailLevel === "detailed") return 18000;
+  if (detailLevel === "concise") return 32000;
+  const structure = String(repolishOptions && repolishOptions.structureLevel || plugin.settings.briefingStructureLevel || "balanced");
+  return structure === "strict" ? 20000 : 24000;
+}
+
+function buildBriefingPipelineOptionsKey(plugin, mode, repolishOptions) {
+  return JSON.stringify({
+    pipeline: 1,
+    mode,
+    promptTemplate: String(plugin.settings.activeTemplateByMode && plugin.settings.activeTemplateByMode[mode] || ""),
+    structureLevel: String(repolishOptions && repolishOptions.structureLevel || plugin.settings.briefingStructureLevel || "balanced"),
+    detailLevel: String(repolishOptions && repolishOptions.detailLevel || "balanced"),
+    fidelity: String(repolishOptions && repolishOptions.fidelity || "faithful"),
+    language: String(plugin.settings.briefingTranslationMode || "off") + ":" + String(plugin.settings.briefingTargetLanguage || ""),
+  });
+}
+
+function buildBriefingTopicMapPrompt(joined, partPlans, mode) {
+  const ranges = partPlans.map((part) => `- 第 ${part.index + 1} 部分：${formatElapsed(part.startOffsetMs)}–${formatElapsed(part.endOffsetMs)}`).join("\n");
+  return `请先为整场材料建立一份**紧凑的全局议题图**，供后续各时段分别整理时保持上下文一致。这里不是最终纪要，不要展开成长文。
+
+要求：
+- 覆盖全程主要议题、人物、决策、分歧、待办、关键数字和跨时段呼应；每项标注大致时间或对应部分。
+- 只写原始转写明确出现的内容，不猜测，不生成最终评价，不代替正文。
+- 输出 Markdown 列表，控制在 2500 字以内；不要 YAML、callout、代码围栏。
+- 当前整理模式：${mode}。
+
+【分部范围】
+${ranges}
+
+【全程原始转写】
+${joined}`;
+}
+
+function buildBriefingAuditPrompt(topicMap, parts) {
+  const summaries = parts.map((part) => `- 第 ${part.index + 1} 部分：${part.summary || "（无小结）"}`).join("\n");
+  return `请检查下面这篇分部纪要的覆盖情况。你只做审计，不重写纪要。
+
+对照全局议题图和各部分小结，检查：
+1. 是否有全局议题没有被任何部分覆盖；
+2. 是否有明显重复、互相矛盾或时序错位；
+3. 是否有部分正文疑似被截断。
+
+如果没有问题，只输出 OK。发现问题时，用简短 Markdown 列表写出“缺失 / 重复 / 矛盾 / 截断”及对应部分编号，不要补写正文。
+
+【全局议题图】
+${topicMap}
+
+【各部分小结】
+${summaries}`;
+}
+
+function mergeBriefingSedimentObjects(parts) {
+  const merged = { people: [], hotwords: {}, learningCards: [], todos: [] };
+  let found = false;
+  for (const part of (parts || [])) {
+    if (!part || !part.sedimentObjects) continue;
+    found = true;
+    const normalized = normalizeSedimentExtractionModel(part.sedimentObjects);
+    merged.people.push(...(normalized.people || []));
+    merged.learningCards.push(...(normalized.learningCards || []));
+    merged.todos.push(...(normalized.todos || []));
+    for (const [key, values] of Object.entries(normalized.hotwords || {})) {
+      if (!Array.isArray(merged.hotwords[key])) merged.hotwords[key] = [];
+      merged.hotwords[key].push(...(Array.isArray(values) ? values : []));
+    }
+  }
+  return found ? normalizeSedimentExtractionModel(merged) : null;
+}
+
+function reportBriefingPartProgress(plugin, computedMeta, checkpoint, currentPart) {
+  const session = plugin && plugin.session;
+  if (!session || typeof plugin.setSessionWorkProgress !== "function") return;
+  if (computedMeta && computedMeta.startedAt && session.startedAt && computedMeta.startedAt !== session.startedAt) return;
+  const total = Math.max(1, checkpoint.parts.length);
+  const completed = checkpoint.parts.filter(part => part.status === "complete").length;
+  plugin.setSessionWorkProgress(session, {
+    stage: "llm-merge",
+    label: total > 1 ? `AI 整理 · ${completed}/${total} 部分` : "AI 整理中",
+    percent: Math.min(86, 48 + Math.round((completed / total) * 38)),
+    detail: total > 1
+      ? `正在整理第 ${Math.min(total, Math.max(1, currentPart || completed + 1))}/${total} 部分；已完成部分会立即保存`
+      : "正在生成纪要正文",
+  });
+  try { plugin.refreshOutlineView(); } catch { /* progress rendering must not block briefing */ }
 }
 
 function renderLongSessionRawFallbackGroup(group, partIndex) {
@@ -6409,102 +6535,226 @@ function buildEmptyLlmOutputFallback() {
   return "> [!warning] AI 整理未完成\n> 未获得可用的整理正文；原始转写仍保留在当前笔记中，可以稍后从处理进度中重试。";
 }
 
-// 超长会议分段整理 + 拼接：当单次输出装不下完整纪要时，按时间切成多段分别整理，再拼成一篇。
-// 仅在 desired > ceiling 的超长场景触发（见 mergeAndPolish 的 shouldChunk）。返回 null 表示无法分段、退回单次。
+// 普通纪要统一走同一条可恢复流水线：短会是一部分，长会是多部分。每个部分完成后立即持久化，
+// 后续失败只重试未完成部分；最终正文由程序按时间顺序拼装，不再让模型重写整篇并再次引入截断风险。
 async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, originalFrontmatter, repolishOptions, ceiling, forceChunk = false) {
-  const desiredForSession = getBriefingMergeDesiredTokens({
-    durationMs: getSegmentsDurationMs(segments),
-    transcriptChars: (segments || []).reduce((sum, segment) => sum + String((segment && segment.text) || "").length, 0),
-    segmentCount: (segments || []).length,
+  const list = Array.isArray(segments) ? segments.filter(segment => segment && String(segment.text || "").trim()) : [];
+  if (!list.length) return null;
+  const fullJoined = list.map((segment, index) => formatMergeSegmentForPrompt(segment, index)).join("\n\n");
+  const preferredTargetChars = forceChunk
+    ? Math.min(16000, getBriefingPipelineTargetChars(plugin, repolishOptions))
+    : getBriefingPipelineTargetChars(plugin, repolishOptions);
+  const targetChars = Number(ceiling) > 0
+    ? Math.min(preferredTargetChars, Math.max(4000, Math.floor(Number(ceiling) * 1.5)))
+    : preferredTargetChars;
+  const partPlans = planBriefingParts(list, targetChars);
+  if (!partPlans.length) return null;
+
+  const identity = createBriefingJobId({
+    segments: list,
+    mode,
+    model: String(plugin.settings.llmModel || ""),
+    optionsKey: buildBriefingPipelineOptionsKey(plugin, mode, repolishOptions),
   });
-  const modelCeiling = Number(ceiling) || 0;
-  const safeCeiling = modelCeiling > 0 ? Math.max(2048, modelCeiling) : Math.max(8192, desiredForSession);
-  // 每组转写字符目标：组产出纪要 token ≈ 0.25×字符数，要落在 ceiling 内 → 字符目标 ≈ 3.2×ceiling（留余量给截断检测）。
-  // 再加绝对上限 36000：确保「内容真的多」的超长会议无论模型 ceiling 多高都能切成多组、逐段充分整理，
-  // 而不是因 ceiling 偏高（如 MiMo 16K → 旧公式 56000）导致 targetChars 过大、切不出多组又退回单次。
-  const targetChars = forceChunk
-    ? Math.min(24000, Math.max(8000, Math.floor(safeCeiling * 1.8)))
-    : Math.min(36000, Math.max(8000, Math.floor(safeCeiling * 3.2)));
-  const groups = splitSegmentsIntoGroups(segments, targetChars);
-  if (groups.length < 2) return null; // 切不出多组 → 退回单次
-  await logLlmRequestDiagnostic(plugin, "info", "llm.merge_long_session_chunked", "超长会议启用分段整理+拼接", {
-    mode, segmentCount: segments.length, groupCount: groups.length, ceiling: safeCeiling, targetChars,
-  });
-  const peopleContext = await buildPeopleContextForLlm(plugin);
-  const sys = "你是一位专业的文字编辑助手，擅长把分段录音转写忠实整理为结构清晰的 Markdown 纪要。第一职责是还原，不得为精炼而漏掉信息。";
-  const allPeople = [];
-  const allTags = [];
-  const partSummaries = [];
-  const partBodies = [];
-  let anyTruncated = false;
-  let rawFallbackFromPart = 0;
-  for (let i = 0; i < groups.length; i++) {
-    const g = groups[i];
-    const joinedChunk = g.map((s, j) => formatMergeSegmentForPrompt(s, j)).join("\n\n");
-    const start = formatElapsed(Number(g[0] && g[0].startOffsetMs) || 0);
-    const end = formatElapsed(Number(g[g.length - 1] && g[g.length - 1].endOffsetMs) || 0);
-    let up = buildChunkMergePrompt(joinedChunk, i + 1, groups.length, `${start}–${end}`);
-    up = applyRepolishPreferenceInstruction(up, repolishOptions, plugin.settings);
-    up = applyBriefingLanguageInstruction(up, plugin.settings);
-    const chunkSpeakerClause = buildKnownSpeakerClause(
-      resolveKnownSpeakerLabels(joinedChunk, originalFrontmatter),
-    );
-    if (chunkSpeakerClause) up = chunkSpeakerClause + "\n\n---\n\n" + up;
-    if (peopleContext) up = peopleContext + "\n\n---\n\n" + up;
-    let response;
-    try {
-      response = await callBriefingMergeLlm(plugin, sys, up, { stream: true, payload: { max_tokens: safeCeiling } }, { mode, chunked: true, part: i + 1, partTotal: groups.length });
-    } catch (e) {
-      // 已完成的分组是有效且已经产生费用的结果，不能因后续一组失败全部丢弃后再整场重跑。
-      // 从失败组开始直接保留按时间排列的原始转写，确保长会至少有完整可核对的输出。
-      rawFallbackFromPart = i + 1;
-      await logLlmRequestDiagnostic(plugin, "warn", "llm.merge_long_session_partial_fallback", "超长会议部分整理失败，保留已完成部分并用原始转写补齐后续", {
-        mode, failedPart: i + 1, partTotal: groups.length, completedParts: i, error: diagnosticError(e),
+  const store = getBriefingCheckpointStore(plugin);
+  const checkpointInput = {
+    id: identity.id,
+    sourceHash: identity.sourceHash,
+    optionsHash: identity.optionsHash,
+    mode,
+    model: String(plugin.settings.llmModel || ""),
+    parts: partPlans,
+  };
+  let checkpoint = reconcileBriefingCheckpoint(await store.load(identity.id), checkpointInput);
+  if (computedMeta && typeof computedMeta === "object") computedMeta._briefingCheckpointId = identity.id;
+  await store.save(checkpoint);
+
+  const tpl = resolveTemplatePromptForMode(plugin, mode, true);
+  let modeGuidance = applyStructureLevelInstruction(tpl, plugin.settings, repolishOptions && repolishOptions.structureLevel)
+    .replace("{{TRANSCRIPT}}", "（原始转写会按时间分部提供，请只执行模板规则，不要补写占位内容。）")
+    .replace("{{STRUCTURE_INSTRUCTION}}", "");
+  modeGuidance = applyRepolishPreferenceInstruction(modeGuidance, repolishOptions, plugin.settings);
+  modeGuidance = applyBriefingLanguageInstruction(modeGuidance, plugin.settings);
+  modeGuidance = truncateForLlmPrompt(modeGuidance, 12000);
+
+  if (!String(checkpoint.topicMap || "").trim()) {
+    const timelineFallback = buildProgrammaticTopicMap(partPlans, formatElapsed);
+    if (partPlans.length === 1) {
+      checkpoint.topicMap = timelineFallback;
+      checkpoint.topicMapSource = "timeline";
+      checkpoint.topicMapFinishReason = "not-needed";
+    } else try {
+      const mapResult = await callBriefingMergeLlm(
+        plugin,
+        "你是会议信息架构助手。只建立紧凑、可核对的全局议题图，不撰写最终纪要。",
+        buildBriefingTopicMapPrompt(fullJoined, partPlans, mode),
+        { stream: true, thinkingMode: "fast", payload: { max_tokens: 4096 } },
+        { purpose: "briefing-topic-map", mode, partTotal: partPlans.length, transcriptChars: fullJoined.length },
+      );
+      const mapText = String(mapResult.text || "").trim();
+      checkpoint.topicMap = mapText && !mapResult.truncated ? mapText : timelineFallback;
+      checkpoint.topicMapSource = mapText && !mapResult.truncated ? "llm" : "timeline";
+      checkpoint.topicMapFinishReason = String(mapResult.finishReason || "");
+      checkpoint.topicMapUsage = mapResult.usage;
+    } catch (error) {
+      checkpoint.topicMap = timelineFallback;
+      checkpoint.topicMapSource = "timeline";
+      checkpoint.topicMapFinishReason = "error";
+      await logLlmRequestDiagnostic(plugin, "warn", "llm.briefing_topic_map_fallback", "全局议题图生成失败，已改用时间索引继续整理", {
+        mode, jobId: identity.id, error: diagnosticError(error),
       });
-      for (let j = i; j < groups.length; j++) {
-        partBodies.push(renderLongSessionRawFallbackGroup(groups[j], j + 1));
-      }
-      break;
     }
-    const { text, truncated } = response;
-    if (truncated) anyTruncated = true;
-    // 解析并剥掉本部分机器注释，避免散落进正文
-    const pp = parsePeopleFromOutput(String(text || ""));
-    const tt = parseSuggestedTagsFromOutput(pp.cleaned);
-    let body = tt.cleaned;
-    const sm = body.match(/<!--\s*lexvoice-part-summary\s*:\s*([\s\S]*?)\s*-->/i);
-    if (sm) { partSummaries.push(sm[1].trim()); body = body.replace(sm[0], ""); }
-    body = body.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim(); // 去模型偶发的 frontmatter
-    body = stripModeSuggestionBlocks(body).trim();
-    for (const p of (pp.people || [])) allPeople.push(p);
-    for (const p of (tt.people || [])) allPeople.push(p);
-    for (const t of (tt.tags || [])) allTags.push(t);
-    if (!body) {
-      rawFallbackFromPart = rawFallbackFromPart || i + 1;
-      partBodies.push(renderLongSessionRawFallbackGroup(g, i + 1));
-      continue;
-    }
-    partBodies.push(`## 第 ${i + 1} 部分 · ${start}–${end}\n\n${body}`);
+    await store.save(checkpoint);
   }
-  // 顶部总览：拼各部分小结
-  const overviewLines = partSummaries.length
-    ? partSummaries.map((s, i) => `> ${i + 1}. ${s}`).join("\n")
-    : `> 本纪要由超长录音按时间分 ${groups.length} 部分整理后拼接而成。`;
-  const overview = `> [!abstract] 全程概览（按时间分 ${groups.length} 部分整理）\n${overviewLines}`;
-  const bodyMd = overview + "\n\n" + partBodies.join("\n\n");
-  // 聚合人物/标签去重，作为机器注释附末尾交给 postProcess 装配 frontmatter
-  const people = mergeUniqueStrings([], allPeople);
-  const tags = mergeUniqueStrings([], allTags).filter(t => t && !/^lexvoice\//.test(t)).slice(0, 9);
-  const machine = `\n\n<!-- lexvoice-people: ${people.join(", ")} -->\n<!-- lexvoice-tags: ${tags.join(", ")} -->`;
-  const fullJoined = segments.map((s, i) => formatMergeSegmentForPrompt(s, i)).join("\n\n");
-  const audited = appendEntityEvidenceWarning(bodyMd + machine, fullJoined);
-  const chunkedNotice = `> [!info] 超长会议 · 已分段整理\n> 本次录音较长，已按时间自动分成 ${groups.length} 部分分别整理后拼接，确保不因单次输出长度上限而丢失后半段内容。`;
-  const rawFallbackNotice = rawFallbackFromPart
-    ? `> [!warning] 部分内容使用原始转写保底\n> 第 ${rawFallbackFromPart} 部分起的 AI 整理未完成。此前已完成的整理结果已保留，后续内容按时间顺序写入原始转写，避免重复计费或遗漏正文。`
+
+  const peopleContext = await buildPeopleContextForLlm(plugin);
+  const metaPrefix = buildSessionMetaPrefix(computedMeta, mode);
+  const meetingWorkbenchPrompt = buildMeetingWorkbenchPrompt(computedMeta && computedMeta.meetingWorkbench);
+  const system = "你是一位专业的文字编辑助手。请把当前时段原始转写忠实整理为完整、可读的 Markdown 正文。第一职责是还原信息，不得为了精炼而遗漏事实。";
+  for (const plan of partPlans) {
+    const part = checkpoint.parts[plan.index];
+    if (part && part.status === "complete" && String(part.text || "").trim()) continue;
+    part.status = "running";
+    part.attempts = Math.max(0, Number(part.attempts) || 0) + 1;
+    part.error = "";
+    await store.save(checkpoint);
+    reportBriefingPartProgress(plugin, computedMeta, checkpoint, plan.index + 1);
+
+    const joinedChunk = plan.segments.map((segment, index) => formatMergeSegmentForPrompt(segment, index)).join("\n\n");
+    const start = formatElapsed(plan.startOffsetMs);
+    const end = formatElapsed(plan.endOffsetMs);
+    let prompt = buildChunkMergePrompt(joinedChunk, plan.index + 1, partPlans.length, `${start}–${end}`, checkpoint.topicMap, modeGuidance);
+    const speakerClause = buildKnownSpeakerClause(resolveKnownSpeakerLabels(joinedChunk, originalFrontmatter));
+    const sharedContext = [peopleContext, metaPrefix, meetingWorkbenchPrompt, speakerClause].filter(Boolean).join("\n\n---\n\n");
+    if (sharedContext) prompt = sharedContext + "\n\n---\n\n" + prompt;
+    prompt = appendSedimentPreExtractionInstruction(prompt);
+    const requestedPartTokens = Math.max(8192, Math.ceil(plan.chars * 1.2));
+    const partMaxTokens = Number(ceiling) > 0 ? Math.min(Math.max(2048, Number(ceiling)), requestedPartTokens) : requestedPartTokens;
+
+    try {
+      const response = await callBriefingMergeLlm(
+        plugin,
+        system,
+        prompt,
+        { stream: true, thinkingMode: "fast", payload: { max_tokens: partMaxTokens } },
+        { purpose: "briefing-part", mode, jobId: identity.id, part: plan.index + 1, partTotal: partPlans.length, transcriptChars: joinedChunk.length },
+      );
+      const sedimentPreExtraction = extractSedimentPreExtractionBlock(String(response.text || ""));
+      const parsedPeople = parsePeopleFromOutput(sedimentPreExtraction.cleaned);
+      const parsedTags = parseSuggestedTagsFromOutput(parsedPeople.cleaned);
+      let body = parsedTags.cleaned;
+      const summaryMatch = body.match(/<!--\s*lexvoice-part-summary\s*:\s*([\s\S]*?)\s*-->/i);
+      const summary = summaryMatch ? summaryMatch[1].trim() : "";
+      if (summaryMatch) body = body.replace(summaryMatch[0], "");
+      body = stripModeSuggestionBlocks(body.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "")).trim();
+      const wrappedBody = partPlans.length > 1 ? `## 第 ${plan.index + 1} 部分 · ${start}–${end}\n\n${body}` : body;
+      Object.assign(part, {
+        status: body && !response.truncated ? "complete" : (body ? "partial" : "failed"),
+        text: wrappedBody,
+        summary,
+        people: mergeUniqueStrings([], (parsedPeople.people || []).concat(parsedTags.people || [])),
+        tags: mergeUniqueStrings([], parsedTags.tags || []),
+        sedimentObjects: sedimentPreExtraction.objects || null,
+        finishReason: String(response.finishReason || ""),
+        usage: response.usage,
+        error: body
+          ? (response.truncated ? "本部分在续写后仍被输出上限截断" : "")
+          : "本部分没有返回可见正文",
+        updatedAt: new Date().toISOString(),
+      });
+      if (part.status !== "complete") {
+        checkpoint.status = "partial";
+        await store.save(checkpoint);
+        await logLlmRequestDiagnostic(plugin, "warn", "llm.briefing_part_incomplete", "纪要分部未完整生成，已保存检查点等待精确重试", {
+          mode, jobId: identity.id, part: plan.index + 1, partTotal: partPlans.length,
+          finishReason: part.finishReason, outputChars: body.length, usage: part.usage,
+        });
+        throw new BriefingPipelineIncompleteError(
+          `纪要整理部分完成：${checkpoint.parts.filter(item => item.status === "complete").length}/${partPlans.length} 部分已完成；第 ${plan.index + 1} 部分需要重试`,
+          checkpoint.parts.filter(item => item.status === "complete").length,
+          partPlans.length,
+          [plan.index],
+        );
+      }
+      await store.save(checkpoint);
+      reportBriefingPartProgress(plugin, computedMeta, checkpoint, plan.index + 2);
+    } catch (error) {
+      if (error instanceof BriefingPipelineIncompleteError) throw error;
+      part.status = "failed";
+      part.error = getErrorMessage(error);
+      part.updatedAt = new Date().toISOString();
+      checkpoint.status = "partial";
+      await store.save(checkpoint);
+      await logLlmRequestDiagnostic(plugin, "warn", "llm.briefing_part_failed", "纪要分部生成失败，已保存此前结果等待精确重试", {
+        mode, jobId: identity.id, part: plan.index + 1, partTotal: partPlans.length,
+        completedParts: checkpoint.parts.filter(item => item.status === "complete").length,
+        error: diagnosticError(error),
+      });
+      throw new BriefingPipelineIncompleteError(
+        `纪要整理部分完成：${checkpoint.parts.filter(item => item.status === "complete").length}/${partPlans.length} 部分已完成；第 ${plan.index + 1} 部分失败：${getErrorMessage(error)}`,
+        checkpoint.parts.filter(item => item.status === "complete").length,
+        partPlans.length,
+        [plan.index],
+      );
+    }
+  }
+
+  const assembledParts = assembleBriefingParts(checkpoint.parts);
+  const summaries = checkpoint.parts.map(part => part.summary).filter(Boolean);
+  const overview = partPlans.length > 1
+    ? `> [!abstract] 全程概览\n${summaries.length ? summaries.map((summary, index) => `> ${index + 1}. ${summary}`).join("\n") : "> 已按时间顺序完成全部内容整理。"}\n\n`
     : "";
-  const topNotices = [chunkedNotice, rawFallbackNotice, anyTruncated ? BRIEFING_TRUNCATION_WARNING : ""].filter(Boolean);
-  const topNotice = topNotices.join("\n\n");
-  return postProcessBriefingOutput(audited, mode, computedMeta, originalFrontmatter, frontmatterBaseModeKey(plugin, mode), topNotice);
+  const people = mergeUniqueStrings([], checkpoint.parts.flatMap(part => part.people || []));
+  const tags = mergeUniqueStrings([], checkpoint.parts.flatMap(part => part.tags || [])).filter(tag => tag && !/^lexvoice\//.test(tag)).slice(0, 9);
+  const machine = `\n\n<!-- lexvoice-people: ${people.join(", ")} -->\n<!-- lexvoice-tags: ${tags.join(", ")} -->`;
+  checkpoint.assembledBody = appendEntityEvidenceWarning(overview + assembledParts + machine, fullJoined);
+  checkpoint.status = "assembled";
+  await store.save(checkpoint);
+
+  if (checkpoint.auditStatus !== "complete") {
+    if (partPlans.length === 1) {
+      checkpoint.auditStatus = "complete";
+      checkpoint.auditText = "OK";
+      checkpoint.auditFinishReason = "not-needed";
+    } else try {
+      const audit = await callBriefingMergeLlm(
+        plugin,
+        "你是纪要完整性审计助手。只报告覆盖问题，不重写正文。",
+        buildBriefingAuditPrompt(checkpoint.topicMap, checkpoint.parts),
+        { stream: false, thinkingMode: "fast", priority: "background", payload: { max_tokens: 2048 } },
+        { purpose: "briefing-audit", mode, jobId: identity.id, partTotal: partPlans.length },
+      );
+      checkpoint.auditStatus = "complete";
+      checkpoint.auditText = String(audit.text || "").trim();
+      checkpoint.auditFinishReason = String(audit.finishReason || "");
+      checkpoint.auditUsage = audit.usage;
+      if (checkpoint.auditText && !/^OK[。.!！]?$/i.test(checkpoint.auditText)) {
+        await logLlmRequestDiagnostic(plugin, "warn", "llm.briefing_audit_findings", "纪要完整性审计发现需要复核的项目", {
+          mode, jobId: identity.id, findingsChars: checkpoint.auditText.length,
+        });
+      }
+    } catch (error) {
+      checkpoint.auditStatus = "failed";
+      checkpoint.auditText = getErrorMessage(error);
+      await logLlmRequestDiagnostic(plugin, "warn", "llm.briefing_audit_failed", "纪要正文已完成，但完整性审计未完成", {
+        mode, jobId: identity.id, error: diagnosticError(error),
+      });
+    }
+    await store.save(checkpoint);
+  }
+
+  await logLlmRequestDiagnostic(plugin, "info", "llm.briefing_pipeline_completed", "纪要整理流水线已完成并保存检查点", {
+    mode,
+    jobId: identity.id,
+    partTotal: partPlans.length,
+    topicMapSource: checkpoint.topicMapSource,
+    partUsage: checkpoint.parts.map(part => ({ part: part.index + 1, finishReason: part.finishReason, outputChars: part.text.length, usage: part.usage })),
+    auditFinishReason: checkpoint.auditFinishReason,
+    auditUsage: checkpoint.auditUsage,
+  });
+  const polished = postProcessBriefingOutput(checkpoint.assembledBody, mode, computedMeta, originalFrontmatter, frontmatterBaseModeKey(plugin, mode), "");
+  const sedimentObjects = mergeBriefingSedimentObjects(checkpoint.parts);
+  return sedimentObjects ? appendSedimentPreExtractionBlock(polished, sedimentObjects) : polished;
 }
 
 // 从转写正文里读出本次录音的说话人（多声道分离得到）；已改名的取真实姓名，否则用「说话人N」。
@@ -6555,24 +6805,21 @@ async function mergeAndPolish(plugin, segments, mode, recruitContext, sessionMet
     transcriptChars: joined.length,
     segmentCount: segments.length,
   }, plugin.settings, runtimeCeiling);
-  // 超长会议工程兜底：当「内容期望输出」明显超过「模型安全上限」（单次必然截断）时，按时间分段整理再拼接，
-  // 而不是把 max_tokens 抬过模型上限被拒。仅普通纪要模式触发；招聘评估是整体研判、文本导入已预压缩，不分段。
   const mergeCeiling = runtimeCeiling;
-  const mergeDesired = getBriefingMergeDesiredTokens({
-    durationMs: getSegmentsDurationMs(segments) || getSessionMetaDurationMs(computedMeta),
-    transcriptChars: joined.length,
-    segmentCount: segments.length,
-  });
-  const inputNeedsChunking = joined.length >= 240000;
-  const modelNeedsChunking = mergeCeiling > 0 && mergeDesired >= mergeCeiling * 1.5;
-  if (mode !== "recruit" && !isRecruitTextImport && !preSummarized && segments.length >= 2 && (modelNeedsChunking || inputNeedsChunking)) {
-    try {
-      const chunked = await mergeAndPolishLongSession(plugin, segments, mode, computedMeta, originalFrontmatter, repolishOptions, mergeCeiling);
-      if (chunked != null) return chunked;
-    } catch (e) {
-      // 分段整理失败 → 退回单次整理（截断告警仍兜底），不让超长会议彻底无输出
-      await logLlmRequestDiagnostic(plugin, "warn", "llm.merge_long_session_fallback", "分段整理失败，退回单次整理", { mode, error: diagnosticError(e) });
-    }
+  // 普通纪要无论长短都走同一条可恢复流水线。招聘评估/岗位画像仍保留专用的全局研判路径，
+  // 文本导入若已做过预摘要也不再二次分部，避免重复有损压缩。
+  if (mode !== "recruit" && !isRecruitTextImport && !preSummarized) {
+    const pipelined = await mergeAndPolishLongSession(
+      plugin,
+      segments,
+      mode,
+      computedMeta,
+      originalFrontmatter,
+      repolishOptions,
+      mergeCeiling,
+      false,
+    );
+    if (pipelined != null) return pipelined;
   }
   const tpl = resolveTemplatePromptForMode(plugin, mode, true);
   const sys = mode === "recruit"
@@ -6640,7 +6887,7 @@ async function mergeAndPolish(plugin, segments, mode, recruitContext, sessionMet
   // 客户端总超时 abort，避免"扣了钱却因超时拿不到结果"的浪费（符合总纲：不因工程缺陷浪费）。
   let mergeResult;
   try {
-    mergeResult = await callBriefingMergeLlm(plugin, sys, userPrompt, { stream: true, payload: { max_tokens: briefingMergeMaxTokens } }, { mode, segmentCount: segments.length, transcriptChars: joined.length });
+    mergeResult = await callBriefingMergeLlm(plugin, sys, userPrompt, { stream: true, thinkingMode: "fast", payload: { max_tokens: briefingMergeMaxTokens } }, { mode, segmentCount: segments.length, transcriptChars: joined.length });
   } catch (e) {
     // 上下文限制不是普通网络重试问题：把同一份超长 prompt 再发一遍只会重复失败或重复计费。
     // 第一次明确收到上下文超限后，立即切换到时间分段路径；分段失败的部分由原始转写保底。
@@ -14558,10 +14805,11 @@ class LexVoicePlugin extends obsidian.Plugin {
     const title = type === "transcribe" ? `分段转写 · 第 ${Math.max(0, Number(task.segmentIndex) || 0) + 1} 段`
       : type === "merge" ? "AI 整理"
         : type === "generate-prompt" ? "生成提示词" : "后台任务";
+    const isPartialBriefing = type === "merge" && /纪要整理部分完成/.test(String(task.lastError || ""));
     const stageLabel = task.status === "running" || task.status === LIVE_ASR_TASK_STATUS ? "正在处理"
       : task.status === "blocked" ? "等待修复配置"
         : task.status === "missing" ? "缺少源文件"
-          : task.status === "failed" ? "本次处理失败" : "等待处理";
+          : task.status === "failed" ? (isPartialBriefing ? "部分完成 · 等待重试" : "本次处理失败") : "等待处理";
     const status = task.status === "running" || task.status === LIVE_ASR_TASK_STATUS || task.status === "processing"
       ? "running"
       : task.status === "failed" || task.status === "blocked" || task.status === "missing"
@@ -17866,8 +18114,9 @@ class LexVoicePlugin extends obsidian.Plugin {
     this.refreshOutlineView();
     new obsidian.Notice(textImportSession ? "文本已读取，AI 结构化整理中…" : "所有段已处理，AI 合并润色中…");
 
-    let polished = ""; let mergeError = null; let nonRetryableMergeError = false;
+    let polished = ""; let mergeError = null; let nonRetryableMergeError = false; let commitError = false;
     let taskMeter = null;
+    let finalSessionMeta = null;
     try {
       this.setSessionWorkProgress(session, {
         stage: "workbench",
@@ -17894,6 +18143,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         sourceMeta: session.sourceMeta || null,
         meetingWorkbench: normalizeMeetingWorkbench(session.meetingWorkbench),
       };
+      finalSessionMeta = sessionMeta;
       this.setSessionWorkProgress(session, {
         stage: "llm-merge",
         label: "AI 整理中",
@@ -17916,6 +18166,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         sourceUrl: s.sourceUrl,
         rawText: s.rawText,
       })), session.mode, session.recruitContext, sessionMeta);
+      session._briefingCheckpointId = sessionMeta._briefingCheckpointId || "";
       this.setSessionWorkProgress(session, {
         stage: "write-note",
         label: "写入纪要",
@@ -17962,7 +18213,7 @@ class LexVoicePlugin extends obsidian.Plugin {
           sourceMeta: session.sourceMeta || null,
           textImportSources: session.textImportSources || [],
           recruitContext: session.recruitContext || null,
-          sessionMeta: {
+          sessionMeta: finalSessionMeta || {
             startedAt: session.startedAt,
             duration: isTextImportSession(session) ? "" : (lastSeg ? formatElapsed(lastSeg.endOffsetMs || 0) : ""),
             source: session.source || "",
@@ -17973,20 +18224,71 @@ class LexVoicePlugin extends obsidian.Plugin {
         });
       }
       session.finalizationError = getErrorMessage(mergeError);
+      const partialBriefing = mergeError instanceof BriefingPipelineIncompleteError;
       this.setSessionWorkProgress(session, {
         stage: nonRetryableMergeError ? "merge-failed" : "merge-retrying",
-        label: nonRetryableMergeError ? "AI 整理失败" : "AI 整理等待重试",
+        label: nonRetryableMergeError ? "AI 整理失败" : partialBriefing ? "纪要部分完成" : "AI 整理等待重试",
         percent: null,
         detail: nonRetryableMergeError
           ? "原始转写已保留；请修复大模型配置后重新整理"
-          : "原始转写已保留；后台队列会按退避规则再次尝试",
+          : partialBriefing
+            ? `${mergeError.message}；已完成部分和原始转写均已保存`
+            : "原始转写已保留；后台队列会按退避规则再次尝试",
       });
     }
 
-    if ((this.settings.consolidatedLayout || textImportSession) && !mergeError) {
-      await this.rewriteConsolidated(writeSession, polished);
+    if (!mergeError) {
+      try {
+        if (this.settings.consolidatedLayout || textImportSession) {
+          await this.rewriteConsolidated(writeSession, polished);
+        } else {
+          await this.appendPolishBlock(writeSession, polished, null, false);
+        }
+      } catch (writeError) {
+        commitError = true;
+        mergeError = writeError;
+        session.finalizationError = getErrorMessage(writeError);
+        await this.logDiagnostic("error", "briefing.commit_failed", "纪要正文已生成，但写入 Markdown 失败", {
+          mode: session.mode,
+          mdPath: session.mdPath,
+          checkpointId: finalSessionMeta && finalSessionMeta._briefingCheckpointId || "",
+          error: diagnosticError(writeError),
+        });
+        await this.queue.add({
+          type: "merge",
+          sessionId: session.id,
+          mdPath: session.mdPath,
+          mode: session.mode,
+          segments: segmentsForFinal.map(s => ({
+            index: s.index, startOffsetMs: s.startOffsetMs, endOffsetMs: s.endOffsetMs, text: s.text,
+            audioName: s.audioName,
+            audioStartOffsetMs: s.audioStartOffsetMs,
+            audioEndOffsetMs: s.audioEndOffsetMs,
+            sourceName: s.sourceName,
+            sourcePath: s.sourcePath,
+            sourceUrl: s.sourceUrl,
+            rawText: s.rawText,
+          })),
+          source: session.source || "",
+          sourceMeta: session.sourceMeta || null,
+          textImportSources: session.textImportSources || [],
+          recruitContext: session.recruitContext || null,
+          sessionMeta: finalSessionMeta,
+          lastError: `纪要写入失败：${getErrorMessage(writeError)}`,
+        });
+        this.setSessionWorkProgress(session, {
+          stage: "write-retrying",
+          label: "纪要写入等待重试",
+          percent: null,
+          detail: "AI 整理结果已保存，不会重复调用模型；稍后只重试写入",
+        });
+      }
     } else {
       await this.appendPolishBlock(writeSession, polished, mergeError, nonRetryableMergeError);
+    }
+    if (!mergeError && finalSessionMeta && finalSessionMeta._briefingCheckpointId) {
+      await clearCommittedBriefingCheckpoint(this, finalSessionMeta);
+      session._briefingCheckpointId = "";
     }
 
     if (!mergeError) {
@@ -18045,7 +18347,11 @@ class LexVoicePlugin extends obsidian.Plugin {
     new obsidian.Notice(mergeError
       ? (nonRetryableMergeError
         ? `AI 整理失败：${formatLlmFailureIssue(mergeError.message || mergeError)}`
-        : "合并润色失败，已加入重试队列")
+        : commitError
+          ? "纪要正文已生成，写入失败，已加入重试队列"
+          : mergeError instanceof BriefingPipelineIncompleteError
+          ? `${mergeError.message}，已加入精确重试`
+          : "AI 整理未完成，已加入重试队列")
       : "LexVoice 处理完成");
 
     if (this.settings.autoOpenNoteAfterFinish) {
@@ -20371,6 +20677,7 @@ ${source}`;
       rawText: s.rawText,
     })), mode, null, sessionMeta);
     await this.rewriteConsolidated(session, polished);
+    await clearCommittedBriefingCheckpoint(this, sessionMeta);
     let finalFile = this.app.vault.getAbstractFileByPath(session.mdPath);
     const renamed = await this.renameMarkdownWithGeneratedTitle(session.mdPath, polished, mode);
     if (renamed instanceof obsidian.TFile) {
@@ -20759,6 +21066,7 @@ ${source}`;
         mode,
         versionStyle,
       );
+      await clearCommittedBriefingCheckpoint(this, sessionMeta);
       let versionCacheError = "";
       try {
         await this.saveLexVoiceVersion(dailyTargetFile, latestSourceContent, segments, {
@@ -21941,6 +22249,7 @@ ${source}`;
       next = merged.content + block;
     }
     await this.app.vault.modify(file, next);
+    await clearCommittedBriefingCheckpoint(this, task.sessionMeta);
     let targetFile = file;
     const recruitContext = task.mode === "recruit"
       ? await this.resolveRecruitProjectContext(task.recruitContext || null)
