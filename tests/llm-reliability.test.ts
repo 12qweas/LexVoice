@@ -4,7 +4,7 @@ vi.mock("obsidian", () => ({
   requestUrl: vi.fn(),
 }));
 
-import { fetchLlmModelList, getLlmConfigIssue, getNextLlmOutputBudget, isLlmContextLimitError, isLlmOutputBudgetError, isLlmOutputParameterError, isTransientLlmError, readLlmSseStream, requestLlmChatCompletion, requestLlmChatCompletionViaObsidian } from "../src/llm/core";
+import { callLlmWithContinuation, fetchLlmModelList, getLlmConfigIssue, getNextLlmOutputBudget, isLlmContextLimitError, isLlmOutputBudgetError, isLlmOutputParameterError, isTransientLlmError, readLlmSseStream, requestLlmChatCompletion, requestLlmChatCompletionViaObsidian } from "../src/llm/core";
 import { applyLearnedLlmCapability, getEffectiveLlmOutputBudget, getLearnedLlmOutputCeiling, getLearnedLlmOutputParameter, rememberLlmOutputCeiling, resetLearnedLlmCapabilities } from "../src/llm/output-budget";
 import { DashScopeStreamingClient, OpenAIRealtimeTranscriptionClient, OpenAIRealtimeTranslationClient } from "../src/asr/clients";
 import { assertSafeServiceEndpoint, canOmitServiceApiKey, getServiceEndpointSecurityIssue, isLocalLlmEndpoint, isSharedAddressSpaceHost } from "../src/shared/util-llm-endpoint";
@@ -193,6 +193,53 @@ describe("LLM 输出预算兼容", () => {
     expect(getNextLlmOutputBudget({ payload: { max_tokens: 128000 } })).toBe(64000);
     expect(getNextLlmOutputBudget({ payload: { max_tokens: 8192 } })).toBe(4096);
     expect(getNextLlmOutputBudget({ payload: { max_tokens: 4096 } })).toBe(0);
+  });
+});
+
+describe("最终纪要截断恢复", () => {
+  it("首次 length 且正文为空时关闭深度思考并继续恢复正文", async () => {
+    const responses = [
+      { choices: [{ message: { content: "" }, finish_reason: "length" }] },
+      { choices: [{ message: { content: "" }, finish_reason: "length" }] },
+      { choices: [{ message: { content: "恢复后的完整正文" }, finish_reason: "stop" }] },
+    ];
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => responses.shift(),
+    }));
+    vi.stubGlobal("window", {
+      fetch: fetchMock,
+      setTimeout: globalThis.setTimeout.bind(globalThis),
+      clearTimeout: globalThis.clearTimeout.bind(globalThis),
+    });
+    try {
+      const plugin = {
+        settings: {
+          llmEndpoint: "https://api.deepseek.com",
+          llmApiKey: "test-key",
+          llmModel: "deepseek-v4-flash",
+          thinkingMode: "reasoning",
+        },
+        addTaskMeter: vi.fn(),
+      };
+      const result = await callLlmWithContinuation(
+        plugin,
+        "system",
+        "user",
+        { stream: false, thinkingMode: "reasoning", payload: { max_tokens: 128000 } },
+        { maxContinuations: 3 },
+      );
+
+      expect(result).toMatchObject({
+        text: "恢复后的完整正文",
+        finishReason: "stop",
+        truncated: false,
+        continuations: 1,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
