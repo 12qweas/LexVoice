@@ -115,6 +115,12 @@ describe("hardware channel speaker mapping", () => {
     });
   });
 
+  it("keeps ASR diarization mappings beyond the four hardware-channel limit", () => {
+    const mappings = normalizeSpeakerMappings({ "spk-6": { personName: "第六位发言人" } }, ["spk-1", "spk-6"]);
+    expect(Object.keys(mappings)).toEqual(["spk-1", "spk-6"]);
+    expect(mappings["spk-6"]).toMatchObject({ channel: 6, label: "说话人6", personName: "第六位发言人" });
+  });
+
   it("can remap a display name without deleting the channel anchor", () => {
     const markdown = [
       "<!-- lexvoice-speaker:spk-1 -->",
@@ -132,10 +138,58 @@ describe("hardware channel speaker mapping", () => {
     expect(first.markdown).toContain("**胡女士：** 先说第一件事。");
     expect(first.markdown).toContain("**说话人 2：** 我来补充。");
 
-    const remapped = replaceSpeakerDisplayName(first.markdown, "spk-1", "胡悲伤");
+    const remapped = replaceSpeakerDisplayName(first.markdown, "spk-1", "张女士");
     expect(remapped.replacements).toBe(2);
     expect(remapped.markdown).not.toContain("**胡女士：**");
-    expect(remapped.markdown).toContain("**胡悲伤：**");
+    expect(remapped.markdown).toContain("**张女士：**");
+  });
+
+  it("adds stable anchors when confirming names in an unanchored diarized transcript", () => {
+    const source = [
+      "[00:00] [说话人1] 我负责产品方案。",
+      "[01:45] [说话人2] 我补充预算信息。",
+    ].join("\n");
+    const confirmed = replaceSpeakerDisplayName(source, "spk-1", "胡女士");
+    expect(confirmed.replacements).toBe(1);
+    expect(confirmed.markdown).toContain("<!-- lexvoice-speaker:spk-1 -->");
+    expect(confirmed.markdown).toContain("[00:00] **胡女士：** 我负责产品方案。");
+
+    const corrected = replaceSpeakerDisplayName(confirmed.markdown, "spk-1", "张女士");
+    expect(corrected.replacements).toBe(1);
+    expect(corrected.markdown).toContain("[00:00] **张女士：** 我负责产品方案。");
+    expect(corrected.markdown).not.toContain("**胡女士：**");
+  });
+
+  it("keeps diarization speaker IDs above the hardware channel limit", () => {
+    const source = "[说话人6] 我补充第六位发言人的观点。";
+    const confirmed = replaceSpeakerDisplayName(source, "spk-6", "第六位发言人");
+    expect(confirmed.replacements).toBe(1);
+    expect(confirmed.markdown).toContain("<!-- lexvoice-speaker:spk-6 -->");
+    expect(confirmed.markdown).toContain("**第六位发言人：**");
+  });
+
+  it("replaces generic speaker references inside briefing prose with stable inline anchors", () => {
+    const source = [
+      "---",
+      "lexvoice_speakers:",
+      "  spk-2:",
+      "    label: 说话人2",
+      "---",
+      "",
+      "## 背景",
+      "说话人2回顾了项目经历，随后说话人1补充了部署风险。",
+      "lexvoice-people: 说话人1, 说话人2",
+    ].join("\n");
+    const confirmed = replaceSpeakerDisplayName(source, "spk-2", "李经理");
+    expect(confirmed.replacements).toBe(1);
+    expect(confirmed.markdown).toContain("<!-- lexvoice-speaker-ref:spk-2 -->李经理<!-- lexvoice-speaker-ref-end:spk-2 -->回顾了项目经历");
+    expect(confirmed.markdown).toContain("label: 说话人2");
+    expect(confirmed.markdown).toContain("lexvoice-people: 说话人1, 说话人2");
+
+    const corrected = replaceSpeakerDisplayName(confirmed.markdown, "spk-2", "王总");
+    expect(corrected.replacements).toBe(1);
+    expect(corrected.markdown).toContain("<!-- lexvoice-speaker-ref:spk-2 -->王总<!-- lexvoice-speaker-ref-end:spk-2 -->回顾了项目经历");
+    expect(corrected.markdown).not.toContain(">李经理<");
   });
 });
 

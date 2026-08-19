@@ -312,6 +312,21 @@ export function normalizeLexVoiceSettings(savedData: unknown): PluginSettings {
     s.transcribeProviders[id] = provider;
   }
   s.activeTranscribeProvider = firstString(defaults.activeTranscribeProvider, speech.activeProviderId, raw.activeTranscribeProvider);
+  s.importTranscribeProvider = firstString(
+    defaults.importTranscribeProvider,
+    speech.importProviderId,
+    raw.importTranscribeProvider,
+  );
+  s.importSpeakerDiarization = firstBoolean(
+    defaults.importSpeakerDiarization,
+    speech.importSpeakerDiarization,
+    raw.importSpeakerDiarization,
+  );
+  s.importSpeakerCount = Math.max(0, Math.min(100, Math.floor(firstNumber(
+    defaults.importSpeakerCount,
+    speech.importSpeakerCount,
+    raw.importSpeakerCount,
+  ))));
   s.transcribeEndpoint = firstString(defaults.transcribeEndpoint, speech.compatEndpoint, raw.transcribeEndpoint);
   s.transcribeApiKey = firstString(defaults.transcribeApiKey, speech.compatApiKey, raw.transcribeApiKey);
   s.transcribeModel = firstString(defaults.transcribeModel, speech.compatModel, raw.transcribeModel);
@@ -478,18 +493,6 @@ export function normalizeLexVoiceSettings(savedData: unknown): PluginSettings {
     s.activeTemplateByMode[template.id] = template.id;
   }
 
-  // 快速口述：专用转写服务 + 自定义整理提示词。字段强制成字符串，缺省空串。
-  const quickDictation = asRecord(raw.quickDictation);
-  const quickAsr = asRecord(firstRecord(quickDictation.asr, raw.quickDictationAsr));
-  s.quickDictationAsr = {
-    endpoint: firstString(defaults.quickDictationAsr.endpoint, quickAsr.endpoint).trim(),
-    apiKey: firstString(defaults.quickDictationAsr.apiKey, quickAsr.apiKey).trim(),
-    model: firstString(defaults.quickDictationAsr.model, quickAsr.model).trim(),
-    language: firstString(defaults.quickDictationAsr.language, quickAsr.language).trim(),
-  };
-  s.quickDictationPrompt = firstString(defaults.quickDictationPrompt, quickDictation.prompt, raw.quickDictationPrompt);
-  s.quickDictationTarget = firstEnum(["editor", "clipboard"] as const, defaults.quickDictationTarget, quickDictation.target, raw.quickDictationTarget);
-
   return s;
 }
 
@@ -527,6 +530,9 @@ export function serializeLexVoiceSettings(s: PluginSettings): PersistedPluginSet
     },
     speech: {
       activeProviderId: s.activeTranscribeProvider,
+      importProviderId: s.importTranscribeProvider,
+      importSpeakerDiarization: s.importSpeakerDiarization !== false,
+      importSpeakerCount: Math.max(0, Math.min(100, Math.floor(Number(s.importSpeakerCount) || 0))),
       compatEndpoint: s.transcribeEndpoint,
       compatApiKey: s.transcribeApiKey,
       compatModel: s.transcribeModel,
@@ -622,11 +628,6 @@ export function serializeLexVoiceSettings(s: PluginSettings): PersistedPluginSet
       available: s.availableUpdate || null,
       lastError: s.lastUpdateError || "",
       installedVersion: s.installedUpdateVersion || "",
-    },
-    quickDictation: {
-      asr: s.quickDictationAsr || { endpoint: "", apiKey: "", model: "", language: "" },
-      prompt: s.quickDictationPrompt || "",
-      target: s.quickDictationTarget === "clipboard" ? "clipboard" : "editor",
     },
     promptTemplates: s.promptTemplates || {},
     activeTemplateByMode: s.activeTemplateByMode || {},

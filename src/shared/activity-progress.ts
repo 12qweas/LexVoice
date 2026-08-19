@@ -88,7 +88,7 @@ const AUDIO_IMPORT_STAGE_DEFINITIONS: ReadonlyArray<{
   label: string;
 }> = [
   { id: "prepare", label: "准备音频" },
-  { id: "transcribe", label: "分段转写" },
+  { id: "transcribe", label: "语音转写" },
   { id: "persist", label: "写入原文" },
   { id: "organize", label: "AI 整理" },
   { id: "write", label: "写入纪要" },
@@ -192,6 +192,18 @@ export function appendActivityEvent(
   const list = Array.isArray(events)
     ? events.filter((item): item is ActivityLifecycleEvent => !!item && typeof item === "object")
     : [];
+  const previous = list[list.length - 1];
+  if (previous
+    && previous.stageId === next.stageId
+    && previous.type === next.type
+    && previous.label === next.label
+    && String(previous.detail || "") === String(next.detail || "")
+    && previous.chunkIndex === next.chunkIndex
+    && previous.attempt === next.attempt) {
+    const replaced = list.slice();
+    replaced[replaced.length - 1] = next;
+    return replaced.slice(Math.max(0, replaced.length - Math.max(1, Math.floor(limit))));
+  }
   const bounded = list.concat(next);
   return bounded.slice(Math.max(0, bounded.length - Math.max(1, Math.floor(limit))));
 }

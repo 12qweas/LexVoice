@@ -69,10 +69,10 @@ export class LlmRequestQueue {
   pump(): void {
     if (this.running > 0) return;
     const now = this.now();
-    // Priority 2 is durable background work such as the realtime outline. Once
-    // it has waited long enough, let the oldest batch run before newly queued
-    // interactive work. Priority 3 remains truly idle-only (for example,
-    // optional follow-up suggestions) and cannot take this protected slot.
+    // Priority 0 is an explicit user action and must always run before queued
+    // background work. A long-waiting realtime outline may move ahead of normal
+    // automatic work, but never ahead of a question or a user-triggered rewrite.
+    const hasInteractive = this.items.some((item) => item.priority === 0);
     const overdueBackground = this.items
       .filter((item) =>
         item.priority === 2
@@ -80,7 +80,7 @@ export class LlmRequestQueue {
       )
       .sort((a, b) => a.seq - b.seq)[0];
     let next: LlmQueueItem | undefined;
-    if (overdueBackground) {
+    if (!hasInteractive && overdueBackground) {
       const index = this.items.indexOf(overdueBackground);
       next = index >= 0 ? this.items.splice(index, 1)[0] : undefined;
     } else {

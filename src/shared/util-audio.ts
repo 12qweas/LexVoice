@@ -32,16 +32,61 @@ export function delayMs(ms) {
 
 export function isTransientAsrError(error) {
   if (isAsrNonRetryableError(error)) return false;
+  if (isAsrTransportError(error)) return true;
   const msg = String((error && error.message) || error || "");
   // 中文关键字：限流（429 提示语）、超时（转写请求超时：…）、流中断（SSE 半路断线）都必须归为瞬时错误，
   // 否则这些典型的网络性故障不会进重试。
   return /\b(429|500|502|503|504)\b|too many|rate\s*limit|timeout|timed?\s*out|network|temporarily|service unavailable|failed to fetch|empty result|限流|超时|流中断|空结果|空转写/i.test(msg);
 }
 
+export function isAsrTransportError(error) {
+  if (isAsrNonRetryableError(error)) return false;
+  if (error && error.asrTransport === true) return true;
+  const msg = String((error && error.message) || error || "");
+  return /\b(429|500|502|503|504)\b|too many|rate\s*limit|timeout|timed?\s*out|network(?:error)?|temporarily|service unavailable|failed to fetch|fetch failed|err_(?:internet|network|connection)|dns|enotfound|econn(?:reset|refused|aborted)|etimedout|net::|限流|超时|流中断|无法连接|连接(?:失败|中断|关闭)|网络(?:错误|不可用)/i.test(msg);
+}
+
 export function isAsrNonRetryableError(error) {
   if (error && error.nonRetryable) return true;
   const msg = String((error && error.message) || error || "");
   return /密钥未配置|模型名称未配置|服务地址未配置|无法解码|仅 wav\/mp3|不被 MiMo 服务端接受|base64 仍超过|单次最多自动切|mime type must be/i.test(msg);
+}
+
+export function getNextAsrTaskRetryCount(currentRetries, maxRetries, error) {
+  const current = Math.max(0, Math.floor(Number(currentRetries) || 0));
+  const maximum = Math.max(1, Math.floor(Number(maxRetries) || 1));
+  if (isAsrTransportError(error)) return current;
+  if (isAsrNonRetryableError(error)) return Math.max(current + 1, maximum);
+  return current + 1;
+}
+
+export const TRANSCRIBE_PENDING_PLACEHOLDER = "_[等待后台转写，音频已保留]_";
+export const TRANSCRIBE_INCOMPLETE_PLACEHOLDER = "_[此段尚未完成转写，音频已保留]_";
+
+export function getTranscribeSegmentPlaceholder(error, options: {
+  streaming?: boolean;
+  retryable?: boolean;
+  deferred?: boolean;
+} = {}) {
+  const streaming = !!options.streaming;
+  const retryable = options.retryable !== undefined
+    ? !!options.retryable
+    : (!!options.deferred || isTransientAsrError(error));
+  return !streaming && retryable
+    ? TRANSCRIBE_PENDING_PLACEHOLDER
+    : TRANSCRIBE_INCOMPLETE_PLACEHOLDER;
+}
+
+export function getAsrTransportTaskRecoveryPatch(task, maxRetries) {
+  if (!task || task.type !== "transcribe" || task.status !== "failed" || !isAsrTransportError(task.lastError || "")) {
+    return null;
+  }
+  const maximum = Math.max(1, Math.floor(Number(maxRetries) || 1));
+  return {
+    status: "pending",
+    retries: Math.min(Math.max(0, Number(task.retries) || 0), Math.max(0, maximum - 1)),
+    deferredReason: "service-unavailable",
+  };
 }
 
 export function pickMimeType(preferOpus) {

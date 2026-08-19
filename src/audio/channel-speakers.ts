@@ -227,7 +227,7 @@ export function buildSpeakerMappings(
 export function extractSpeakerIdsFromMarkdown(markdown: string): SpeakerId[] {
   const text = String(markdown || "");
   const found = new Set<SpeakerId>();
-  for (const match of text.matchAll(/<!--\s*lexvoice-speaker:(spk-(\d+))\s*-->/gi)) {
+  for (const match of text.matchAll(/<!--\s*lexvoice-speaker(?:-ref)?:(spk-(\d+))\s*-->/gi)) {
     found.add(speakerIdForChannel(Number(match[2])));
   }
   for (const match of text.matchAll(/(?:\[|\*\*)说话人\s*(\d+)(?:\]|\s*[：:]\*\*)/g)) {
@@ -240,12 +240,22 @@ export function normalizeSpeakerMappings(
   raw: unknown,
   speakerIds: SpeakerId[],
 ): Record<SpeakerId, SpeakerMapping> {
-  const maxChannel = speakerIds.reduce((max, id) => Math.max(max, Number(id.slice(4)) || 1), 1);
-  const mappings = buildSpeakerMappings(maxChannel, raw);
-  const allowed = new Set(speakerIds);
+  const source = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
   const filtered: Record<SpeakerId, SpeakerMapping> = {};
-  for (const [id, mapping] of Object.entries(mappings)) {
-    if (allowed.has(id as SpeakerId)) filtered[id as SpeakerId] = mapping;
+  for (const id of speakerIds) {
+    const channel = Math.max(1, Number(id.slice(4)) || 1);
+    const item = source[id] && typeof source[id] === "object"
+      ? source[id] as Record<string, unknown>
+      : {};
+    const personName = typeof item.personName === "string" ? item.personName.trim() : "";
+    const personPath = typeof item.personPath === "string" ? item.personPath.trim() : "";
+    filtered[id] = {
+      id,
+      channel,
+      label: typeof item.label === "string" && item.label.trim() ? item.label.trim() : `说话人${channel}`,
+      ...(personName ? { personName } : {}),
+      ...(personPath ? { personPath } : {}),
+    };
   }
   return filtered;
 }
@@ -255,28 +265,68 @@ export function replaceSpeakerDisplayName(
   speakerId: SpeakerId,
   personName: string,
 ): { markdown: string; replacements: number } {
-  const channel = clampSpeakerChannelCount(Number(speakerId.slice(4)));
+  // Hardware capture currently exposes at most four channels, but ASR
+  // diarization can return more speakers. Do not clamp those stable IDs here.
+  const channel = Math.max(1, Math.floor(Number(speakerId.slice(4))) || 1);
   const safeName = String(personName || "").replace(/[\r\n]+/g, " ").trim();
   if (!safeName) return { markdown: String(markdown || ""), replacements: 0 };
   const anchored = new RegExp(
-    `(<!--\\s*lexvoice-speaker:${speakerId}\\s*-->\\s*\\n?\\s*)\\*\\*[^*\\n]{1,80}[：:]\\*\\*`,
+    `(<!--\\s*lexvoice-speaker:${speakerId}\\s*-->\\s*\\n?\\s*)(\\[[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?\\]\\s*)?\\*\\*[^*\\n]{1,80}[：:]\\*\\*`,
     "gi",
   );
   let replacements = 0;
-  let next = String(markdown || "").replace(anchored, (_match, prefix: string) => {
+  let next = String(markdown || "").replace(anchored, (_match, prefix: string, timePrefix = "") => {
     replacements += 1;
-    return `${prefix}**${safeName}：**`;
+    return `${prefix}${timePrefix}**${safeName}：**`;
   });
-  const bold = new RegExp(`\\*\\*说话人\\s*${channel}[：:]\\*\\*`, "g");
-  next = next.replace(bold, () => {
+  // Older diarization notes may contain generic labels without a stable anchor.
+  // Add the anchor during the first rename so later corrections can still find
+  // the same speaker after the visible label has changed to a real name.
+  const bold = new RegExp(`(^|\\n)([ \\t]*)\\*\\*说话人\\s*${channel}[：:]\\*\\*`, "g");
+  next = next.replace(bold, (_match, lineStart: string, indent: string) => {
     replacements += 1;
-    return `**${safeName}：**`;
+    return `${lineStart}${indent}<!-- lexvoice-speaker:${speakerId} -->\n${indent}**${safeName}：**`;
   });
-  const bracket = new RegExp(`\\[说话人\\s*${channel}\\]`, "g");
-  next = next.replace(bracket, () => {
+  const bracket = new RegExp(`(^|\\n)([ \\t]*)(\\[[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?\\]\\s*)?\\[说话人\\s*${channel}\\]\\s*`, "g");
+  next = next.replace(bracket, (_match, lineStart: string, indent: string, timePrefix = "") => {
     replacements += 1;
-    return `[${safeName}]`;
+    return `${lineStart}${indent}<!-- lexvoice-speaker:${speakerId} -->\n${indent}${timePrefix}**${safeName}：** `;
   });
+  const inlineMarker = `<!-- lexvoice-speaker-ref:${speakerId} -->${safeName}<!-- lexvoice-speaker-ref-end:${speakerId} -->`;
+  const anchoredInline = new RegExp(
+    `<!--\\s*lexvoice-speaker-ref:${speakerId}\\s*-->[^\\n]*?<!--\\s*lexvoice-speaker-ref-end:${speakerId}\\s*-->`,
+    "gi",
+  );
+  next = next.replace(anchoredInline, () => {
+    replacements += 1;
+    return inlineMarker;
+  });
+
+  // Final briefings generated before speaker confirmation can mention generic
+  // speakers inside prose (for example, "说话人2回顾了..."). Convert those
+  // references to invisible, stable markers instead of a blind name replace.
+  // Frontmatter, fenced code and machine metadata remain untouched.
+  const genericInline = new RegExp(`说话人\\s*${channel}(?!\\d)`, "g");
+  const lines = next.split("\n");
+  let inFrontmatter = lines.length > 0 && lines[0].replace(/^\uFEFF/, "").trim() === "---";
+  let inFence = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (inFrontmatter) {
+      if (index > 0 && line.trim() === "---") inFrontmatter = false;
+      continue;
+    }
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence || /^\s*(?:<!--\s*)?lexvoice-(?:people|tags|part-summary)\s*:/i.test(line)) continue;
+    lines[index] = line.replace(genericInline, () => {
+      replacements += 1;
+      return inlineMarker;
+    });
+  }
+  next = lines.join("\n");
   const result = { markdown: next, replacements };
   return result;
 }

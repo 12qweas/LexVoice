@@ -1,7 +1,8 @@
 export const LIVE_ASR_BACKLOG_WARN_MS = 10 * 60 * 1000;
 export const LIVE_ASR_BACKLOG_CRITICAL_MS = 30 * 60 * 1000;
 export const LIVE_ASR_CIRCUIT_FAILURE_THRESHOLD = 3;
-export const LIVE_ASR_CIRCUIT_COOLDOWN_MS = 2 * 60 * 1000;
+export const LIVE_ASR_CIRCUIT_COOLDOWN_MS = 5 * 60 * 1000;
+export const LIVE_ASR_CIRCUIT_MAX_COOLDOWN_MS = 30 * 60 * 1000;
 export const LIVE_ASR_TASK_STATUS = "live";
 
 export type LiveAsrJobState = "spooling" | "queued" | "transcribing";
@@ -70,6 +71,13 @@ export function recordLiveAsrSuccess(): LiveAsrCircuitState {
   return createLiveAsrCircuitState();
 }
 
+export function getLiveAsrCircuitCooldownMs(consecutiveFailures: number): number {
+  const failures = Math.max(0, Math.floor(Number(consecutiveFailures) || 0));
+  if (failures < LIVE_ASR_CIRCUIT_FAILURE_THRESHOLD) return 0;
+  const exponent = Math.max(0, failures - LIVE_ASR_CIRCUIT_FAILURE_THRESHOLD);
+  return Math.min(LIVE_ASR_CIRCUIT_MAX_COOLDOWN_MS, LIVE_ASR_CIRCUIT_COOLDOWN_MS * (2 ** exponent));
+}
+
 export function recordLiveAsrFailure(
   current: LiveAsrCircuitState,
   errorMessage: string,
@@ -78,10 +86,11 @@ export function recordLiveAsrFailure(
 ): LiveAsrCircuitState {
   if (!transient) return current || createLiveAsrCircuitState();
   const nextFailures = Math.max(0, Number(current && current.consecutiveFailures) || 0) + 1;
+  const cooldownMs = getLiveAsrCircuitCooldownMs(nextFailures);
   return {
     consecutiveFailures: nextFailures,
-    openUntilMs: nextFailures >= LIVE_ASR_CIRCUIT_FAILURE_THRESHOLD
-      ? nowMs + LIVE_ASR_CIRCUIT_COOLDOWN_MS
+    openUntilMs: cooldownMs > 0
+      ? Math.max(Math.max(0, Number(current && current.openUntilMs) || 0), nowMs + cooldownMs)
       : 0,
     lastError: String(errorMessage || "").slice(0, 240),
   };

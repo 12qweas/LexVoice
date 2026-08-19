@@ -3,7 +3,6 @@ export type AudioChannelMode = "auto" | "mono" | "multichannel";
 export type AudioChannelRuntimeMode = "mono" | "probing" | "multichannel";
 export type BubbleSize = "large" | "medium" | "small";
 export type PeopleContextMode = "privacy" | "hotwords" | "localFull";
-export type QuickDictationTarget = "editor" | "clipboard";
 
 export interface TranscribeProviderSettings {
   name?: string;
@@ -14,13 +13,6 @@ export interface TranscribeProviderSettings {
   protocol?: string;
   targetLanguage?: string;
   hint?: string;
-}
-
-export interface QuickDictationAsrSettings {
-  endpoint: string;
-  apiKey: string;
-  model: string;
-  language: string;
 }
 
 export interface LlmAsrSnapshot {
@@ -132,10 +124,10 @@ export interface PluginSettings {
   transcribeApiKey: string;
   transcribeModel: string;
   transcribeLanguage: string;
-  quickDictationAsr: QuickDictationAsrSettings;
-  quickDictationPrompt: string;
-  quickDictationTarget: QuickDictationTarget;
   activeTranscribeProvider: string;
+  importTranscribeProvider: string;
+  importSpeakerDiarization: boolean;
+  importSpeakerCount: number;
   transcribeProviders: Record<string, TranscribeProviderSettings>;
   llmEndpoint: string;
   llmApiKey: string;
@@ -240,7 +232,6 @@ export interface PersistedPluginSettings {
   ui: Record<string, unknown>;
   recruiting: Record<string, unknown>;
   updates: Record<string, unknown>;
-  quickDictation: Record<string, unknown>;
   promptTemplates: Record<string, PromptTemplate>;
   activeTemplateByMode: Record<string, string>;
 }
@@ -281,6 +272,8 @@ export interface QueueTaskLifecycle {
   startedAt?: string;
   lastEventAt?: string;
   attempt?: number;
+  transportFailures?: number;
+  nextRetryAt?: string;
 }
 
 export interface TranscribeQueueTaskPayload {
@@ -311,6 +304,10 @@ export interface TranscribeQueueTaskPayload {
   audioChannelMode?: AudioChannelMode;
   audioChannelCount?: number;
   audioChannelRuntimeMode?: AudioChannelRuntimeMode;
+  providerId?: string;
+  wholeFileImport?: boolean;
+  speakerDiarization?: boolean;
+  speakerCount?: number;
 }
 
 export interface MergeQueueTaskPayload {
@@ -324,6 +321,7 @@ export interface MergeQueueTaskPayload {
   textImportSources?: unknown[];
   recruitContext?: RecruitContext | null;
   sessionMeta?: unknown;
+  speakerFrontmatter?: Record<string, unknown> | null;
   temporarySourcePath?: string;
 }
 

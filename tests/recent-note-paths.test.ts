@@ -15,6 +15,10 @@ describe("最近纪要索引范围", () => {
       roots
     )).toBe(true);
     expect(isPathUnderRecentNoteRoots(
+      "LexVoice/转写纪要/产品思路/2026-08-18 1621 · 综合纪要.md",
+      roots
+    )).toBe(true);
+    expect(isPathUnderRecentNoteRoots(
       "JD/HR-SSC负责人/候选人/储立瑗-终面.md",
       roots
     )).toBe(true);

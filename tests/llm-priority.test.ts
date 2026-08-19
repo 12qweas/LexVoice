@@ -4,7 +4,7 @@ vi.mock("obsidian", () => ({
   requestUrl: vi.fn(),
 }));
 
-import { getLlmRequestPriority } from "../src/llm/core";
+import { getLlmRequestPriority, runQueuedLlmRequest } from "../src/llm/core";
 
 describe("getLlmRequestPriority", () => {
   it("keeps explicit user work ahead of normal and background work", () => {
@@ -17,5 +17,18 @@ describe("getLlmRequestPriority", () => {
     expect(getLlmRequestPriority({ priority: "idle" })).toBe(3);
     expect(getLlmRequestPriority({ priority: "suggestion" })).toBe(3);
     expect(getLlmRequestPriority({ priority: "optional" })).toBe(3);
+  });
+
+  it("reports when a queued request starts", async () => {
+    const events: string[] = [];
+    await runQueuedLlmRequest({
+      priority: "interactive",
+      onQueued: () => events.push("queued"),
+      onStart: () => events.push("started"),
+    }, async () => {
+      events.push("run");
+      return "ok";
+    });
+    expect(events).toEqual(["queued", "started", "run"]);
   });
 });

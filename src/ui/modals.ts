@@ -15,7 +15,6 @@ import { listJDProjects } from '../recruit/jd-projects';
 import { getBuiltInVisiblePolishModeKeys, getCustomPromptModeTemplates, getEffectivePolishMode, getModeMeta, getVisibleModeEntries, isCustomPromptModeTemplate, makeCustomPromptModeId, sanitizePromptTemplate, setLexVoiceModePillIcon } from '../shared/mode-meta';
 import { getActivityStagePosition } from '../shared/activity-progress';
 import { getDesktopProcess } from '../shared/desktop-runtime';
-
 export function pickReportAccentColor(app, defaultHex) {
   return new Promise((resolve) => {
     const modal = new obsidian.Modal(app);
@@ -397,6 +396,90 @@ export class PeopleDirectorySuggestionModal extends obsidian.Modal {
   }
 }
 
+export class SpeakerNameConfirmModal extends obsidian.Modal {
+  constructor(app, plugin, candidates, initialMappings, options = {}, onDone) {
+    super(app);
+    this.plugin = plugin;
+    this.candidates = Array.isArray(candidates) ? candidates : [];
+    this.initialMappings = initialMappings || {};
+    this.options = options || {};
+    this.onDone = onDone;
+    this.rows = [];
+    this.result = null;
+    this.settled = false;
+  }
+
+  async onOpen() {
+    const { contentEl, modalEl } = this;
+    contentEl.empty();
+    modalEl.addClass("lexvoice-speaker-confirm-modal");
+    contentEl.createEl("h2", { text: "确认说话人" });
+    contentEl.createDiv({
+      cls: "lexvoice-speaker-confirm-desc",
+      text: "转写已完成。填写姓名后，AI 会按姓名整理发言、结论和待办；留空则继续使用说话人编号。",
+    });
+    if (this.options.unstableAcrossSegments) {
+      contentEl.createDiv({
+        cls: "lexvoice-speaker-confirm-warning",
+        text: "当前转写由多个独立分段生成，说话人编号可能在分段之间变化。请根据发言示例核对；不确定时可以暂不填写。",
+      });
+    }
+
+    let people = [];
+    try { people = await loadPeopleDirectory(this.plugin); } catch { /* optional suggestions */ }
+    const datalistId = `lexvoice-speaker-name-options-${Date.now()}`;
+    const datalist = contentEl.createEl("datalist", { attr: { id: datalistId } });
+    const knownNames = new Set();
+    for (const person of people || []) {
+      const name = String(person && person.name || "").trim();
+      if (!name || knownNames.has(name)) continue;
+      knownNames.add(name);
+      datalist.createEl("option", { value: name });
+    }
+
+    const list = contentEl.createDiv({ cls: "lexvoice-speaker-confirm-list" });
+    this.rows = [];
+    for (const candidate of this.candidates) {
+      const row = list.createDiv({ cls: "lexvoice-speaker-confirm-row" });
+      const copy = row.createDiv({ cls: "lexvoice-speaker-confirm-copy" });
+      copy.createDiv({ cls: "lexvoice-speaker-confirm-label", text: candidate.label || candidate.id });
+      const samples = Array.isArray(candidate.samples) ? candidate.samples.filter(Boolean) : [];
+      copy.createDiv({
+        cls: "lexvoice-speaker-confirm-sample",
+        text: samples.length ? samples.join(" / ") : "暂无可展示的发言示例",
+      });
+      const input = row.createEl("input", {
+        cls: "lexvoice-speaker-confirm-input",
+        type: "text",
+        attr: {
+          list: datalistId,
+          placeholder: "输入姓名",
+          "aria-label": `${candidate.label || candidate.id}的姓名`,
+        },
+      });
+      input.value = String(this.initialMappings[candidate.id] && this.initialMappings[candidate.id].personName || "");
+      this.rows.push({ candidate, input });
+    }
+
+    const actions = contentEl.createDiv({ cls: "modal-button-container lexvoice-speaker-confirm-actions" });
+    const skip = actions.createEl("button", { text: "暂不填写" });
+    skip.onclick = () => this.close();
+    const confirm = actions.createEl("button", { text: "确认并继续" });
+    confirm.addClass("mod-cta");
+    confirm.onclick = () => {
+      this.result = Object.fromEntries(this.rows.map(({ candidate, input }) => [candidate.id, input.value.trim()]));
+      this.close();
+    };
+  }
+
+  onClose() {
+    this.contentEl.empty();
+    if (this.settled) return;
+    this.settled = true;
+    if (typeof this.onDone === "function") this.onDone(this.result);
+  }
+}
+
 export class QueueModal extends obsidian.Modal {
   constructor(app, plugin) {
     super(app);
@@ -406,11 +489,15 @@ export class QueueModal extends obsidian.Modal {
     this._expandedActivities = new Set();
     this._collapsedActivities = new Set();
     this._lastActiveStage = "";
+    this._scrollTop = 0;
+    this._lastScrollAt = 0;
   }
   onOpen() {
     const { contentEl } = this;
     // 静态 Modal 默认停在打开瞬间；处理中时定时重渲染让进度实时走动。先清旧定时器避免叠加。
     if (this._activityTimer) { window.clearInterval(this._activityTimer); this._activityTimer = null; }
+    const previousList = contentEl.querySelector(".lexvoice-progress-list");
+    if (previousList) this._scrollTop = previousList.scrollTop;
     contentEl.empty();
     contentEl.addClass("lexvoice-progress");
     try { if (this.modalEl) this.modalEl.addClass("lexvoice-progress-modal"); } catch { /* intentionally empty */ }
@@ -423,7 +510,9 @@ export class QueueModal extends obsidian.Modal {
     const activityLabel = this.plugin.getCurrentActivityLabel ? this.plugin.getCurrentActivityLabel() : null;
     const active = !!(detail || activityLabel);
     const activeLiveness = detail && detail.liveness ? String(detail.liveness) : (active ? "running" : "done");
-    const sessionId = this.plugin.session && this.plugin.session.id ? String(this.plugin.session.id) : "";
+    const sessionId = this.plugin._importBusy && this.plugin._importBusy.sessionId
+      ? String(this.plugin._importBusy.sessionId)
+      : this.plugin.session && this.plugin.session.id ? String(this.plugin.session.id) : "";
     const currentActivityIds = new Set(sessionId && active
       ? [`import:${sessionId}`, `finalize:${sessionId}`]
       : []);
@@ -432,7 +521,7 @@ export class QueueModal extends obsidian.Modal {
       : [])
       .filter((task) => task && !String(task.kind || "").startsWith("queue-"))
       .filter((task) => !currentActivityIds.has(String(task.id || "")));
-    // 当前处理链由三阶段流程展示；这里只保留真正需要用户处理的后台异常，避免同一任务重复展开。
+    // 当前处理链由顶部流程展示；这里只保留真正需要用户处理的后台异常，避免同一任务重复展开。
     const visibleTaskActivities = taskActivities.filter((task) => ["failed", "stalled"].includes(String(task.status || "")));
     const taskProblems = taskActivities.filter((task) => ["failed", "stalled"].includes(String(task.status || "")));
     const taskActive = taskActivities.filter((task) => ["queued", "running", "waiting", "slow", "stalled", "retrying"].includes(String(task.status || "")));
@@ -452,9 +541,9 @@ export class QueueModal extends obsidian.Modal {
     const livenessLabel = (state) => ({
       queued: "等待处理",
       pending: "尚未开始",
-      running: "正常运行",
+      running: "进行中",
       waiting: "等待服务响应",
-      slow: "响应较慢",
+      slow: "处理中",
       stalled: "可能卡住",
       retrying: "等待重试",
       failed: "已失败",
@@ -464,9 +553,9 @@ export class QueueModal extends obsidian.Modal {
     const livenessDetail = (state) => ({
       queued: "任务已经登记，等待可用处理槽位",
       pending: "前置步骤完成后自动开始",
-      running: "最近仍有明确进展",
+      running: "",
       waiting: "请求已经发出，服务尚未返回结果",
-      slow: "请求仍在执行，但等待时间已经明显变长",
+      slow: "请求已经发出，服务正在处理",
       stalled: "已经超过本阶段的预期截止时间，正在等待超时机制收口",
       retrying: "本次请求未成功，已按退避规则等待下一次请求",
       failed: "本阶段未得到可用结果",
@@ -489,9 +578,16 @@ export class QueueModal extends obsidian.Modal {
       detail && detail.modeLabel,
       activityLabel,
     ].filter(Boolean).join(" ").toLowerCase();
-    const isTranscribing = /(transcrib|asr|转写|音频|分段)/i.test(activityText);
-    const headTitle = headActive
-      ? (isTranscribing ? "正在转写" : "正在整理纪要")
+    const activePipelineStage = detail && Array.isArray(detail.stages)
+      ? detail.stages.find((stage) => stage && stage.status === "active") || null
+      : null;
+    const isTranscribing = activePipelineStage
+      ? ["prepare", "transcribe", "persist"].includes(String(activePipelineStage.id || ""))
+      : /(transcrib|asr|转写|音频|分段)/i.test(activityText);
+    const headTitle = headLiveness === "done"
+      ? "处理完成"
+      : headActive
+        ? (isTranscribing ? "正在转写" : "正在整理纪要")
       : taskProblems.length ? "处理未完成" : "处理进度";
     const head = contentEl.createDiv({ cls: "lexvoice-progress-head" });
     const titleRow = head.createDiv({ cls: "lexvoice-progress-title-row" });
@@ -572,9 +668,8 @@ export class QueueModal extends obsidian.Modal {
     const phase = headActive || pending.length || running.length
       ? (/(transcrib|asr|转写|音频|分段)/i.test(phaseText) ? "transcribe" : "organize")
       : "complete";
-    const phaseIndex = { transcribe: 0, organize: 1, complete: 2 }[phase] || 0;
-    const pipeline = head.createDiv({ cls: `lexvoice-progress-pipeline is-${headLiveness}` });
-    const pipelineSteps = [
+    let phaseIndex = { transcribe: 0, organize: 1, complete: 2 }[phase] || 0;
+    let pipelineSteps = [
       {
         key: "transcribe",
         label: "转写",
@@ -593,9 +688,49 @@ export class QueueModal extends obsidian.Modal {
         summary: phase === "complete" ? "已写入纪要" : "写入纪要",
       },
     ];
+    const detailedStages = detail && Array.isArray(detail.stages) ? detail.stages : [];
+    const activeDetailedStage = activePipelineStage
+      || detailedStages.find((stage) => stage && stage.status === "active")
+      || null;
+    const isImportPipeline = detailedStages.some((stage) => stage && stage.id === "transcribe");
+    const pipelineLiveness = new Map();
+    if (isImportPipeline) {
+      const stageById = (id) => detailedStages.find((stage) => stage && stage.id === id) || {};
+      const activeId = activeDetailedStage ? String(activeDetailedStage.id || "prepare") : "";
+      const allDone = detailedStages.length > 0 && detailedStages.every((stage) => stage && stage.status === "done");
+      phaseIndex = allDone
+        ? 3
+        : activeId === "prepare" ? 0
+          : activeId === "transcribe" || activeId === "persist" ? 1
+            : activeId === "organize" ? 2 : 3;
+      const transcribeStage = stageById("transcribe");
+      const persistStage = stageById("persist");
+      const organizeStage = stageById("organize");
+      const writeStage = stageById("write");
+      pipelineLiveness.set("prepare", String(stageById("prepare").liveness || ""));
+      pipelineLiveness.set("transcribe", [transcribeStage, persistStage].some((stage) => ["failed", "stalled"].includes(String(stage.liveness || "")))
+        ? "failed"
+        : String((activeId === "persist" ? persistStage : transcribeStage).liveness || ""));
+      pipelineLiveness.set("organize", String(organizeStage.liveness || ""));
+      pipelineLiveness.set("complete", String(writeStage.liveness || ""));
+      pipelineSteps = [
+        { key: "prepare", label: "准备", summary: String(stageById("prepare").summary || "读取音频") },
+        {
+          key: "transcribe",
+          label: "语音转写",
+          summary: String((activeId === "persist" ? persistStage.summary : transcribeStage.summary) || detail.count || "等待处理"),
+        },
+        { key: "organize", label: "AI 整理", summary: String(organizeStage.summary || "等待转写完成") },
+        { key: "complete", label: "完成", summary: String(writeStage.summary || "写入纪要") },
+      ];
+    }
+    const pipeline = head.createDiv({ cls: `lexvoice-progress-pipeline is-${headLiveness}` });
     for (let index = 0; index < pipelineSteps.length; index++) {
       const step = pipelineSteps[index];
-      const state = index < phaseIndex ? "done" : index === phaseIndex ? (taskProblems.length ? "failed" : "active") : "pending";
+      const stepLiveness = pipelineLiveness.get(step.key) || "";
+      const state = ["failed", "stalled"].includes(stepLiveness)
+        ? "failed"
+        : index < phaseIndex ? "done" : index === phaseIndex ? (headLiveness === "failed" ? "failed" : "active") : "pending";
       const stepEl = pipeline.createDiv({ cls: `lexvoice-progress-pipeline-step is-${state}` });
       const marker = stepEl.createDiv({ cls: "lexvoice-progress-pipeline-marker", attr: { "aria-hidden": "true" } });
       if (state === "done") {
@@ -633,6 +768,11 @@ export class QueueModal extends obsidian.Modal {
 
     // —— 任务列表：已完成（✓）→ 处理中（转圈）→ 待处理（脉冲点）——
     const list = contentEl.createDiv({ cls: "lexvoice-progress-list" });
+    const restoreScrollTop = this._scrollTop;
+    list.addEventListener("scroll", () => {
+      this._scrollTop = list.scrollTop;
+      this._lastScrollAt = Date.now();
+    }, { passive: true });
     const makeRow = (kind, extraCls = "") => {
       const r = list.createDiv({ cls: `lexvoice-progress-row is-${kind}${extraCls ? " " + extraCls : ""}` });
       return { row: r, ico: r.createDiv({ cls: "lexvoice-progress-ico" }), body: r.createDiv({ cls: "lexvoice-progress-body" }) };
@@ -660,11 +800,12 @@ export class QueueModal extends obsidian.Modal {
           if (item.open) {
             this._expandedActivities.delete(activityId);
             this._collapsedActivities.add(activityId);
+            item.open = false;
           } else {
             this._expandedActivities.add(activityId);
             this._collapsedActivities.delete(activityId);
+            item.open = true;
           }
-          this.onOpen();
         };
 
         const icon = summaryEl.createSpan({ cls: `lexvoice-progress-activity-icon is-${state}`, attr: { "aria-hidden": "true" } });
@@ -786,7 +927,7 @@ export class QueueModal extends obsidian.Modal {
     }
 
     if (active) {
-      list.createDiv({ cls: "lexvoice-progress-section-title lexvoice-progress-legacy-current", text: "当前处理步骤" });
+      list.createDiv({ cls: "lexvoice-progress-section-title lexvoice-progress-legacy-current", text: "当前任务" });
       const { ico, body } = makeRow("running", "lexvoice-progress-legacy-current");
       if (["failed", "stalled"].includes(activeLiveness)) {
         const stateIcon = ico.createSpan({ cls: `lexvoice-progress-task-state is-${activeLiveness}` });
@@ -799,15 +940,38 @@ export class QueueModal extends obsidian.Modal {
       }
       const sess = this.plugin.session;
       const fileName = sess && sess.mdPath ? String(sess.mdPath).split(/[\\/]/).pop().replace(/\.md$/i, "") : "";
-      const name = fileName || (detail ? [detail.kind, detail.modeLabel].filter(Boolean).join(" · ") : activityLabel) || "处理中";
+      const name = (detail && detail.sourceFile) || fileName || (detail ? [detail.kind, detail.modeLabel].filter(Boolean).join(" · ") : activityLabel) || "处理中";
       const detailStartedAt = detail && Number(detail.startedAt) > 0 ? Number(detail.startedAt) : (_tm && _tm.startedAt);
       const right = detailStartedAt ? [fmtDur(Date.now() - detailStartedAt), tmTokLabel].filter(Boolean).join(" · ") : "";
       titleLine(body, name, right, false);
-      const stepBase = detail ? (detail.step || detail.kind || "处理中") : (activityLabel || "处理中");
-      const pctTxt = detail && Number.isFinite(Number(detail.percent)) ? `（${Math.round(Number(detail.percent))}%）` : "";
+      const stepBase = primaryActivity && primaryActivity.stageLabel
+        ? String(primaryActivity.stageLabel)
+        : detail ? (detail.step || detail.kind || "处理中") : (activityLabel || "处理中");
+      const currentProgress = primaryActivity && Number.isFinite(Number(primaryActivity.progress))
+        ? Number(primaryActivity.progress)
+        : detail && Number.isFinite(Number(detail.percent)) ? Number(detail.percent) : null;
+      const pctTxt = currentProgress !== null ? `（${Math.round(currentProgress)}%）` : "";
       subLine(body, `${stepBase}${pctTxt}${detail && detail.count ? " · " + detail.count : ""}`);
       if (detail && detail.stepDetail) {
         body.createDiv({ cls: "lexvoice-progress-detail", text: detail.stepDetail });
+      }
+
+      if (detail) {
+        const taskFacts = [
+          ["来源文件夹", detail.sourceFolder],
+          ["音频时长", Number(detail.durationMs) > 0 ? fmtDur(Number(detail.durationMs)) : ""],
+          ["原模式", detail.sourceModeLabel],
+          ["目标模式", detail.targetModeLabel || detail.modeLabel],
+        ].filter(([, value]) => String(value || "").trim());
+        if (taskFacts.length) {
+          const factGrid = body.createDiv({ cls: "lexvoice-progress-current-facts" });
+          for (const [label, value] of taskFacts) {
+            const fact = factGrid.createDiv({ cls: "lexvoice-progress-current-fact" });
+            fact.createSpan({ cls: "lexvoice-progress-current-fact-label", text: String(label) });
+            const factValue = fact.createSpan({ cls: "lexvoice-progress-current-fact-value", text: String(value) });
+            factValue.setAttr("title", String(value));
+          }
+        }
       }
 
       if (detail && Array.isArray(detail.stages) && detail.stages.length) {
@@ -840,11 +1004,12 @@ export class QueueModal extends obsidian.Modal {
             if (item.open) {
               this._expandedStages.delete(stageId);
               this._collapsedStages.add(stageId);
+              item.open = false;
             } else {
               this._expandedStages.add(stageId);
               this._collapsedStages.delete(stageId);
+              item.open = true;
             }
-            this.onOpen();
           };
           const marker = summaryEl.createSpan({ cls: "lexvoice-progress-stage-marker", attr: { "aria-hidden": "true" } });
           const iconName = stageLiveness === "done" ? "check"
@@ -922,7 +1087,14 @@ export class QueueModal extends obsidian.Modal {
           if (Array.isArray(stage.events) && stage.events.length) {
             const eventSection = panel.createDiv({ cls: "lexvoice-progress-events" });
             eventSection.createDiv({ cls: "lexvoice-progress-section-label", text: "最近事件" });
-            for (const event of stage.events.slice().reverse()) {
+            const visibleEvents = stage.events.filter((event, index, events) => {
+              const next = events[index + 1];
+              if (!next) return true;
+              return String(event.type || "") !== String(next.type || "")
+                || String(event.label || "") !== String(next.label || "")
+                || String(event.detail || "") !== String(next.detail || "");
+            });
+            for (const event of visibleEvents.slice(-10).reverse()) {
               const eventRow = eventSection.createDiv({ cls: "lexvoice-progress-event" });
               eventRow.createSpan({ cls: "lexvoice-progress-event-time", text: fmtTime(Number(event.at) || Date.now()) });
               const eventCopy = eventRow.createSpan({ cls: "lexvoice-progress-event-copy" });
@@ -933,7 +1105,7 @@ export class QueueModal extends obsidian.Modal {
         }
       }
 
-      if (detail) {
+      if (detail && String(detail.liveness || "running") !== "running") {
         const now = Date.now();
         const stageStartedAt = Number(detail.stageStartedAt) || Number(detail.startedAt) || 0;
         const updatedAt = Number(detail.updatedAt) || stageStartedAt;
@@ -1018,9 +1190,19 @@ export class QueueModal extends obsidian.Modal {
       };
     }
 
-    // 处理中时每 1.2s 重渲染，让步骤名/百分比实时更新；空闲即停止刷新。
+    // 在所有动态内容插入后再恢复滚动位置。提前设置时列表高度仍为 0，浏览器会把位置夹回顶部。
+    window.requestAnimationFrame(() => {
+      if (!list.isConnected) return;
+      const maxScrollTop = Math.max(0, list.scrollHeight - list.clientHeight);
+      list.scrollTop = Math.min(restoreScrollTop, maxScrollTop);
+    });
+
+    // 处理中定时刷新；用户正在滚动时暂停重建，避免内容在手指/滚轮下跳动。
     if (active || running.length || taskActive.length) {
-      this._activityTimer = window.setInterval(() => { try { this.onOpen(); } catch { /* intentionally empty */ } }, 1200);
+      this._activityTimer = window.setInterval(() => {
+        if (Date.now() - this._lastScrollAt < 900) return;
+        try { this.onOpen(); } catch { /* intentionally empty */ }
+      }, 1200);
     }
   }
   onClose() {
@@ -1882,7 +2064,7 @@ export class ImportTextModal extends obsidian.Modal {
     void this.loadTextFiles();
 
     const actions = contentEl.createDiv({ cls: "lexvoice-import-actions" });
-    this.processBtn = actions.createEl("button", { text: "开始处理（0 个文件）", cls: "mod-cta" });
+    this.processBtn = actions.createEl("button", { text: "开始转写（0 个文件）", cls: "mod-cta" });
     this.processBtn.disabled = true;
     this.processBtn.onclick = () => this.process();
     this.selectionText = actions.createSpan({ cls: "lexvoice-import-selection", text: "未选择文本" });
@@ -2131,6 +2313,66 @@ export class ImportTextModal extends obsidian.Modal {
   }
 }
 
+export class AudioImportOptionsModal extends obsidian.Modal {
+  constructor(app, plugin, options = {}) {
+    super(app);
+    this.plugin = plugin;
+    this.paths = Array.isArray(options.paths) ? options.paths.slice() : [];
+    this.selectedMode = getEffectivePolishMode(
+      plugin.settings,
+      options.mode || plugin.settings.polishMode,
+      "meeting",
+    );
+    this.onConfirm = typeof options.onConfirm === "function" ? options.onConfirm : null;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("lexvoice-import-options-modal");
+    contentEl.createEl("h2", { text: "导入音频" });
+    contentEl.createDiv({
+      cls: "lexvoice-import-desc",
+      text: this.paths.length > 1
+        ? `已选择 ${this.paths.length} 个音频文件。确认本次整理方式。`
+        : "确认本次整理方式。",
+    });
+
+    const mode = contentEl.createDiv({ cls: "lexvoice-import-mode" });
+    const modeCopy = mode.createDiv();
+    modeCopy.createDiv({ cls: "lexvoice-import-mode-title", text: "整理方式" });
+    modeCopy.createDiv({ cls: "lexvoice-import-mode-hint", text: "转写完成后生成对应类型的纪要。" });
+    const modeSelect = mode.createEl("select", { cls: "dropdown lexvoice-import-mode-select" });
+    for (const [key, name] of getVisibleModeEntries(this.plugin.settings, false)) {
+      modeSelect.createEl("option", { value: key, text: name });
+    }
+    modeSelect.value = this.selectedMode;
+    modeSelect.onchange = () => {
+      this.selectedMode = getEffectivePolishMode(this.plugin.settings, modeSelect.value, "meeting");
+    };
+
+    contentEl.createDiv({
+      cls: "lexvoice-import-execution-note",
+      text: "音频将按整文件转写。转写服务和说话人识别可在设置的“说话人”页修改。",
+    });
+
+    const actions = contentEl.createDiv({ cls: "lexvoice-import-actions" });
+    const cancel = actions.createEl("button", { text: "取消", attr: { type: "button" } });
+    cancel.onclick = () => this.close();
+    const start = actions.createEl("button", { text: "开始转写", cls: "mod-cta", attr: { type: "button" } });
+    start.onclick = async () => {
+      start.disabled = true;
+      const payload = { mode: this.selectedMode };
+      this.close();
+      if (this.onConfirm) await this.onConfirm(payload);
+    };
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
 export class ImportAudioModal extends obsidian.Modal {
   constructor(app, plugin) {
     super(app);
@@ -2157,6 +2399,10 @@ export class ImportAudioModal extends obsidian.Modal {
     desc.setText(`从 ${this.plugin.settings.audioFolder} 选择音频。支持 WebM、M4A/MP4、MP3、WAV、AAC、OGG、FLAC 等格式；同一次录音的分段会合并显示。`);
 
     this.renderModeControl(contentEl);
+    contentEl.createDiv({
+      cls: "lexvoice-import-execution-note",
+      text: "按整文件转写；说话人设置使用“设置 → 说话人”中的配置。",
+    });
 
     const folderPath = obsidian.normalizePath(this.plugin.settings.audioFolder);
     const folder = this.plugin.app.vault.getAbstractFileByPath(folderPath);
@@ -2373,7 +2619,7 @@ export class ImportAudioModal extends obsidian.Modal {
     const n = this.selected.size;
     const fullBatches = (this.batches || []).filter((batch) => batch.files.length && batch.files.every((f) => this.selected.has(f.path))).length;
     const label = fullBatches > 0 ? `${fullBatches} 组 / ${n} 个文件` : `${n} 个文件`;
-    this.processBtn.setText(`开始处理（${label}）`);
+    this.processBtn.setText(`开始转写（${label}）`);
     this.processBtn.disabled = n === 0;
     if (this.selectionText) {
       this.selectionText.setText(n ? `将按文件名升序合并处理` : "未选择音频");
@@ -2492,11 +2738,7 @@ export class BubbleWidget {
       const info = this.plugin.recorder.getInfo();
       const queue = this.plugin.queue;
       const hasPromptJob = !!(queue && queue.hasPendingGeneratePrompt && queue.hasPendingGeneratePrompt());
-      const qd = this.plugin.quickDictation;
-      // 听写实时字幕：listening 时把 liveText 长度纳入签名，partial 更新才会重绘滚动字幕。
-      const qdLive = qd && qd.state === "listening" && typeof qd.liveText === "string" ? `#${qd.liveText.length}` : "";
-      const qdSig = qd && qd.isActive() ? `Q${qd.state}${qd.target}${qdLive}` : "";
-      const sig = `${info.state}|${hasPromptJob ? "P" : ""}|${qdSig}`;
+      const sig = `${info.state}|${hasPromptJob ? "P" : ""}`;
       if (sig === this._lastSig) {
         const t = this.el && this.el.querySelector(".lexvoice-bubble-timer");
         if (t) t.setText(formatElapsed(info.elapsed));
@@ -2556,55 +2798,11 @@ export class BubbleWidget {
     if (!this.el) return;
     const info = this.plugin.recorder.getInfo();
     this.el.empty();
-    this.el.removeClass("is-idle"); this.el.removeClass("is-recording"); this.el.removeClass("is-paused"); this.el.removeClass("is-dictating");
-    // 重置口述胶囊态类，再按当前态精确加回。
-    this.el.removeClass("is-qd"); this.el.removeClass("is-qd-idle"); this.el.removeClass("is-qd-listening"); this.el.removeClass("is-qd-listening-live"); this.el.removeClass("is-qd-processing"); this.el.removeClass("is-qd-done");
+    this.el.removeClass("is-idle"); this.el.removeClass("is-recording"); this.el.removeClass("is-paused");
     // 悬浮窗大小（大/中/小）：每次渲染都重置三档尺寸类，再加回当前档，与状态无关。
     ["large", "medium", "small"].forEach(sz => this.el.removeClass("lexvoice-bubble-size-" + sz));
     this.el.addClass("lexvoice-bubble-size-" + (this.plugin.settings.bubbleSize || "large"));
     if (this.wrapEl) this.wrapEl.removeClass("is-recording-wrap");
-    const qd = this.plugin.quickDictation;
-    // ── (1) 快速口述进行中：即时转写胶囊（聆听 / 整理 / 已写入）───────────────
-    if (qd && qd.isActive()) {
-      this.el.addClass("is-qd");
-      // 填色波形按钮常驻 left:8（在这些态里就是结束触发器）
-      const waveBtn = this.el.createEl("button", { cls: "lexvoice-qd-wave" });
-      obsidian.setTooltip(waveBtn, "结束即时听写", { placement: "top" });
-      this._paintIcon(waveBtn, ["audio-lines", "lucide-audio-lines"]);
-      waveBtn.onclick = (e) => { e.stopPropagation(); void this.plugin.quickDictation.toggle(this.plugin.settings.quickDictationTarget || "editor"); };
-      if (qd.state === "listening") {
-        this.el.addClass("is-qd-listening");
-        // 声波涟漪（4 环，藏在波形按钮后面）
-        const rip = this.el.createDiv({ cls: "lexvoice-qd-ripples" });
-        for (let i = 0; i < 4; i++) rip.createDiv({ cls: "lexvoice-qd-ripple" });
-        const zone = this.el.createDiv({ cls: "lexvoice-qd-textzone", attr: { "aria-live": "polite" } });
-        if (qd._streaming) {
-          // 流式：只显示实时字幕（当前这句，左对齐自然生长）+ 光标；不显示"聆听中"（那是批量占位）。
-          this.el.addClass("is-qd-listening-live");
-          const live = typeof qd.liveText === "string" ? qd.liveText : "";
-          const span = zone.createSpan({ cls: "lexvoice-qd-live", text: live });
-          span.createSpan({ cls: "lexvoice-qd-caret" }); // 光标塞进字幕内，跟着文字一起居中
-          try { span.scrollLeft = span.scrollWidth; } catch { /* intentionally empty */ } // 长句超宽时滚到句尾，始终露最新
-        } else {
-          // 批量：说完才出字，用「聆听中…」占位 + 光标。
-          zone.createSpan({ cls: "lexvoice-qd-listen-label", text: "正在录音…" });
-          zone.createSpan({ cls: "lexvoice-qd-caret" });
-        }
-      } else if (qd.state === "done") {
-        this.el.addClass("is-qd-done");
-        const zone = this.el.createDiv({ cls: "lexvoice-qd-textzone" });
-        const chk = zone.createDiv({ cls: "lexvoice-qd-check" });
-        this._paintIcon(chk, ["check", "lucide-check"]);
-        zone.createSpan({ cls: "lexvoice-qd-done-label", text: "已写入" });
-      } else {
-        // transcribing | cleaning → 统一「AI 整理中…」
-        this.el.addClass("is-qd-processing");
-        const zone = this.el.createDiv({ cls: "lexvoice-qd-textzone" });
-        zone.createDiv({ cls: "lexvoice-qd-spinner" });
-        zone.createSpan({ cls: "lexvoice-qd-proc-label", text: "AI 整理中…" });
-      }
-      return;
-    }
     const makeDocButton = (title, handler) => {
       const jumpBtn = this.el.createEl("button", { cls: "lexvoice-bubble-jump", attr: { title, "aria-label": title } });
       // 用 Lucide 图标替代之前 CSS 画的文档形状。
@@ -2616,27 +2814,13 @@ export class BubbleWidget {
       return jumpBtn;
     };
     if (info.state === "idle") {
-      // ── (3) 空闲：三枚 40×40 圆形图标按钮胶囊 ─────────────────────────────
-      this.el.addClass("is-qd"); this.el.addClass("is-qd-idle");
-      // file-text 幽灵按钮 · 定位跳转
-      const locateBtn = this.el.createEl("button", { cls: "lexvoice-qd-ghost lexvoice-qd-locate" });
-      obsidian.setTooltip(locateBtn, "定位跳转", { placement: "top" });
-      if (!this._paintIcon(locateBtn, ["file-text", "lucide-file-text", "file"])) locateBtn.addClass("is-fallback-icon");
-      locateBtn.onclick = (e) => { e.stopPropagation(); this.plugin.openRecentNote(); };
-      // audio-lines 填色按钮 · 即时转写（主触发）
-      const waveBtn = this.el.createEl("button", {
-        cls: "lexvoice-qd-wave",
-        attr: { "aria-label": "即时听写（不保存录音）", title: "即时听写（不保存录音）" },
-      });
-      obsidian.setTooltip(waveBtn, "即时听写（不保存录音）", { placement: "top" });
-      this._paintIcon(waveBtn, ["audio-lines", "lucide-audio-lines"]);
-      waveBtn.onclick = (e) => { e.stopPropagation(); void this.plugin.quickDictation.toggle(this.plugin.settings.quickDictationTarget || "editor"); };
-      // mic 幽灵按钮 · 会议纪要录音
+      this.el.addClass("is-idle");
+      makeDocButton("打开最近纪要", () => this.plugin.openRecentNote());
       const micBtn = this.el.createEl("button", {
-        cls: "lexvoice-qd-ghost lexvoice-qd-mic",
-        attr: { "aria-label": "会议纪要录音（保存录音）", title: "会议纪要录音（保存录音）" },
+        cls: "lexvoice-bubble-main",
+        attr: { "aria-label": "开始会议录音", title: "开始会议录音" },
       });
-      obsidian.setTooltip(micBtn, "会议纪要录音（保存录音）", { placement: "top" });
+      obsidian.setTooltip(micBtn, "开始会议录音", { placement: "top" });
       this._paintIcon(micBtn, ["mic", "lucide-mic"]);
       micBtn.onclick = (e) => { e.stopPropagation(); this.plugin.startRecording(); };
       if (this.plugin.queue && this.plugin.queue.hasPendingGeneratePrompt && this.plugin.queue.hasPendingGeneratePrompt()) {

@@ -27,15 +27,10 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   transcribeModel: "FunAudioLLM/SenseVoiceSmall",
   transcribeLanguage: "auto",
 
-  // 快速口述专用转写服务（可选）：留空则回退到活跃的会议转写服务；
-  // 填了就让快速口述单独走这个（建议填一个对短音频快的服务）。
-  quickDictationAsr: { endpoint: "", apiKey: "", model: "", language: "" },
-  // 快速口述自定义整理提示词（空 = 用内置默认 QUICK_DICTATION_DEFAULT_TEMPLATE）。
-  quickDictationPrompt: "",
-  // 即时转写落点：editor=插入光标处 / clipboard=复制到剪贴板。
-  quickDictationTarget: "editor",
-
   activeTranscribeProvider: "siliconflow",
+  importTranscribeProvider: "dashscope-filetrans",
+  importSpeakerDiarization: true,
+  importSpeakerCount: 0,
   transcribeProviders: {
     siliconflow: {
       name: "SiliconFlow",
@@ -52,6 +47,15 @@ export const DEFAULT_SETTINGS: PluginSettings = {
       model: "gpt-4o-transcribe",
       language: "",
       hint: "切片转写。准确度天花板。中文人名/专业术语识别强。需海外网络。",
+    },
+    "openai-diarize": {
+      name: "OpenAI · 说话人分离",
+      endpoint: "https://api.openai.com/v1/audio/transcriptions",
+      apiKey: "",
+      model: "gpt-4o-transcribe-diarize",
+      language: "",
+      protocol: "openai-diarized-transcription",
+      hint: "整场录音完成后统一识别，并标注说话人。转写结束时可把说话人编号对应到真实姓名。",
     },
     apimimo: {
       name: "APIMiMo V2.5 ASR",
@@ -87,6 +91,15 @@ export const DEFAULT_SETTINGS: PluginSettings = {
       language: "",
       hint: "国内最便宜的流式 ASR，约 ¥3.6/小时。",
     },
+    "dashscope-filetrans": {
+      name: "阿里云百炼 Fun-ASR",
+      endpoint: "https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription",
+      apiKey: "",
+      model: "fun-asr",
+      language: "zh",
+      protocol: "dashscope-filetrans",
+      hint: "导入音频专用。整文件异步转写，支持说话人分离；普通转写最长 12 小时，开启说话人分离时建议不超过 2 小时。",
+    },
     custom: {
       name: "其他转写服务",
       endpoint: "",
@@ -109,6 +122,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
       apiKey: "",
       model: "whisper-large-v3",
       language: "zh",
+      protocol: "speaker-diarization",
       hint: "本地 WhisperX / whisper-diarization 服务：转写同时做说话人分离。需服务在响应里返回 segments[].speaker（或在 text 内联 [SPEAKER_00]），LexVoice 会自动归一成 [说话人N]。注意：整段导入音频时说话人编号才全程一致；边录边切的分段模式跨段编号可能对不上。",
     },
   },

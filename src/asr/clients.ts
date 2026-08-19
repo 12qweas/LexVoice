@@ -117,7 +117,7 @@ export class DashScopeStreamingClient {
     if (isEnd) {
       this._finalizedText += text;
       this._currentPartial = "";
-      this.onPartial(this.getFullText(), true, text); // 第三参=当前句（供听写字幕只显示这一句）
+          this.onPartial(this.getFullText(), true, text); // 第三参=当前句，供实时字幕只显示当前内容
     } else {
       this._currentPartial = text;
       this.onPartial(this.getFullText(), false, text);

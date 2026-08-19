@@ -1,4 +1,4 @@
-export const BRIEFING_PIPELINE_VERSION = 1;
+export const BRIEFING_PIPELINE_VERSION = 3;
 
 export type BriefingSegment = {
   index?: number;
@@ -33,6 +33,13 @@ export type BriefingPartCheckpoint = {
   attempts: number;
   usage: BriefingUsage;
   error: string;
+  sourceChars?: number;
+  outputChars?: number;
+  outputRatio?: number;
+  minimumOutputChars?: number;
+  targetOutputChars?: number;
+  qualityStatus?: "pending" | "ok" | "under-detailed";
+  repairAttempts?: number;
   updatedAt: string;
 };
 
@@ -69,6 +76,23 @@ export type BriefingPartPlan = {
   endOffsetMs: number;
   sourceHash: string;
   chars: number;
+};
+
+export type BriefingFidelityPolicy = {
+  profile: "detailed" | "balanced" | "concise";
+  sourceTargetChars: number;
+  minimumOutputRatio: number;
+  targetOutputRatio: number;
+  absoluteMinimumChars: number;
+};
+
+export type BriefingFidelityAssessment = {
+  sourceChars: number;
+  outputChars: number;
+  outputRatio: number;
+  minimumOutputChars: number;
+  targetOutputChars: number;
+  needsExpansion: boolean;
 };
 
 export const EMPTY_BRIEFING_USAGE: BriefingUsage = {
@@ -143,12 +167,21 @@ export function planBriefingParts(
     .filter((segment) => cleanText(segment?.text));
   if (!segments.length) return [];
   const limit = Math.max(4000, Math.floor(Number(targetChars) || 24000));
+  const totalChars = segments.reduce((sum, segment) => sum + cleanText(segment.text).length, 0);
+  const desiredPartCount = Math.max(1, Math.ceil(totalChars / limit));
+  const balancedTarget = Math.max(1, Math.ceil(totalChars / desiredPartCount));
   const groups: BriefingSegment[][] = [];
   let current: BriefingSegment[] = [];
   let chars = 0;
-  for (const segment of segments) {
+  for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex += 1) {
+    const segment = segments[segmentIndex];
     const nextChars = cleanText(segment.text).length;
-    if (current.length && chars + nextChars > limit) {
+    const segmentsRemaining = segments.length - segmentIndex;
+    const groupsNeededAfterCurrent = desiredPartCount - groups.length - 1;
+    const canStartAnotherGroup = groupsNeededAfterCurrent > 0 && segmentsRemaining >= groupsNeededAfterCurrent;
+    const wouldPassBalancedTarget = chars + nextChars > balancedTarget;
+    const currentIsSubstantial = chars >= balancedTarget * 0.55;
+    if (current.length && canStartAnotherGroup && wouldPassBalancedTarget && currentIsSubstantial) {
       groups.push(current);
       current = [];
       chars = 0;
@@ -175,6 +208,83 @@ export function planBriefingParts(
   });
 }
 
+export function getBriefingPartTargetChars(input: {
+  detailLevel?: string;
+  structureLevel?: string;
+} = {}): number {
+  return getBriefingFidelityPolicy(input).sourceTargetChars;
+}
+
+export function getBriefingFidelityPolicy(input: {
+  detailLevel?: string;
+  structureLevel?: string;
+} = {}): BriefingFidelityPolicy {
+  const detailLevel = cleanText(input.detailLevel).toLowerCase();
+  if (detailLevel === "detailed") {
+    return {
+      profile: "detailed",
+      sourceTargetChars: 14_000,
+      minimumOutputRatio: 0.48,
+      targetOutputRatio: 0.62,
+      absoluteMinimumChars: 1_600,
+    };
+  }
+  if (detailLevel === "concise") {
+    return {
+      profile: "concise",
+      sourceTargetChars: 28_000,
+      minimumOutputRatio: 0.15,
+      targetOutputRatio: 0.22,
+      absoluteMinimumChars: 700,
+    };
+  }
+  const structureLevel = cleanText(input.structureLevel).toLowerCase();
+  return {
+    profile: "balanced",
+    sourceTargetChars: structureLevel === "strict" ? 18_000 : 20_000,
+    minimumOutputRatio: 0.30,
+    targetOutputRatio: 0.42,
+    absoluteMinimumChars: 1_000,
+  };
+}
+
+export function assessBriefingPartFidelity(
+  sourceChars: unknown,
+  output: unknown,
+  input: { detailLevel?: string; structureLevel?: string } = {},
+): BriefingFidelityAssessment {
+  const source = Math.max(0, Math.floor(Number(sourceChars) || 0));
+  const outputChars = cleanText(output).length;
+  const policy = getBriefingFidelityPolicy(input);
+  if (!source) {
+    return {
+      sourceChars: 0,
+      outputChars,
+      outputRatio: 0,
+      minimumOutputChars: 0,
+      targetOutputChars: 0,
+      needsExpansion: false,
+    };
+  }
+  const sourceSafeCeiling = Math.max(1, Math.ceil(source * 0.92));
+  const minimumOutputChars = Math.min(
+    sourceSafeCeiling,
+    Math.max(policy.absoluteMinimumChars, Math.ceil(source * policy.minimumOutputRatio)),
+  );
+  const targetOutputChars = Math.min(
+    Math.max(minimumOutputChars, Math.ceil(source * policy.targetOutputRatio)),
+    Math.max(minimumOutputChars, Math.ceil(source * 0.96)),
+  );
+  return {
+    sourceChars: source,
+    outputChars,
+    outputRatio: outputChars / source,
+    minimumOutputChars,
+    targetOutputChars,
+    needsExpansion: outputChars < minimumOutputChars,
+  };
+}
+
 function createPartCheckpoint(plan: BriefingPartPlan): BriefingPartCheckpoint {
   return {
     index: plan.index,
@@ -193,6 +303,13 @@ function createPartCheckpoint(plan: BriefingPartPlan): BriefingPartCheckpoint {
     attempts: 0,
     usage: { ...EMPTY_BRIEFING_USAGE },
     error: "",
+    sourceChars: plan.chars,
+    outputChars: 0,
+    outputRatio: 0,
+    minimumOutputChars: 0,
+    targetOutputChars: 0,
+    qualityStatus: "pending",
+    repairAttempts: 0,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -274,7 +391,22 @@ export function assembleBriefingParts(parts: BriefingPartCheckpoint[]): string {
       incomplete.map((part) => part.index),
     );
   }
-  return ordered.map((part) => cleanText(part.text)).filter(Boolean).join("\n\n");
+  return ordered.map((part) => normalizeBriefingPartBody(part.text)).filter(Boolean).join("\n\n");
+}
+
+/**
+ * Long briefings are processed in internal time windows, but those windows must
+ * never become visible document boundaries. Older checkpoints and occasional
+ * model responses may still contain a generated "part N" heading, so remove
+ * only that implementation-specific wrapper before deterministic assembly.
+ */
+export function normalizeBriefingPartBody(value: unknown): string {
+  return cleanText(value)
+    .replace(
+      /^\s*#{1,6}\s*(?:第\s*\d+\s*(?:\/\s*\d+\s*)?(?:部分|分部|时段)|(?:内部)?(?:时间窗口|转写窗口|分段)\s*\d+)(?:\s*[·:：—-]\s*[^\n]*)?\s*\n+/gim,
+      "",
+    )
+    .trim();
 }
 
 export class BriefingPipelineIncompleteError extends Error {

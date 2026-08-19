@@ -7,7 +7,7 @@ import { normalizeRealtimeOutlineList, parseRecruitRealtimeOutlineProtocol, buil
 import { drainRealtimeOutlineBacklog } from "./outline-finalizer";
 import { LexVoiceSettingTab } from "./ui/settings-tab";
 import { getDesktopModule, getDesktopProcess } from "./shared/desktop-runtime";
-import { pickReportAccentColor, AudioTimeModal, PeopleDirectorySuggestionModal, QueueModal, VirtualCableSetupModal, RecruitContextModal, ImportTextModal, ImportAudioModal, BubbleWidget } from "./ui/modals";
+import { pickReportAccentColor, AudioTimeModal, PeopleDirectorySuggestionModal, SpeakerNameConfirmModal, QueueModal, VirtualCableSetupModal, RecruitContextModal, ImportTextModal, ImportAudioModal, AudioImportOptionsModal, BubbleWidget } from "./ui/modals";
 import { stripLexVoiceFrontmatterSimple, getRecentNoteProcessingState, lexvoiceConfirm, enumerateAudioDevices, trashLexVoiceFile, normalizeAudioInputMode, audioInputModeLabel } from "./ui/helpers";
 import { isKnownPolishMode, makeCustomPromptModeId, getCustomPromptModeTemplate, getCustomPromptModeTemplates, getBuiltInVisiblePolishModeKeys, getVisiblePolishModeKeys, getModeMeta, getEffectivePolishMode, getVisibleModeEntries, sanitizePromptTemplate } from "./shared/mode-meta";
 import { isLexVoiceMobileRuntime } from "./shared/util-platform";
@@ -18,10 +18,10 @@ import { sanitizeReportFileStem, generateHtmlReportFromMarkdown, generateStyledR
 import { parseElapsedMsToken, parseLexVoiceDurationLabel, TEXT_IMPORT_PRE_SUMMARY_CHUNK_CHARS, buildBriefingLanguageInstruction, applyBriefingLanguageInstruction, getSessionMetaDurationMs, getSegmentsDurationMs, truncateForLlmPrompt, splitLongTextForLlm } from "./shared/util-text";
 import { JOBPORTRAIT_DIMENSIONS, DEFAULT_RECRUIT_QUALITIES, isRecruitFeatureUnlocked, buildRecruitContextPrefix, getRecruitInterviewOutline, getRecruitJdLibrary, upsertRecruitJdLibrary, applyRecruitJdLibraryItem, getRecruitJdPreview, extractPdfTextBestEffort, extractCandidateNameFromResumeText, parseRecruitQualitiesFromOutput, buildCompactRecruitContextPrefix, buildRecruitTextImportMergePrompt, generateJobPortrait, normalizeRecruitContext, hasRecruitContextContent, parseJdProject, renderRecruitCandidateBase, renderRecruitAggregateBase, ensureRecruitAggregateBase, createRecruitProject, renderRecruitHomepageTemplate, listRecruitCandidateNotes } from "./recruit";
 import { registerRecruitBoardView, recommendationTone } from "./recruit/bases-view";
-import { normalizeAsrConcurrency, decodeAudioBlob, renderAudioBufferSliceToWav, mapLimit, transcribeImportAudioChunk, resolveTranscribeProvider, makeRecordingIssue, APIMIMO_ASR_CHUNK_MS, isApimimoAsrProvider, transcribeAudio } from "./asr/transcribe";
+import { normalizeAsrConcurrency, decodeAudioBlob, renderAudioBufferSliceToWav, resolveTranscribeProvider, makeRecordingIssue, isApimimoAsrProvider, transcribeAudio } from "./asr/transcribe";
 import { getFrontmatterTags, readFileFrontmatter, upsertFrontmatterInMarkdown, LEARNING_CARD_TAG, CONCEPT_CARD_TAG, TODO_CARD_TAG, ensureTodayDailyNoteFile } from "./shared/util-note";
 import { PEOPLE_SUGGESTION_CACHE_LIMIT, splitPersonFieldValue, normalizePersonLookupText, loadPeopleDirectory, buildPeopleContextForLlm, ensurePeopleNoteRelatedBaseSection, formatPeopleBaseYaml, formatPeopleNoteMarkdown, mergeUniqueStrings, normalizePeopleSuggestion, normalizePeopleSuggestionIgnores, isPeopleSuggestionIgnored, addPeopleSuggestionIgnore, removePeopleSuggestionIgnores, getPeopleSuggestionCacheKey, normalizePeopleSuggestionCache, makePeopleSuggestionCacheRecord, isPeopleSuggestionCacheRecordCurrent, peopleSuggestionRecordToSuggestion, peopleSuggestionIgnoreRecordToSuggestion, findMatchingPersonEntry, arePeopleSuggestionsRelated, mergePeopleSuggestions, mergeSourceNoteRelatedPeopleFrontmatter, mergePersonFrontmatter, generatePeopleDirectorySuggestions, normalizePersonNameForEmail, parsePeopleFromOutput, personEntryFromFrontmatter } from "./people";
-import { getSedimentTodoId, getSedimentCardId, getSedimentHotwordId, getSedimentPersonId, withSedimentCandidateIds, removeSedimentGroupDone, sanitizeSedimentText, normalizeSedimentTodoSubtasks, normalizeSedimentExtractionModel, appendSedimentPreExtractionInstruction, stripSedimentPreExtractionBlocks, extractSedimentPreExtractionBlock, splitOutSedimentBlock, appendSedimentPreExtractionBlock, upsertSedimentPreExtractionBlockInFile, generateSedimentObjects, writeSedimentObjectCards } from "./sediment";
+import { getSedimentTodoId, getSedimentCardId, getSedimentHotwordId, getSedimentPersonId, withSedimentCandidateIds, removeSedimentGroupDone, sanitizeSedimentText, normalizeSedimentTodoSubtasks, normalizeSedimentExtractionModel, stripSedimentPreExtractionBlocks, extractSedimentPreExtractionBlock, splitOutSedimentBlock, appendSedimentPreExtractionBlock, upsertSedimentPreExtractionBlockInFile, generateSedimentObjects, writeSedimentObjectCards } from "./sediment";
 import { createVocabularyGroups, parseVocabularyGroups, flattenVocabularyGroups, countVocabularyGroups, normalizeVocabularyInput, mergeVocabularyGroups, isStructuredVocabularyMarkdown, loadVocabularyGroups, formatVocabularyMarkdown, applyVocabularyCorrections } from "./vocabulary";
 import { logLlmRequestDiagnostic, getLlmConfigIssue, isLlmConfigError, isLlmServiceBlockedError, isLlmNonRetryableError, isLlmContextLimitError, formatLlmConfigIssue, formatLlmFailureIssue, callLlm, callBriefingMergeLlm, stripModeSuggestionBlocks } from "./llm/core";
 import { DEFAULT_DAILY_MEETING_OVERVIEW_HEADING, DEFAULT_DAILY_MEETING_OVERVIEW_TEMPLATE, DEFAULT_SETTINGS } from "./shared/defaults";
@@ -40,8 +40,8 @@ import { SEDIMENT_GROUP_CONFIG, SEDIMENT_GROUP_ORDER, VOCABULARY_SECTIONS } from
 import { AUDIO_EXT, TEXT_IMPORT_EXT } from "./shared/catalog-import";
 import { isRecord, pickDefined, genId, pad, formatElapsed, sanitizeFilename, escapeRegExp, stripHtmlText, safeDecodeUriText, normalizeAudioLinkTarget } from "./shared/util-common";
 import { escapeHtmlText, makeFileWikiLink } from "./shared/util-markdown";
-import { mimeFromExt, extFromMime, isAsrNonRetryableError, isTransientAsrError, pickMimeType, assertAudioCaptureSupported } from "./shared/util-audio";
-import { LIVE_ASR_CIRCUIT_COOLDOWN_MS, LIVE_ASR_TASK_STATUS, classifyLiveAsrBacklog, createLiveAsrCircuitState, isLiveAsrCircuitOpen, recordLiveAsrFailure, recordLiveAsrSuccess, summarizeLiveAsrJobs } from "./asr/live-segment-policy";
+import { mimeFromExt, extFromMime, getAsrTransportTaskRecoveryPatch, getNextAsrTaskRetryCount, getTranscribeSegmentPlaceholder, isAsrTransportError, isTransientAsrError, pickMimeType, assertAudioCaptureSupported } from "./shared/util-audio";
+import { LIVE_ASR_TASK_STATUS, classifyLiveAsrBacklog, createLiveAsrCircuitState, isLiveAsrCircuitOpen, recordLiveAsrFailure, recordLiveAsrSuccess, summarizeLiveAsrJobs } from "./asr/live-segment-policy";
 import { canOmitServiceApiKey, isLocalLlmEndpoint } from "./shared/util-llm-endpoint";
 import { obfuscateApiKey, deobfuscateApiKey, redactDiagnosticText, sanitizeDiagnosticData, diagnosticError } from "./shared/util-key-diag";
 import { extractJsonObject } from "./shared/util-json";
@@ -49,16 +49,19 @@ import { MODE_BODIES } from "./prompts/mode-bodies";
 import { SHARED_DISCIPLINE, STRUCTURE_LEVEL_INSTRUCTIONS } from "./prompts/discipline";
 import { INDUSTRY_META_PROMPT } from "./prompts/industry-meta";
 import { JOBPORTRAIT_SYSTEM_PROMPT, JOBPORTRAIT_FOLLOWUP_RULES } from "./prompts/recruit-hrbp";
-import { CLEAN_TRANSCRIPT_SYSTEM, buildCleanTranscriptChunkPrompt, buildKnownSpeakerClause, QUICK_DICTATION_SYSTEM, buildQuickDictationCleanupPrompt } from "./prompts/clean-transcript";
+import { CLEAN_TRANSCRIPT_SYSTEM, buildCleanTranscriptChunkPrompt, buildKnownSpeakerClause } from "./prompts/clean-transcript";
 import { RealtimeOutlineCoordinator, runInOutlineSessionTail } from "./outline-coordinator";
 import { buildLexVoiceVersionPayload, replaceExistingLexVoiceActiveVersionBlock, replaceLeadingFrontmatter, sanitizeLexVoiceActiveVersionBody, splitLeadingFrontmatter, splitLexVoiceVersionPayload } from "./version-content";
 import { getRecentNoteParentPath, getRecentNotePathRelativeToRoot, getRecentNoteTopLevelFolder, normalizeRecentNoteRoot, normalizeRecentNoteRoots, isPathUnderRecentNoteRoots } from "./recent-note-paths";
 import {
+  appendActivityEvent,
+  audioImportStageFromWorkProgress,
   buildAudioImportStages,
   classifyActivityRequest,
   getDominantActivityLiveness,
   normalizeAudioImportStage,
   summarizeActivityRequests,
+  upsertActivityRequest,
 } from "./shared/activity-progress";
 import { TaskActivityStore, getTaskErrorHint, getTaskErrorMessage } from "./shared/task-activity";
 import {
@@ -76,8 +79,20 @@ import {
   speakerLabelForChannel,
 } from "./audio/channel-speakers";
 import { renderMultichannelAudioBufferSliceToWav, transcribeAudioByChannels } from "./asr/channel-transcription";
+import { applySpeakerNamesForLlm, buildConfirmedSpeakerMappings, collectSpeakerCandidates } from "./asr/speaker-mapping";
+import { isSpeakerDiarizationProvider } from "./asr/diarization";
+import { isDashScopeFileTransProvider, resolveImportTranscribeProvider, transcribeImportedAudio } from "./asr/long-audio-transcription";
 import { BriefingCheckpointStore } from "./briefing/checkpoint-store";
-import { BriefingPipelineIncompleteError, assembleBriefingParts, buildProgrammaticTopicMap, createBriefingJobId, planBriefingParts, reconcileBriefingCheckpoint } from "./briefing/pipeline";
+import { BriefingPipelineIncompleteError, assembleBriefingParts, assessBriefingPartFidelity, buildProgrammaticTopicMap, createBriefingJobId, getBriefingFidelityPolicy, getBriefingPartTargetChars, normalizeBriefingPartBody, planBriefingParts, reconcileBriefingCheckpoint } from "./briefing/pipeline";
+import {
+  ExternalInboxScanner,
+  createExternalInboxLedger,
+  isAbsoluteExternalInboxPath,
+  normalizeExternalInboxLedger,
+  pruneExternalInboxLedger,
+  shouldImportExternalInboxFile,
+} from "./audio/external-inbox";
+import { verifyTranscriptCheckpoint } from "./imports/transcript-checkpoint";
 
 
 
@@ -89,6 +104,8 @@ const QUICK_INTERIM_CUTS_MS = [10 * 1000, 60 * 1000, 3 * 60 * 1000];
 const SHORT_RECORDING_FILTER_MS = 3000;
 const KNOWLEDGE_EXTRACTION_BATCH_LIMIT = 20;
 const SEGMENT_CACHE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const EXTERNAL_INBOX_SCAN_INTERVAL_MS = 30 * 1000;
+const EXTERNAL_INBOX_RETRY_DELAYS_MS = [60 * 1000, 5 * 60 * 1000, 15 * 60 * 1000];
 
 function primitiveText(value: unknown): string {
   if (typeof value === "string") return value;
@@ -2875,32 +2892,12 @@ function getAudioDurationMs(blob) {
   });
 }
 
-const IMPORT_LONG_AUDIO_CHUNK_MS = 5 * 60 * 1000;
-const IMPORT_LONG_AUDIO_THRESHOLD_MS = 8 * 60 * 1000;
-const IMPORT_LONG_AUDIO_SIZE_THRESHOLD_BYTES = 24 * 1024 * 1024;
-
-function shouldChunkImportedAudio(blob, durationMs) {
-  const size = blob && Number.isFinite(blob.size) ? blob.size : 0;
-  const duration = Number(durationMs) || 0;
-  return duration >= IMPORT_LONG_AUDIO_THRESHOLD_MS || size >= IMPORT_LONG_AUDIO_SIZE_THRESHOLD_BYTES;
-}
-
-
-
-
-
-
 // 确定性 ASR 错误：格式不被服务端接受 / 本机无法解码 / 超过体积上限 / 4xx 拒绝（密钥、余额、审核）——
 // 重试同样必败，还会对大文件反复解码卡 UI、对服务端反复发必拒请求。队列对这类失败直接吃满重试退出自动重试。
 // 旗标 nonRetryable 由抛错处设置（apimimoPermanentError / HTTP 4xx 分支）；正则兜底匹配已落盘任务的 lastError。
 
 
 
-
-function shouldTranscodeImportedAudio(file, mime) {
-  const ext = String((file && file.extension) || "").toLowerCase();
-  return ext === "aac" || ext === "acc" || String(mime || "").toLowerCase().includes("audio/aac");
-}
 
 function stripLexVoiceImportAppendices(text) {
   return stripSedimentPreExtractionBlocks(String(text || ""))
@@ -3212,356 +3209,6 @@ function createStreamingTranscriptionClient(profile, provider, callbacks) {
 // PCM 实时编码器：MediaStream → PCM 16-bit mono 帧（默认 16kHz，可设 24kHz）
 // 用 ScriptProcessorNode（已废弃但 Electron 下兼容性最好）
 // ============================================================
-
-// 转写/清洗出来的文字，去掉说话人标签、代码围栏和首尾空白，才好直接落进输入框。
-function stripQuickDictationRaw(t) {
-  let s = String(t == null ? "" : t).trim();
-  s = s.replace(/\[说话人\s*\d+\]\s*[:：]?\s*/g, "");
-  s = s.replace(/^```[a-zA-Z]*\s*/, "").replace(/\s*```$/, "");
-  return s.trim();
-}
-
-// 快速口述（Typeless 式短语音输入）：按快捷键/点悬浮窗麦克风 → 录一小段 → 再按结束 →
-// 先把转写原文乐观落到光标或剪贴板，再用 fast 关思维链的短清洗替换。
-// 与主录音链路完全解耦：自带轻量 MediaRecorder，不建纪要、不建 session，只搬"音频→干净文字"这段大脑。
-class QuickDictationController {
-  declare plugin: LexVoicePlugin;
-  constructor(plugin) {
-    this.plugin = plugin;
-    this.state = "idle"; // idle | listening | transcribing | cleaning
-    this.stream = null;
-    this.recorder = null;
-    this.chunks = [];
-    this.mime = "";
-    this.target = "editor"; // editor | clipboard
-    this.asrProviderId = null; // 快速口述专用转写服务（null=回退到活跃服务）
-    this.asrOverride = null; // 快速口述专用转写 provider 对象（配了 quickDictationAsr 时用；null=回退到活跃服务）
-    this.asrLabel = "";
-    this.anchor = null; // { editor, from } —— 开录时锚定光标
-    this.startedAt = 0;
-    this._stopResolve = null;
-    this._starting = false;
-    this._lastRawText = ""; // 上次听写的转写原文（供召回命令）
-    this._mobileStreamNoticeShown = false;
-    this._streamErrorNotified = false;
-    this._doneTimer = null; // "已写入" 闪现回落 idle 的计时器
-    // 流式听写（WebSocket ASR）：边说边出实时字幕；批量（如 MiMo）走原路径。
-    this.streamingClient = null;
-    this.pcmEncoder = null;
-    this.liveText = "";
-    this._streaming = false;
-  }
-  isActive() { return this.state !== "idle"; }
-  _setState(s) {
-    this.state = s;
-    try { if (this.plugin.bubble) this.plugin.bubble.scheduleUpdate(); } catch { /* intentionally empty */ }
-  }
-  async toggle(target) {
-    if (this.state === "idle") { await this.start(target); return; }
-    if (this.state === "listening") { await this.stop(); return; }
-    // 处理中（转写/整理）时再次触发：忽略，不弹条幅。
-  }
-  async start(target) {
-    if (this.state !== "idle" || this._starting) return;
-    if (this.plugin.recorder && this.plugin.recorder.state !== "idle") {
-      new obsidian.Notice("会议录音中，听写不可用；请先停止录音。", 5000);
-      return;
-    }
-    new obsidian.Notice("即时听写不会保存录音；需要保存会议内容，请使用“会议纪要录音”。", 6000);
-    this._starting = true; // 同步占位，防麦克风获取期间二次触发起两条流
-    try {
-      // 自动落点：设置为「剪贴板」则强制走剪贴板；否则自动判断——
-      // Obsidian 窗口在前台且有活动的 Markdown 编辑器 → 插入光标；否则（切到别的 app / 无可写编辑器）→ 剪贴板，等你自己粘贴。
-      this.anchor = null;
-      const forceClip = this.plugin.settings.quickDictationTarget === "clipboard";
-      const view = forceClip ? null : this.plugin.app.workspace.getActiveViewOfType(obsidian.MarkdownView);
-      const editor = (view && view.editor && (typeof activeDocument === "undefined" || activeDocument.hasFocus())) ? view.editor : null;
-      if (editor) { this.target = "editor"; this.anchor = { editor, from: editor.getCursor() }; }
-      else { this.target = "clipboard"; }
-      try {
-        assertAudioCaptureSupported();
-        this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      } catch (e) {
-        console.error("[LexVoice] quick dictation mic failed", e);
-        try { void this.plugin.logDiagnostic("error", "quickdict.mic_failed", "听写麦克风打不开", { error: (e && e.message) || String(e) }); } catch { /* intentionally empty */ }
-        new obsidian.Notice(`听写：麦克风打不开：${(e && e.message) || e}`, 8000);
-        this._cleanupStream();
-        return;
-      }
-      // 流式检测：听写转写地址是 ws(s):// 且三项齐全 → 走流式实时字幕；否则批量。
-      const s = this._resolveQuickStreaming();
-      if (s) {
-        // ── 流式听写：连 WebSocket ASR，PCM 推流，onPartial 更新实时字幕 ──
-        this._streamErrorNotified = false; // 每场重置"中途错误只提示一次"
-        this.streamingClient = createStreamingTranscriptionClient(s.profile, s.provider, {
-          onPartial: (fullText, isFinal, sentenceText) => {
-            // 字幕只显示"当前这句"（左对齐自然生长、不狂滚）；全文在结束时由 getFullText() 整段交给 LLM。
-            this.liveText = (sentenceText != null ? sentenceText : (fullText || ""));
-            try { if (this.plugin.bubble) this.plugin.bubble.scheduleUpdate(); } catch { /* intentionally empty */ }
-          },
-          onError: (e) => {
-            console.error("[LexVoice] 听写 streaming error", e);
-            try { void this.plugin.logDiagnostic("error", "quickdict.stream_error", "听写流式中途错误", { error: (e && e.message) || String(e) }); } catch { /* intentionally empty */ }
-            // 中途错误只提示一次：字幕会停在已到达文本，结束时用 getFullText 兜底继续整理
-            if (!this._streamErrorNotified) {
-              this._streamErrorNotified = true;
-              new obsidian.Notice(`听写流式转写出错：${String((e && e.message) || e).slice(0, 100)}；结束后将用已到达文本继续。`, 8000);
-            }
-          },
-          onClosed: () => {},
-        });
-        // 点击即反馈：先进"聆听"态、显示"连接中…"，避免连接期间看着像"点了没反应"。
-        this._streaming = true;
-        this.startedAt = Date.now();
-        this.liveText = "连接中…";
-        this._setState("listening");
-        try {
-          await this.streamingClient.connect();
-        } catch (e) {
-          console.error("[LexVoice] 听写流式连接失败", e);
-          try { void this.plugin.logDiagnostic("error", "quickdict.stream_connect_failed", "听写流式连接失败", { error: (e && e.message) || String(e) }); } catch { /* intentionally empty */ }
-          new obsidian.Notice(`听写连接失败：${(e && e.message) || e}`, 9000);
-          this._cleanupStreaming();
-          this._cleanupStream();
-          this.anchor = null;
-          this.liveText = "";
-          this._streaming = false;
-          this._setState("idle");
-          return;
-        }
-        // 连上了：清掉"连接中"，等首个 partial；开始推流。
-        this.liveText = "";
-        try { if (this.plugin.bubble) this.plugin.bubble.scheduleUpdate(); } catch { /* intentionally empty */ }
-        const sampleRate = s.profile.streamProtocol.startsWith("openai-realtime") ? 24000 : 16000;
-        this.pcmEncoder = new PcmStreamEncoder(this.stream, {
-          sampleRate,
-          onFrame: (ab) => { try { if (this.streamingClient) this.streamingClient.sendAudioFrame(ab); } catch { /* intentionally empty */ } },
-        });
-        this.pcmEncoder.start();
-      } else {
-        // ── 批量听写（如 MiMo）：MediaRecorder 录整段，停止后统一转写 ──
-        this._streaming = false;
-        // 快速口述转写服务：配了「快速转写 API」就单独走它，否则回退到活跃的会议转写服务。
-        const qa = this.plugin.settings.quickDictationAsr;
-        if (qa && qa.endpoint && qa.apiKey && qa.model) {
-          this.asrOverride = { id: "quick-asr", name: "快速转写", endpoint: qa.endpoint, apiKey: qa.apiKey, model: qa.model, language: qa.language || "" };
-        } else {
-          this.asrOverride = null;
-        }
-        const asrProvider = this.asrOverride || resolveTranscribeProvider(this.plugin);
-        this.asrLabel = (asrProvider && asrProvider.name) || (asrProvider && asrProvider.id) || "";
-        // 格式选择跟着服务走：APIMiMo 录 Opus（它只收 wav/mp3，本机解码转 WAV，Electron 解得了 Opus）。
-        let preferOpus = false;
-        try { preferOpus = isApimimoAsrProvider(asrProvider); } catch { /* intentionally empty */ }
-        this.mime = pickMimeType(preferOpus);
-        this.chunks = [];
-        try {
-          this.recorder = this.mime ? new MediaRecorder(this.stream, { mimeType: this.mime }) : new MediaRecorder(this.stream);
-        } catch { this.recorder = new MediaRecorder(this.stream); }
-        this.recorder.ondataavailable = (e) => { if (e.data && e.data.size) this.chunks.push(e.data); };
-        this.recorder.onstop = () => { const r = this._stopResolve; this._stopResolve = null; if (r) r(); };
-        this.startedAt = Date.now();
-        try { this.recorder.start(); }
-        catch (e) {
-          console.error("[LexVoice] quick dictation recorder start failed", e);
-          try { void this.plugin.logDiagnostic("error", "quickdict.recorder_failed", "快速口述无法开始录音", { error: (e && e.message) || String(e) }); } catch { /* intentionally empty */ }
-          this._cleanupStream();
-          return;
-        }
-        this._setState("listening"); // 胶囊 HUD 显示"聆听中"，不弹条幅
-      }
-    } finally { this._starting = false; }
-  }
-  cancel() {
-    if (this._doneTimer) { window.clearTimeout(this._doneTimer); this._doneTimer = null; }
-    if (this.state === "idle") return;
-    try { if (this.recorder && this.recorder.state !== "inactive") this.recorder.stop(); } catch { /* intentionally empty */ }
-    this._cleanupStreaming();
-    this._cleanupStream();
-    this.chunks = [];
-    this.anchor = null;
-    this._stopResolve = null;
-    this.liveText = "";
-    this._setState("idle"); // _setState 内部 scheduleUpdate 重绘胶囊
-  }
-  async stop() {
-    if (this.state !== "listening") return;
-    // ── 流式听写：停 PCM 编码器 → finish() 拿终稿 → 关客户端 → 走共享收尾 ──
-    if (this._streaming) {
-      try { if (this.pcmEncoder) this.pcmEncoder.stop(); } catch { /* intentionally empty */ }
-      this.pcmEncoder = null;
-      this._setState("transcribing");
-      let raw = "";
-      const t0 = this.startedAt;
-      try {
-        if (this.streamingClient) {
-          await this.streamingClient.finish();
-          raw = this.streamingClient.getFullText() || this.liveText || "";
-        }
-      } catch {
-        // finish() 失败也要尽量拿全文：getFullText 含已定稿句子；liveText 只有当前一句，仅作最后兜底
-        try { raw = (this.streamingClient && this.streamingClient.getFullText()) || this.liveText || ""; }
-        catch { raw = this.liveText || ""; }
-        try { void this.plugin.logDiagnostic("warn", "quickdict.stream_finish_failed", "听写流式收尾失败，已用已到达文本兜底", { chars: raw.length }); } catch { /* intentionally empty */ }
-      }
-      try { if (this.streamingClient && this.streamingClient._safeClose) this.streamingClient._safeClose(); } catch { /* intentionally empty */ }
-      this.streamingClient = null;
-      this._streaming = false;
-      this.liveText = "";
-      this._cleanupStream();
-      // 提升转写质量：流式文本也过一遍热词修正（批量路径在 transcribeAudio 内部已做，流式此前漏了）
-      try { raw = applyVocabularyCorrections(raw, await loadVocabularyGroups(this.plugin)); } catch { /* intentionally empty */ }
-      await this._finalize(raw, Date.now() - t0);
-      return;
-    }
-    // ── 批量听写：MediaRecorder 停 → blob → 转写 → 共享收尾 ──
-    const stopped = new Promise((res) => { this._stopResolve = res; });
-    try { this.recorder.stop(); } catch { if (this._stopResolve) { this._stopResolve(); this._stopResolve = null; } }
-    await stopped;
-    this._cleanupStream();
-    const blob = new Blob(this.chunks, { type: this.mime || "audio/webm" });
-    const durationMs = Date.now() - this.startedAt;
-    this.chunks = [];
-    if (!blob.size || durationMs < 400) {
-      this.anchor = null;
-      this._setState("idle"); // 太短：静默回落
-      return;
-    }
-    this._setState("transcribing");
-    let raw = "";
-    const _tTranscribe = Date.now();
-    try {
-      raw = await transcribeAudio(this.plugin, blob, blob.type || this.mime || "audio/webm", this.asrOverride || undefined);
-    } catch (e) {
-      console.error("[LexVoice] quick dictation transcribe failed", e);
-      try { void this.plugin.logDiagnostic("error", "quickdict.transcribe_failed", "听写转写失败", { error: (e && e.message) || String(e) }); } catch { /* intentionally empty */ }
-      new obsidian.Notice(`听写转写失败：${String((e && e.message) || e).slice(0, 120)}`, 9000);
-      this.anchor = null;
-      this._setState("idle");
-      return;
-    }
-    const transcribeMs = Date.now() - _tTranscribe;
-    await this._finalize(raw, transcribeMs);
-  }
-  // 转写原文就绪后的共享收尾：清洗 → 落编辑器/剪贴板 → done 闪现 → 计时日志 + 失败兜底。
-  // 批量与流式两条 stop 路径都调用此方法；行为与旧内联逻辑逐字一致。
-  async _finalize(raw, transcribeMs) {
-    raw = stripQuickDictationRaw(raw);
-    if (!raw) {
-      this.anchor = null;
-      this._setState("idle"); // 没转出内容：静默回落
-      return;
-    }
-    this._lastRawText = raw; // 原文可召回：整理成败都留一份（命令「即时听写 · 复制上次转写原文」）
-    // 不先写原文（用户要求）：等结构化整理出来，一次性落整理版；整理失败才兜底落原文，并把失败原因显示出来。
-    const toEditor = this.target === "editor" && !!(this.anchor && this.anchor.editor);
-    this._setState("cleaning");
-    let clean = "";
-    let cleanErr = null;
-    const _tClean = Date.now();
-    const cleanupPrompt = buildQuickDictationCleanupPrompt(raw, this.plugin.settings.quickDictationPrompt);
-    const cleanupOpts = { timeoutMs: 25000, noRetry: true, thinkingMode: "fast", payload: { max_tokens: 1500 } };
-    try {
-      clean = await callLlm(this.plugin, QUICK_DICTATION_SYSTEM, cleanupPrompt, cleanupOpts);
-    } catch (e) {
-      cleanErr = e;
-      const msg = String((e && e.message) || e);
-      // 失败若不像超时——很可能是该模型不认 enable_thinking 参数（如 mimo ultraspeed → 4xx）。
-      // 去掉思考档参数自愈重试一次；超时则不重试（免得再等一轮）。
-      if (!/超时|timeout|abort/i.test(msg)) {
-        console.warn("[LexVoice] quick dictation cleanup failed, retrying without thinking param", e);
-        try {
-          clean = await callLlm(this.plugin, QUICK_DICTATION_SYSTEM, cleanupPrompt, Object.assign({}, cleanupOpts, { thinkingMode: "default" }));
-          cleanErr = null;
-        } catch (e2) { cleanErr = e2; console.warn("[LexVoice] quick dictation cleanup retry failed", e2); }
-      } else {
-        console.warn("[LexVoice] quick dictation cleanup timed out", e);
-      }
-    }
-    const cleanMs = Date.now() - _tClean;
-    clean = stripQuickDictationRaw(clean);
-    const cleanedOk = !!clean;
-    const finalText = clean || raw; // 整理失败兜底用原文
-    let landedOk = false;
-    if (toEditor) {
-      try {
-        this.anchor.editor.replaceRange(finalText, this.anchor.from);
-        this.anchor.editor.setCursor(this.anchor.editor.offsetToPos(this.anchor.editor.posToOffset(this.anchor.from) + finalText.length));
-        landedOk = true;
-      } catch (e) {
-        // 编辑器在说话期间被关闭等：兜底转投剪贴板，绝不静默丢内容
-        console.error("[LexVoice] quick dictation insert failed", e);
-        try {
-          await navigator.clipboard.writeText(finalText);
-          landedOk = true;
-          new obsidian.Notice("编辑器已关闭，即时听写结果已复制到剪贴板", 6000);
-        } catch { /* intentionally empty */ }
-      }
-    } else {
-      try { await navigator.clipboard.writeText(finalText); landedOk = true; }
-      catch (e) { console.error("[LexVoice] quick dictation clipboard failed", e); }
-    }
-    this.anchor = null;
-    if (landedOk) {
-      // 落字成功才闪现「已写入」态（done），1200ms 后回落 idle；失败绝不给假成功信号。
-      this._setState("done");
-      if (this._doneTimer) { window.clearTimeout(this._doneTimer); this._doneTimer = null; }
-      this._doneTimer = window.setTimeout(() => {
-        this._doneTimer = null;
-        if (this.state === "done") this._setState("idle");
-      }, 1200);
-    } else {
-      new obsidian.Notice("即时听写结果写入失败；可用命令“即时听写 · 复制上次转写原文”找回内容。", 9000);
-      try { void this.plugin.logDiagnostic("error", "quickdict.land_failed", "听写结果落字失败", { toEditor, chars: finalText.length }); } catch { /* intentionally empty */ }
-      this._setState("idle");
-    }
-    try {
-      void this.plugin.logDiagnostic("info", "quickdict.timing", "即时听写处理完成", { transcribeMs, cleanMs });
-    } catch { /* diagnostics must not affect dictation */ }
-    // 成功：不弹条幅，由胶囊「已写入」态表达；整理失败：弹一条通知 + 写诊断日志（已兜底落原文）。
-    if (!cleanedOk) {
-      new obsidian.Notice("大模型整理失败，已置入转写原文");
-      try { void this.plugin.logDiagnostic("warn", "quickdict.cleanup_failed", "快速口述整理没生效，已落原文", { reason: cleanErr ? String((cleanErr && cleanErr.message) || cleanErr).slice(0, 200) : "模型返回空", transcribeMs, cleanMs }); } catch { /* intentionally empty */ }
-    }
-  }
-  _cleanupStream() {
-    try { if (this.stream) this.stream.getTracks().forEach((t) => { try { t.stop(); } catch { /* intentionally empty */ } }); } catch { /* intentionally empty */ }
-    this.stream = null;
-    this.recorder = null;
-  }
-  // 听写转写配置是否为流式（WebSocket ASR）：地址、密钥、模型齐全且地址是 ws(s)://。
-  // 返回 { profile:{streamProtocol}, provider:{endpoint,apiKey,model,language} } 或 null（走批量）。
-  _resolveQuickStreaming() {
-    const qa = this.plugin.settings.quickDictationAsr;
-    if (!qa || !qa.endpoint || !qa.apiKey || !qa.model) return null;
-    if (!/^wss?:\/\//i.test(qa.endpoint)) return null;
-    // 移动端无 Node require，打包的 ws 初始化必败、浏览器 WebSocket 又设不了鉴权头——流式必挂。
-    // 提前回退批量路径 + 一次性提示，免得用户看到浏览器级晦涩报错。
-    if (isLexVoiceMobileRuntime()) {
-      if (!this._mobileStreamNoticeShown) {
-        this._mobileStreamNoticeShown = true;
-        new obsidian.Notice("移动端暂不支持流式听写（需要桌面端），已改用整段转写。", 6000);
-      }
-      return null;
-    }
-    const host = String(qa.endpoint).toLowerCase();
-    let streamProtocol = "dashscope-ws";
-    if (host.includes("dashscope")) streamProtocol = "dashscope-ws";
-    else if (host.includes("openai")) streamProtocol = "openai-realtime-transcription";
-    return {
-      profile: { streamProtocol },
-      provider: { endpoint: qa.endpoint, apiKey: qa.apiKey, model: qa.model, language: qa.language || "" },
-    };
-  }
-  // 收尾流式：停 pcm 编码器、关流式客户端、清标志。
-  _cleanupStreaming() {
-    try { if (this.pcmEncoder) this.pcmEncoder.stop(); } catch { /* intentionally empty */ }
-    this.pcmEncoder = null;
-    try { if (this.streamingClient && this.streamingClient._safeClose) this.streamingClient._safeClose(); } catch { /* intentionally empty */ }
-    this.streamingClient = null;
-    this._streaming = false;
-  }
-}
 
 class RecorderService {
   declare plugin: LexVoicePlugin;
@@ -4855,7 +4502,7 @@ function cleanLexVoiceTranscriptBlock(block) {
     .replace(/<\/?details>/gi, "")
     .replace(/^###\s+段落\s+\d+[^\n]*$/gm, "")
     .replace(/!\[\[[^\]]+\]\]/g, "")
-    .replace(/^_\[转写失败[^\n]*$/gm, "")
+    .replace(/^_\[(?:转写失败|等待后台转写|此段尚未完成转写)[^\n]*$/gm, "")
     .replace(/^_\[此段无内容\]_$/gm, "")
     .replace(/^\s*---\s*$/gm, "")
     .replace(/[ \t]+\n/g, "\n")
@@ -5022,7 +4669,7 @@ function normalizeSegmentsForMergedNote(segments, offsetMs, startIndex, sourceFi
 function stripLexVoiceEmptyPlaceholders(text) {
   return String(text || "")
     .replace(/!\[\[[^\]]+\]\]/g, "")
-    .replace(/_?\[(?:此段无内容|无输出|转写失败|合并润色失败)[^\]\n]*\]_?/g, "")
+    .replace(/_?\[(?:此段无内容|无输出|转写失败|等待后台转写|此段尚未完成转写|合并润色失败)[^\]\n]*\]_?/g, "")
     .replace(/^(?:没有|暂无)(?:可整理内容|有效内容|实际内容|可用内容)[。.!！]*$/gm, "")
     .replace(/^转写(?:为空|返回为空|无内容)[。.!！]*$/gm, "")
     .replace(/[ \t]+\n/g, "\n")
@@ -6052,11 +5699,11 @@ function formatMergeSegmentForPrompt(seg, fallbackIndex) {
     : "";
   const anchor = segmentAnchor ? ` ${segmentAnchor}` : "";
   const tag = `===SEG ${safeIndex + 1} (${formatElapsed(start)}-${formatElapsed(end)})${anchor}===`;
-  // 转写失败段：把失败原因带进 merge 输入并显式要求模型在纪要相应位置标注缺漏，
-  // 不让"这段没内容"被模型静默跳过 → 纪要在该时段凭空断层而用户不知。
+  // 转写失败段只向模型说明时间范围缺失。技术错误留在任务中心和诊断日志，
+  // 不进入长期文档，也不消耗模型上下文去解释网络故障。
   const text = String((seg && seg.text) || "").trim();
   if (!text && seg && seg.error) {
-    return `${tag}\n_[本段转写失败：${String(seg.error).slice(0, 120)}；此时间段（${formatElapsed(start)}–${formatElapsed(end)}）内容缺失，请在纪要对应位置标注"（此处约 ${formatElapsed(start)}–${formatElapsed(end)} 有内容因转写失败而缺失）"]_`;
+    return `${tag}\n_[此时间段（${formatElapsed(start)}–${formatElapsed(end)}）尚未完成转写；如需引用该时段内容，请标注“待补转写”，不要推测或补写。]_`;
   }
   return `${tag}\n${text || "_[此段无内容]_"}`;
 }
@@ -6189,7 +5836,6 @@ async function polishTranscript(plugin, transcript, mode, recruitContext, sessio
       ? truncateForLlmPrompt(recruitPrefix, TEXT_IMPORT_RECRUIT_CONTEXT_CHARS)
       : recruitPrefix) + "\n\n" + userPrompt;
   }
-  userPrompt = appendSedimentPreExtractionInstruction(userPrompt);
   // 流式：merge 是最长、最贵、跑一次的调用。流式 + 空闲超时确保服务端只要在持续输出就不会被
   // 客户端总超时 abort，避免"扣了钱却因超时拿不到结果"的浪费（符合总纲：不因工程缺陷浪费）。
   const raw = await callLlm(plugin, sys, userPrompt, { stream: true, payload: { max_tokens: briefingMergeMaxTokens } });
@@ -6279,7 +5925,7 @@ function parseCoverageScanModel(raw, prev, allowFreeze = true) {
 // 人物指认幻觉的机械兜底（软提示，不删改）：模型可能把转写里零星出现的称呼提升为贯穿全文的
 // 核心人物（实测案例：把全场只提到三五次的"某称呼"指认为一号位）。这里按 lexvoice-people 名单
 // 比对"产出引用次数 vs 原始转写出现次数"，明显倒挂的在文末附核对 callout。
-// 字面计数会因转写错字低估真实人名（"李扣"被听写成"你扣"），所以只提示、绝不自动改写。
+    // 字面计数会因转写错字低估真实人名（"李扣"被转写成"你扣"），所以只提示、绝不自动改写。
 function appendEntityEvidenceWarning(outputMd, transcript) {
   try {
     const md = String(outputMd || "");
@@ -6355,18 +6001,108 @@ async function cleanTranscript(plugin, segments, ceiling) {
   return { text: parts.join("\n\n"), truncated: anyTruncated };
 }
 
+function buildBriefingFidelityContract(assessment, profile, segmentCount) {
+  const detailClause = profile === "detailed"
+    ? "逐项展开背景、推理过程、例子、异议、数字、影响与后续动作；原文反复讨论但角度不同的内容，不得粗暴合并成一句。"
+    : profile === "concise"
+      ? "可以压缩重复口语，但每个独立事实、判断、数字、立场、例子、待办和风险仍须至少出现一次。"
+      : "保留支撑结论所需的事实、论证、例子、分歧与上下文，不要只剩结论清单。";
+  return `【本部分完整度合同】
+- 原始转写约 ${assessment.sourceChars} 字，包含 ${Math.max(1, Number(segmentCount) || 1)} 个时间分段。
+- 可见正文目标约 ${assessment.targetOutputChars} 字，原则上不得少于 ${assessment.minimumOutputChars} 字。该范围是防止摘要化的完整度下限，不是让你复述口头禅或用空话凑字数。
+- ${detailClause}
+- 必须逐个处理输入中的 \`===SEG N===\`。只有纯静音、完全重复或明确标注未完成转写的分段可以不展开；其余每段的新增信息都要在正文里找到对应落点。
+- 如果某个主题跨多个分段延续，可以合并到同一章节，但必须保留后续分段新增的事实、例子、转折和结论。`;
+}
+
+function buildExternalAudioSourceDetails(session) {
+  const source = session && session.externalAudioSource;
+  const name = String(source && source.name || "").trim();
+  if (!name) return "";
+  return [
+    "<details>",
+    "<summary>导入来源</summary>",
+    "",
+    `文件：${name}`,
+    "",
+    "源音频保留在同步文件夹中，未复制到当前知识库。",
+    "",
+    "</details>",
+  ].join("\n");
+}
+
+function parseBriefingPartResponse(raw) {
+  const sedimentPreExtraction = extractSedimentPreExtractionBlock(String(raw || ""));
+  const parsedPeople = parsePeopleFromOutput(sedimentPreExtraction.cleaned);
+  const parsedTags = parseSuggestedTagsFromOutput(parsedPeople.cleaned);
+  let body = parsedTags.cleaned;
+  const summaryMatch = body.match(/<!--\s*lexvoice-part-summary\s*:\s*([\s\S]*?)\s*-->/i);
+  const summary = summaryMatch ? summaryMatch[1].trim() : "";
+  if (summaryMatch) body = body.replace(summaryMatch[0], "");
+  body = stripModeSuggestionBlocks(body.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "")).trim();
+  return {
+    body,
+    summary,
+    people: mergeUniqueStrings([], (parsedPeople.people || []).concat(parsedTags.people || [])),
+    tags: mergeUniqueStrings([], parsedTags.tags || []),
+    sedimentObjects: sedimentPreExtraction.objects || null,
+  };
+}
+
+function mergeBriefingUsage(...items) {
+  return items.reduce((total, item) => ({
+    promptTokens: total.promptTokens + Math.max(0, Number(item && item.promptTokens) || 0),
+    completionTokens: total.completionTokens + Math.max(0, Number(item && item.completionTokens) || 0),
+    reasoningTokens: total.reasoningTokens + Math.max(0, Number(item && item.reasoningTokens) || 0),
+    totalTokens: total.totalTokens + Math.max(0, Number(item && item.totalTokens) || 0),
+  }), { promptTokens: 0, completionTokens: 0, reasoningTokens: 0, totalTokens: 0 });
+}
+
+function buildBriefingPartExpansionPrompt(joinedChunk, currentBody, timeRange, fidelityContract) {
+  return `当前纪要正文相对原始转写明显过短，说明上一版把展开讨论压成了摘要。请对照原始转写，返回一份**完整替换版正文**。
+
+这是同一场会议中的一个内部时间窗口，不是独立会议，也不是独立文档。内部切片仅用于控制请求体量，最终会按时间顺序合并为一篇纪要。
+
+${fidelityContract}
+
+修订规则：
+- 保留当前稿里已经正确呈现的内容，并补回遗漏的事实、推理链、案例、数字、分歧、风险、上下文和行动依据。
+- 重点检查每个 \`===SEG N===\` 是否有新增信息被遗漏，不能只增加形容词或重复已有结论。
+- 按讨论实际推进顺序重组，使用实际议题名称作为二级/三级标题和自然段；不要用“第 N 部分”“时间窗口 N”“分段 N”作为标题。
+- 不要重新介绍会议背景，不要输出独立会议的总标题、全局摘要或全局结论；跨窗口延续的议题直接续写，不强行在本窗口收束。
+- 不要输出修订说明、前言、YAML 或代码围栏。
+- 待办只在原文确有动作时使用 Markdown todo；责任人和截止时间不明确就省略。
+- 末尾保留三条机器注释：\`lexvoice-people\`、\`lexvoice-tags\`、\`lexvoice-part-summary\`。
+
+【时间范围】
+${timeRange}
+
+【原始转写】
+${joinedChunk}
+
+【当前过短稿】
+${currentBody}`;
+}
+
 // 统一整理流水线的「正文部分」提示词。全局议题图只负责保持跨时段关系，正文事实仍以当前原始转写为准。
-function buildChunkMergePrompt(joinedChunk, partIndex, partTotal, timeRange, topicMap, modeGuidance) {
+function buildChunkMergePrompt(joinedChunk, partIndex, partTotal, timeRange, topicMap, modeGuidance, fidelityContract) {
   const topLevelRule = partTotal > 1
-    ? "- 只整理本部分，不复述其它部分；不要写 YAML frontmatter；不要写顶部总览/摘要 callout（顶部总览由程序统一生成）。"
+    ? "- 只整理当前内部时间窗口的新内容，不复述其它窗口；不要写 YAML frontmatter、文档总标题、顶部总览、摘要 callout 或全局结论（这些由程序统一处理）。"
     : "- 这是唯一正文部分：按本模式要求输出完整成品正文；不要写 YAML frontmatter（由程序统一生成）。";
-  return `你正在整理一场会议/录音的**第 ${partIndex}/${partTotal} 部分**（时间段约 ${timeRange}）。请把这部分的分段转写整理成忠实、结构化的 Markdown 纪要正文。
+  return `你正在整理**同一场会议**中的一个内部时间窗口（处理进度 ${partIndex}/${partTotal}，时间约 ${timeRange}）。请把当前窗口的分段转写整理成可连续拼入同一篇 Markdown 纪要的正文。
+
+【连续性硬约束】内部窗口只用于控制请求体量，不代表会议被拆成多场，也不是最终文档章节。严禁把当前窗口写成独立会议、独立纪要或“第 N 部分”。若议题从上一窗口延续，直接承接该议题；若议题还会继续，不要为了窗口结束而强行总结或下结论。
 
 【最高优先级·忠实还原】本部分出现的所有事实、数字、判断、立场、待办、风险、关键原话一律保留，宁可写长也不要漏；只做无损整理（去口头禅、合并重复表述），不得以"概括/精炼"为名删除任何一条具体信息。禁止用"还讨论了 X""此外提到 Y"这类一句话带过本部分实际展开过的内容——该展开的要展开成完整段落。
+
+【组织主轴·以事为中心】按议题或事项的发展脉络组织：问题如何提出、背景和证据如何补充、观点如何演进或发生分歧、最终形成什么判断与动作。明确保留讨论中的正例、反例、类比和失败经验，并说明它们支撑或限制了什么判断。不要按说话人轮次机械写成「A 说……B 说……」；只有关键观点、独特判断、明确分歧和责任承诺需要注明提出者。
+
+${fidelityContract}
 
 【硬性要求】
 ${topLevelRule}
 - 用二级/三级标题组织本部分议题；按讨论实际推进顺序展开。
+- 标题必须使用真实议题名称，不得使用“第 N 部分”“时间窗口 N”“分段 N”或时间范围作为标题。本文的连续性规则高于下方模式模板中的文档级标题、全局摘要和结论要求。
 - 待办用 \`- [ ] 事项：<动作>\`，能确定时再补 \`责任人：<人>\` 和 \`截止：<时间>\`；无法判断就直接省略该字段，不要写"未提及"。
 - 转写里没出现的人名/公司/数字一律不写，不编造。
 - 直接输出本部分正文 Markdown，无前言、无解释、无代码围栏。
@@ -6378,7 +6114,7 @@ ${topicMap || "（未生成；请严格按当前时段原始转写整理）"}
 【本模式的输出要求】
 ${modeGuidance || "忠实、完整、结构清晰地整理当前时段。"}
 
-【本部分转写】
+【当前窗口转写】
 ${joinedChunk}`;
 }
 
@@ -6407,12 +6143,17 @@ async function clearCommittedBriefingCheckpoint(plugin, meta) {
   }
 }
 
-function getBriefingPipelineTargetChars(plugin, repolishOptions) {
-  const detailLevel = String(repolishOptions && repolishOptions.detailLevel || "");
-  if (detailLevel === "detailed") return 18000;
-  if (detailLevel === "concise") return 32000;
-  const structure = String(repolishOptions && repolishOptions.structureLevel || plugin.settings.briefingStructureLevel || "balanced");
-  return structure === "strict" ? 20000 : 24000;
+function getBriefingEffectiveDetailLevel(mode, repolishOptions) {
+  const explicit = String(repolishOptions && repolishOptions.detailLevel || "").trim();
+  if (explicit) return explicit;
+  return mode === "synthesis" ? "detailed" : "balanced";
+}
+
+function getBriefingPipelineTargetChars(plugin, mode, repolishOptions) {
+  return getBriefingPartTargetChars({
+    detailLevel: getBriefingEffectiveDetailLevel(mode, repolishOptions),
+    structureLevel: repolishOptions && repolishOptions.structureLevel || plugin.settings.briefingStructureLevel,
+  });
 }
 
 function buildBriefingPipelineOptionsKey(plugin, mode, repolishOptions) {
@@ -6421,7 +6162,7 @@ function buildBriefingPipelineOptionsKey(plugin, mode, repolishOptions) {
     mode,
     promptTemplate: String(plugin.settings.activeTemplateByMode && plugin.settings.activeTemplateByMode[mode] || ""),
     structureLevel: String(repolishOptions && repolishOptions.structureLevel || plugin.settings.briefingStructureLevel || "balanced"),
-    detailLevel: String(repolishOptions && repolishOptions.detailLevel || "balanced"),
+    detailLevel: getBriefingEffectiveDetailLevel(mode, repolishOptions),
     fidelity: String(repolishOptions && repolishOptions.fidelity || "faithful"),
     language: String(plugin.settings.briefingTranslationMode || "off") + ":" + String(plugin.settings.briefingTargetLanguage || ""),
   });
@@ -6445,20 +6186,24 @@ ${joined}`;
 }
 
 function buildBriefingAuditPrompt(topicMap, parts) {
-  const summaries = parts.map((part) => `- 第 ${part.index + 1} 部分：${part.summary || "（无小结）"}`).join("\n");
+  const summaries = parts.map((part) => {
+    const ratio = Number(part.outputRatio);
+    const ratioText = Number.isFinite(ratio) && ratio > 0 ? `${Math.round(ratio * 100)}%` : "未知";
+    return `- 第 ${part.index + 1} 部分：原文 ${Number(part.sourceChars) || 0} 字 → 正文 ${Number(part.outputChars) || 0} 字（${ratioText}，${part.qualityStatus || "未检查"}）；${part.summary || "（无小结）"}`;
+  }).join("\n");
   return `请检查下面这篇分部纪要的覆盖情况。你只做审计，不重写纪要。
 
 对照全局议题图和各部分小结，检查：
 1. 是否有全局议题没有被任何部分覆盖；
 2. 是否有明显重复、互相矛盾或时序错位；
-3. 是否有部分正文疑似被截断。
+3. 是否有部分正文疑似被截断，或完整度状态仍为 under-detailed。
 
 如果没有问题，只输出 OK。发现问题时，用简短 Markdown 列表写出“缺失 / 重复 / 矛盾 / 截断”及对应部分编号，不要补写正文。
 
 【全局议题图】
 ${topicMap}
 
-【各部分小结】
+【各部分完整度与小结】
 ${summaries}`;
 }
 
@@ -6480,12 +6225,64 @@ function mergeBriefingSedimentObjects(parts) {
   return found ? normalizeSedimentExtractionModel(merged) : null;
 }
 
+function getBriefingTaskActivityId(computedMeta) {
+  return String(computedMeta && computedMeta._taskActivityId || "").trim();
+}
+
+function createBriefingLlmActivityOptions(plugin, computedMeta, patch) {
+  const taskId = getBriefingTaskActivityId(computedMeta);
+  const taskMeter = computedMeta && computedMeta._taskMeter || null;
+  if (!taskId || !plugin || typeof plugin.patchTaskActivity !== "function") {
+    return taskMeter ? { taskMeter } : {};
+  }
+  const basePatch = Object.assign({
+    status: "running",
+    deadlineAt: 0,
+  }, patch || {});
+  let lastHeartbeatAt = 0;
+  const heartbeat = (detail) => {
+    const now = Date.now();
+    if (now - lastHeartbeatAt < 1500) return;
+    lastHeartbeatAt = now;
+    plugin.patchTaskActivity(taskId, Object.assign({}, basePatch, {
+      detail: detail || basePatch.detail || "模型正在返回内容",
+    }));
+  };
+  return {
+    priority: "interactive",
+    taskMeter,
+    onQueued: () => plugin.patchTaskActivity(taskId, Object.assign({}, basePatch, {
+      stage: "llm-queued",
+      stageLabel: "等待 AI 服务",
+      detail: "前面的模型任务完成后会自动开始",
+    })),
+    onStart: () => plugin.patchTaskActivity(taskId, basePatch),
+    onActivity: () => heartbeat("模型正在返回内容"),
+  };
+}
+
 function reportBriefingPartProgress(plugin, computedMeta, checkpoint, currentPart) {
+  const total = Math.max(1, checkpoint.parts.length);
+  const completed = checkpoint.parts.filter(part => part.status === "complete").length;
+  const taskId = getBriefingTaskActivityId(computedMeta);
+  if (taskId && plugin && typeof plugin.patchTaskActivity === "function") {
+    const finished = completed >= total;
+    plugin.patchTaskActivity(taskId, {
+      status: "running",
+      stage: finished ? "assembling" : "llm",
+      stageLabel: finished
+        ? "正在组装纪要"
+        : total > 1 ? `AI 整理 · 第 ${Math.min(total, Math.max(1, currentPart || completed + 1))}/${total} 部分` : "AI 正在整理正文",
+      detail: finished
+        ? `${total} 个部分均已生成，正在按时间顺序合并`
+        : total > 1 ? `已完成 ${completed}/${total} 部分；每部分完成后都会立即保存` : "模型正在根据原始转写生成正文",
+      progress: finished ? 88 : Math.min(84, 12 + Math.round((completed / total) * 72)),
+      deadlineAt: 0,
+    });
+  }
   const session = plugin && plugin.session;
   if (!session || typeof plugin.setSessionWorkProgress !== "function") return;
   if (computedMeta && computedMeta.startedAt && session.startedAt && computedMeta.startedAt !== session.startedAt) return;
-  const total = Math.max(1, checkpoint.parts.length);
-  const completed = checkpoint.parts.filter(part => part.status === "complete").length;
   plugin.setSessionWorkProgress(session, {
     stage: "llm-merge",
     label: total > 1 ? `AI 整理 · ${completed}/${total} 部分` : "AI 整理中",
@@ -6523,8 +6320,8 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
   if (!list.length) return null;
   const fullJoined = list.map((segment, index) => formatMergeSegmentForPrompt(segment, index)).join("\n\n");
   const preferredTargetChars = forceChunk
-    ? Math.min(16000, getBriefingPipelineTargetChars(plugin, repolishOptions))
-    : getBriefingPipelineTargetChars(plugin, repolishOptions);
+    ? Math.min(16000, getBriefingPipelineTargetChars(plugin, mode, repolishOptions))
+    : getBriefingPipelineTargetChars(plugin, mode, repolishOptions);
   const targetChars = Number(ceiling) > 0
     ? Math.min(preferredTargetChars, Math.max(4000, Math.floor(Number(ceiling) * 1.5)))
     : preferredTargetChars;
@@ -6556,7 +6353,18 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
     .replace("{{STRUCTURE_INSTRUCTION}}", "");
   modeGuidance = applyRepolishPreferenceInstruction(modeGuidance, repolishOptions, plugin.settings);
   modeGuidance = applyBriefingLanguageInstruction(modeGuidance, plugin.settings);
+  const adaptiveLength = buildAdaptiveBriefingLengthInstruction(mode, {
+    durationMs: getSegmentsDurationMs(list) || getSessionMetaDurationMs(computedMeta),
+    transcriptChars: fullJoined.length,
+    segmentCount: list.length,
+  });
+  if (adaptiveLength) modeGuidance = `${adaptiveLength}\n\n---\n\n${modeGuidance}`;
   modeGuidance = truncateForLlmPrompt(modeGuidance, 12000);
+  const fidelityInput = {
+    detailLevel: getBriefingEffectiveDetailLevel(mode, repolishOptions),
+    structureLevel: repolishOptions && repolishOptions.structureLevel || plugin.settings.briefingStructureLevel,
+  };
+  const fidelityPolicy = getBriefingFidelityPolicy(fidelityInput);
 
   if (!String(checkpoint.topicMap || "").trim()) {
     const timelineFallback = buildProgrammaticTopicMap(partPlans, formatElapsed);
@@ -6569,7 +6377,15 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
         plugin,
         "你是会议信息架构助手。只建立紧凑、可核对的全局议题图，不撰写最终纪要。",
         buildBriefingTopicMapPrompt(fullJoined, partPlans, mode),
-        { stream: true, thinkingMode: "fast", payload: { max_tokens: 4096 } },
+        Object.assign(
+          { stream: true, thinkingMode: "fast", payload: { max_tokens: 4096 } },
+          createBriefingLlmActivityOptions(plugin, computedMeta, {
+            stage: "topic-map",
+            stageLabel: "分析全局议题",
+            detail: "正在建立跨时段议题索引",
+            progress: 8,
+          }),
+        ),
         { purpose: "briefing-topic-map", mode, partTotal: partPlans.length, transcriptChars: fullJoined.length },
       );
       const mapText = String(mapResult.text || "").trim();
@@ -6604,40 +6420,104 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
     const joinedChunk = plan.segments.map((segment, index) => formatMergeSegmentForPrompt(segment, index)).join("\n\n");
     const start = formatElapsed(plan.startOffsetMs);
     const end = formatElapsed(plan.endOffsetMs);
-    let prompt = buildChunkMergePrompt(joinedChunk, plan.index + 1, partPlans.length, `${start}–${end}`, checkpoint.topicMap, modeGuidance);
+    let fidelity = assessBriefingPartFidelity(plan.chars, "", fidelityInput);
+    const fidelityContract = buildBriefingFidelityContract(fidelity, fidelityPolicy.profile, plan.segments.length);
+    let prompt = buildChunkMergePrompt(joinedChunk, plan.index + 1, partPlans.length, `${start}–${end}`, checkpoint.topicMap, modeGuidance, fidelityContract);
     const speakerClause = buildKnownSpeakerClause(resolveKnownSpeakerLabels(joinedChunk, originalFrontmatter));
     const sharedContext = [peopleContext, metaPrefix, meetingWorkbenchPrompt, speakerClause].filter(Boolean).join("\n\n---\n\n");
     if (sharedContext) prompt = sharedContext + "\n\n---\n\n" + prompt;
-    prompt = appendSedimentPreExtractionInstruction(prompt);
-    const requestedPartTokens = Math.max(8192, Math.ceil(plan.chars * 1.2));
+    const requestedPartTokens = Math.max(8192, Math.ceil(plan.chars * 1.2), Math.ceil(fidelity.targetOutputChars * 1.5));
     const partMaxTokens = Number(ceiling) > 0 ? Math.min(Math.max(2048, Number(ceiling)), requestedPartTokens) : requestedPartTokens;
 
     try {
-      const response = await callBriefingMergeLlm(
+      let response = await callBriefingMergeLlm(
         plugin,
         system,
         prompt,
-        { stream: true, thinkingMode: "fast", payload: { max_tokens: partMaxTokens } },
+        Object.assign(
+          { stream: true, thinkingMode: "fast", payload: { max_tokens: partMaxTokens } },
+          createBriefingLlmActivityOptions(plugin, computedMeta, {
+            stage: "llm",
+            stageLabel: partPlans.length > 1 ? `AI 整理 · 第 ${plan.index + 1}/${partPlans.length} 部分` : "AI 正在整理正文",
+            detail: partPlans.length > 1
+              ? `正在生成第 ${plan.index + 1}/${partPlans.length} 部分`
+              : "正在根据原始转写生成正文",
+            progress: Math.min(84, 12 + Math.round((plan.index / partPlans.length) * 72)),
+          }),
+        ),
         { purpose: "briefing-part", mode, jobId: identity.id, part: plan.index + 1, partTotal: partPlans.length, transcriptChars: joinedChunk.length },
       );
-      const sedimentPreExtraction = extractSedimentPreExtractionBlock(String(response.text || ""));
-      const parsedPeople = parsePeopleFromOutput(sedimentPreExtraction.cleaned);
-      const parsedTags = parseSuggestedTagsFromOutput(parsedPeople.cleaned);
-      let body = parsedTags.cleaned;
-      const summaryMatch = body.match(/<!--\s*lexvoice-part-summary\s*:\s*([\s\S]*?)\s*-->/i);
-      const summary = summaryMatch ? summaryMatch[1].trim() : "";
-      if (summaryMatch) body = body.replace(summaryMatch[0], "");
-      body = stripModeSuggestionBlocks(body.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "")).trim();
-      const wrappedBody = partPlans.length > 1 ? `## 第 ${plan.index + 1} 部分 · ${start}–${end}\n\n${body}` : body;
+      let parsed = parseBriefingPartResponse(response.text);
+      fidelity = assessBriefingPartFidelity(plan.chars, parsed.body, fidelityInput);
+      let combinedUsage = mergeBriefingUsage(response.usage);
+      let repairAttempts = 0;
+      if (parsed.body && !response.truncated && fidelity.needsExpansion) {
+        repairAttempts = 1;
+        await logLlmRequestDiagnostic(plugin, "warn", "llm.briefing_part_under_detailed", "纪要分部明显短于原始材料，正在对照原文补回细节", {
+          mode,
+          jobId: identity.id,
+          part: plan.index + 1,
+          partTotal: partPlans.length,
+          profile: fidelityPolicy.profile,
+          sourceChars: fidelity.sourceChars,
+          outputChars: fidelity.outputChars,
+          minimumOutputChars: fidelity.minimumOutputChars,
+          targetOutputChars: fidelity.targetOutputChars,
+          outputRatio: Number(fidelity.outputRatio.toFixed(3)),
+        });
+        const repair = await callBriefingMergeLlm(
+          plugin,
+          "你是纪要保真编辑。你的任务是对照原始转写补回被摘要掉的信息，并返回完整替换稿；不得用空话凑长度，也不得编造原文没有的内容。",
+          buildBriefingPartExpansionPrompt(joinedChunk, parsed.body, `${start}–${end}`, fidelityContract),
+          Object.assign(
+            { stream: true, thinkingMode: "fast", payload: { max_tokens: partMaxTokens } },
+            createBriefingLlmActivityOptions(plugin, computedMeta, {
+              stage: "llm-detail-repair",
+              stageLabel: partPlans.length > 1 ? `补充细节 · 第 ${plan.index + 1}/${partPlans.length} 部分` : "正在补充遗漏细节",
+              detail: `当前正文 ${fidelity.outputChars} 字，正在对照原始转写补全`,
+              progress: Math.min(86, 18 + Math.round((plan.index / partPlans.length) * 68)),
+            }),
+          ),
+          { purpose: "briefing-part-detail-repair", mode, jobId: identity.id, part: plan.index + 1, partTotal: partPlans.length, transcriptChars: joinedChunk.length },
+        );
+        const repaired = parseBriefingPartResponse(repair.text);
+        const repairedFidelity = assessBriefingPartFidelity(plan.chars, repaired.body, fidelityInput);
+        combinedUsage = mergeBriefingUsage(combinedUsage, repair.usage);
+        if (repaired.body && !repair.truncated && repairedFidelity.outputChars > fidelity.outputChars) {
+          response = repair;
+          parsed = repaired;
+          fidelity = repairedFidelity;
+        }
+        await logLlmRequestDiagnostic(plugin, fidelity.needsExpansion ? "warn" : "info", "llm.briefing_part_detail_repaired", fidelity.needsExpansion ? "纪要分部补充后仍偏短，已保留较完整版本" : "纪要分部已对照原文补回细节", {
+          mode,
+          jobId: identity.id,
+          part: plan.index + 1,
+          partTotal: partPlans.length,
+          profile: fidelityPolicy.profile,
+          sourceChars: fidelity.sourceChars,
+          outputChars: fidelity.outputChars,
+          minimumOutputChars: fidelity.minimumOutputChars,
+          targetOutputChars: fidelity.targetOutputChars,
+          outputRatio: Number(fidelity.outputRatio.toFixed(3)),
+        });
+      }
+      const body = normalizeBriefingPartBody(parsed.body);
       Object.assign(part, {
         status: body && !response.truncated ? "complete" : (body ? "partial" : "failed"),
-        text: wrappedBody,
-        summary,
-        people: mergeUniqueStrings([], (parsedPeople.people || []).concat(parsedTags.people || [])),
-        tags: mergeUniqueStrings([], parsedTags.tags || []),
-        sedimentObjects: sedimentPreExtraction.objects || null,
+        text: body,
+        summary: parsed.summary,
+        people: parsed.people,
+        tags: parsed.tags,
+        sedimentObjects: parsed.sedimentObjects,
         finishReason: String(response.finishReason || ""),
-        usage: response.usage,
+        usage: combinedUsage,
+        sourceChars: fidelity.sourceChars,
+        outputChars: fidelity.outputChars,
+        outputRatio: Number(fidelity.outputRatio.toFixed(4)),
+        minimumOutputChars: fidelity.minimumOutputChars,
+        targetOutputChars: fidelity.targetOutputChars,
+        qualityStatus: fidelity.needsExpansion ? "under-detailed" : "ok",
+        repairAttempts,
         error: body
           ? (response.truncated ? "本部分在续写后仍被输出上限截断" : "")
           : "本部分没有返回可见正文",
@@ -6683,7 +6563,7 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
   const assembledParts = assembleBriefingParts(checkpoint.parts);
   const summaries = checkpoint.parts.map(part => part.summary).filter(Boolean);
   const overview = partPlans.length > 1
-    ? `> [!abstract] 全程概览\n${summaries.length ? summaries.map((summary, index) => `> ${index + 1}. ${summary}`).join("\n") : "> 已按时间顺序完成全部内容整理。"}\n\n`
+    ? `> [!abstract] 全程概览\n${summaries.length ? summaries.map((summary) => `> ${summary}`).join("\n>\n") : "> 已按时间顺序完成全部内容整理。"}\n\n`
     : "";
   const people = mergeUniqueStrings([], checkpoint.parts.flatMap(part => part.people || []));
   const tags = mergeUniqueStrings([], checkpoint.parts.flatMap(part => part.tags || [])).filter(tag => tag && !/^lexvoice\//.test(tag)).slice(0, 9);
@@ -6702,7 +6582,15 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
         plugin,
         "你是纪要完整性审计助手。只报告覆盖问题，不重写正文。",
         buildBriefingAuditPrompt(checkpoint.topicMap, checkpoint.parts),
-        { stream: false, thinkingMode: "fast", priority: "background", payload: { max_tokens: 2048 } },
+        Object.assign(
+          { stream: false, thinkingMode: "fast", priority: "interactive", payload: { max_tokens: 2048 } },
+          createBriefingLlmActivityOptions(plugin, computedMeta, {
+            stage: "audit",
+            stageLabel: "检查纪要完整性",
+            detail: "正文已经生成，正在检查遗漏和重复",
+            progress: 92,
+          }),
+        ),
         { purpose: "briefing-audit", mode, jobId: identity.id, partTotal: partPlans.length },
       );
       checkpoint.auditStatus = "complete";
@@ -6729,7 +6617,18 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
     jobId: identity.id,
     partTotal: partPlans.length,
     topicMapSource: checkpoint.topicMapSource,
-    partUsage: checkpoint.parts.map(part => ({ part: part.index + 1, finishReason: part.finishReason, outputChars: part.text.length, usage: part.usage })),
+    partUsage: checkpoint.parts.map(part => ({
+      part: part.index + 1,
+      finishReason: part.finishReason,
+      sourceChars: Number(part.sourceChars) || 0,
+      outputChars: Number(part.outputChars) || part.text.length,
+      outputRatio: Number(part.outputRatio) || 0,
+      minimumOutputChars: Number(part.minimumOutputChars) || 0,
+      targetOutputChars: Number(part.targetOutputChars) || 0,
+      qualityStatus: part.qualityStatus || "unchecked",
+      repairAttempts: Number(part.repairAttempts) || 0,
+      usage: part.usage,
+    })),
     auditFinishReason: checkpoint.auditFinishReason,
     auditUsage: checkpoint.auditUsage,
   });
@@ -6738,17 +6637,21 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
   return sedimentObjects ? appendSedimentPreExtractionBlock(polished, sedimentObjects) : polished;
 }
 
-// 从转写正文里读出本次录音的说话人（多声道分离得到）；已改名的取真实姓名，否则用「说话人N」。
-// 没有多声道说话人时返回空数组，调用方据此跳过注入，单声道行为完全不变。
+// 从转写正文或已保存映射中读取说话人。已确认姓名时返回「说话人N = 姓名」，
+// 让提示词既保留可核验的 ASR 标签，又明确告诉模型应该使用哪个真实姓名。
 function resolveKnownSpeakerLabels(transcript, frontmatter) {
-  const ids = extractSpeakerIdsFromMarkdown(String(transcript || ""));
-  if (!ids.length) return [];
+  let ids = extractSpeakerIdsFromMarkdown(String(transcript || ""));
   const raw = frontmatter && typeof frontmatter === "object" ? frontmatter.lexvoice_speakers : null;
+  if (!ids.length && raw && typeof raw === "object") {
+    ids = Object.keys(raw).filter(id => /^spk-\d+$/.test(id));
+  }
+  if (!ids.length) return [];
   const mappings = normalizeSpeakerMappings(raw || {}, ids);
   return ids.map((id) => {
     const mapped = mappings[id];
+    const label = mapped && mapped.label ? String(mapped.label).trim() : speakerLabelForChannel(Number(String(id).replace(/^spk-/, "")) || 1);
     const personName = mapped && mapped.personName ? String(mapped.personName).trim() : "";
-    return personName || speakerLabelForChannel(Number(String(id).replace(/^spk-/, "")) || 1);
+    return personName ? `${label} = ${personName}` : label;
   });
 }
 
@@ -6863,12 +6766,23 @@ async function mergeAndPolish(plugin, segments, mode, recruitContext, sessionMet
       ? truncateForLlmPrompt(recruitPrefix, TEXT_IMPORT_RECRUIT_CONTEXT_CHARS)
       : recruitPrefix) + "\n\n" + userPrompt;
   }
-  userPrompt = appendSedimentPreExtractionInstruction(userPrompt);
   // 流式：merge 是最长、最贵、跑一次的调用。流式 + 空闲超时确保服务端只要在持续输出就不会被
   // 客户端总超时 abort，避免"扣了钱却因超时拿不到结果"的浪费（符合总纲：不因工程缺陷浪费）。
   let mergeResult;
   try {
-    mergeResult = await callBriefingMergeLlm(plugin, sys, userPrompt, { stream: true, thinkingMode: "fast", payload: { max_tokens: briefingMergeMaxTokens } }, { mode, segmentCount: segments.length, transcriptChars: joined.length });
+    mergeResult = await callBriefingMergeLlm(plugin, sys, userPrompt, Object.assign(
+      {
+        stream: true,
+        thinkingMode: "fast",
+        payload: { max_tokens: briefingMergeMaxTokens },
+      },
+      createBriefingLlmActivityOptions(plugin, computedMeta, {
+        stage: "llm",
+        stageLabel: "AI 正在整理正文",
+        detail: "模型正在根据原始转写生成纪要",
+        progress: 18,
+      }),
+    ), { mode, segmentCount: segments.length, transcriptChars: joined.length });
   } catch (e) {
     // 上下文限制不是普通网络重试问题：把同一份超长 prompt 再发一遍只会重复失败或重复计费。
     // 第一次明确收到上下文超限后，立即切换到时间分段路径；分段失败的部分由原始转写保底。
@@ -6979,6 +6893,12 @@ class TaskQueue {
           task.retries = Math.max(0, maxRetries - 1);
           task.lastError = "临时切片缺失，已升级为从完整录音恢复切片后重试";
         }
+        const transportRecoveryPatch = getAsrTransportTaskRecoveryPatch(task, maxRetries);
+        if (transportRecoveryPatch) {
+          // 网络/服务中断属于服务级故障，不应让某一个音频片段永久耗尽重试额度。
+          // 保留音频并恢复为 pending，等待共享熔断器允许下一次探测。
+          Object.assign(task, transportRecoveryPatch);
+        }
         if (task.type === "merge"
           && task.status === "failed"
           && isLlmNonRetryableError(task.lastError || "")) {
@@ -7064,30 +6984,49 @@ class TaskQueue {
     if (this.running) return;
     this.running = true;
     try {
-      const pending = this.tasks.filter(t => t.status !== "running" && t.status !== LIVE_ASR_TASK_STATUS && t.status !== "missing" && t.status !== "blocked" && t.retries < (this.plugin.settings.maxRetries || 3));
+      const maxRetries = this.plugin.settings.maxRetries || 3;
+      const now = Date.now();
+      const isRetryDue = (task) => {
+        if (!task.nextRetryAt) return true;
+        const retryAt = Date.parse(String(task.nextRetryAt));
+        return !Number.isFinite(retryAt) || retryAt <= now;
+      };
+      const pending = this.tasks.filter(t => t.status !== "running"
+        && t.status !== LIVE_ASR_TASK_STATUS
+        && t.status !== "missing"
+        && t.status !== "blocked"
+        && isRetryDue(t)
+        && (t.retries < maxRetries || (t.type === "transcribe" && isAsrTransportError(t.lastError || ""))));
       // 批量进度游标：喂状态栏指示器，让"重试全部 / 多任务"跑到哪一目了然。
       this._batchTotal = pending.length;
       this._batchDone = 0;
       try { this.plugin.updateBusyStatus(); } catch { /* intentionally empty */ }
       for (const t of pending) {
-        let transientAsrFailure = null;
+        if (t.type === "transcribe" && this.plugin.isAsrServiceCircuitOpen()) {
+          const retryDelayMs = this.plugin.getAsrServiceRetryDelayMs();
+          this.plugin.scheduleTaskQueueRetry(retryDelayMs, "asr-service-circuit-open");
+          continue;
+        }
+        let transportAsrFailure = null;
         await this.processOne(t).catch((e) => {
           console.error("[LexVoice] queue task failed", e);
-          if (t && t.type === "transcribe" && isTransientAsrError(e)) transientAsrFailure = e;
+          if (t && t.type === "transcribe" && isAsrTransportError(e)) transportAsrFailure = e;
         });
         this._batchDone++;
         try { this.plugin.updateBusyStatus(); } catch { /* intentionally empty */ }
-        if (transientAsrFailure) {
+        if (transportAsrFailure) {
           // 服务仍在限流/超时，继续扫后续音频只会扩大请求风暴。暂停整批，冷却后从持久化队列续跑。
+          const retryDelayMs = this.plugin.getAsrServiceRetryDelayMs();
           try {
             await this.plugin.logDiagnostic("warn", "queue.asr_circuit_opened", "后台转写连续处理遇到瞬时故障，已暂停批次", {
               remaining: Math.max(0, pending.length - this._batchDone),
-              cooldownMs: LIVE_ASR_CIRCUIT_COOLDOWN_MS,
-              error: diagnosticError(transientAsrFailure),
+              cooldownMs: retryDelayMs,
+              consecutiveFailures: this.plugin.getAsrServiceCircuitState().consecutiveFailures,
+              error: diagnosticError(transportAsrFailure),
             });
           } catch { /* intentionally empty */ }
           if (this.plugin && typeof this.plugin.scheduleTaskQueueRetry === "function") {
-            this.plugin.scheduleTaskQueueRetry(LIVE_ASR_CIRCUIT_COOLDOWN_MS, "transient-asr-failure");
+            this.plugin.scheduleTaskQueueRetry(retryDelayMs, "transient-asr-failure");
           }
           break;
         }
@@ -7116,7 +7055,10 @@ class TaskQueue {
       attempt: Math.max(1, (Number(task.retries) || 0) + 1),
     });
     try {
-      if (task.type === "transcribe") await this.plugin.retryTranscribeTask(task);
+      if (task.type === "transcribe") {
+        await this.plugin.retryTranscribeTask(task);
+        this.plugin.recordAsrServiceAttemptSuccess();
+      }
       else if (task.type === "merge") await this.plugin.retryMergeTask(task);
       else if (task.type === "generate-prompt") await this.plugin.runGeneratePromptTask(task);
       else throw new Error(`未知任务类型：${task.type}`);
@@ -7144,21 +7086,31 @@ class TaskQueue {
       const message = (e && e.message) || String(e);
       const isMissingAudio = task.type === "transcribe" && /音频不存在|临时切片不存在/.test(message);
       const isBlockedMerge = task.type === "merge" && isLlmNonRetryableError(e);
-      // 确定性转写错误（格式/解码/超限/4xx）：直接吃满重试，避免必败任务空转（如对 80MB 文件反复解码）。
-      const isPermanentAsr = task.type === "transcribe" && !isMissingAudio && isAsrNonRetryableError(e);
+      const isTransportAsr = task.type === "transcribe" && isAsrTransportError(e);
+      // 确定性转写错误（格式/解码/超限/4xx）会直接吃满重试；
+      // 网络中断则保留原额度，避免把服务故障错误记在某个音频片段头上。
       const maxR = (this.plugin.settings && this.plugin.settings.maxRetries) || 3;
       const nextRetries = isBlockedMerge ? (task.retries || 0)
-        : isPermanentAsr ? Math.max((task.retries || 0) + 1, maxR)
+        : task.type === "transcribe" ? getNextAsrTaskRetryCount(task.retries, maxR, e)
         : (task.retries || 0) + 1;
+      const serviceCircuit = isTransportAsr ? this.plugin.recordAsrServiceAttemptFailure(e) : null;
+      const nextRetryAt = serviceCircuit && serviceCircuit.openUntilMs > Date.now()
+        ? new Date(serviceCircuit.openUntilMs).toISOString()
+        : undefined;
       await this.update(task.id, {
-        status: isMissingAudio ? "missing" : isBlockedMerge ? "blocked" : "failed",
+        status: isMissingAudio ? "missing" : isBlockedMerge ? "blocked" : isTransportAsr ? "pending" : "failed",
         retries: nextRetries,
+        transportFailures: isTransportAsr ? Math.max(0, Number(task.transportFailures) || 0) + 1 : task.transportFailures,
+        nextRetryAt,
+        deferredReason: isTransportAsr ? "service-unavailable" : task.deferredReason,
         lastError: message,
         lastEventAt: new Date().toISOString(),
       });
       await this.plugin.logDiagnostic("error", "queue.task_failed", "队列任务失败", {
         taskType: task.type,
         retries: nextRetries,
+        transportFailures: isTransportAsr ? Math.max(0, Number(task.transportFailures) || 0) + 1 : 0,
+        nextRetryAt: nextRetryAt || "",
         maxRetries: this.plugin.settings.maxRetries || 3,
         mdPath: task.mdPath || "",
         audioPath: task.audioPath || "",
@@ -7188,6 +7140,7 @@ class OutlineView extends obsidian.ItemView {
     this.lastOutlineWorkbenchSignature = "";
     this.outlineSessionId = "";
     this._renderRaf = 0;
+    this._recentVaultRefreshTimer = 0;
     this._preserveScrollOnNextRender = false;
     this._lastSig = "";
     this._lastRenderedOutline = "";
@@ -7230,19 +7183,26 @@ class OutlineView extends obsidian.ItemView {
       this.idlePanelTab = "";
       this.scheduleUpdate();
     }));
-    // 文件改名/删除（无论从面板内还是 Obsidian 文件管理器触发）→ 让最近纪要面板跟着刷新：
-    // 改名后名字同步、删除后从列表消失。computeSignature 不含最近笔记文件名，必须清掉
-    // _lastSig 才会真重渲染（否则签名没变只会 updateLiveStats，看起来"没反应"）。
-    // 不监听 create：Obsidian 启动时会对所有文件补发 create，易造成风暴；新建纪要本就经
-    // recorder/finalize 触发刷新。
+    // 文件系统变化需要刷新最近纪要。create 在启动、同步和批量粘贴时可能密集触发，
+    // 因此统一进入短延迟合并刷新；metadata changed 负责补上 frontmatter 尚未解析完成的情况。
+    this.registerEvent(this.app.vault.on("create", (file) => {
+      if (file instanceof obsidian.TFile && this.isRecentNotePath(file.path)) {
+        this.queueRecentVaultRefresh();
+      }
+    }));
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
       if (file instanceof obsidian.TFile && (this.isRecentNotePath(file.path) || this.isRecentNotePath(oldPath))) {
-        this.forceRecentRender();
+        this.queueRecentVaultRefresh();
       }
     }));
     this.registerEvent(this.app.vault.on("delete", (file) => {
       if (file && file.path && this.isRecentNotePath(file.path)) {
-        this.forceRecentRender();
+        this.queueRecentVaultRefresh();
+      }
+    }));
+    this.registerEvent(this.app.metadataCache.on("changed", (file) => {
+      if (file instanceof obsidian.TFile && this.isRecentNotePath(file.path)) {
+        this.queueRecentVaultRefresh(260);
       }
     }));
     if ((this.plugin.settings.enableRealtimeOutline
@@ -7258,6 +7218,7 @@ class OutlineView extends obsidian.ItemView {
   async onClose() {
     if (this.unsubscribeRecorder) { this.unsubscribeRecorder(); this.unsubscribeRecorder = null; }
     if (this._renderRaf) { cancelAnimationFrame(this._renderRaf); this._renderRaf = 0; }
+    if (this._recentVaultRefreshTimer) { window.clearTimeout(this._recentVaultRefreshTimer); this._recentVaultRefreshTimer = 0; }
     if (this._outlineFollowRaf) { cancelAnimationFrame(this._outlineFollowRaf); this._outlineFollowRaf = 0; }
     if (this.sedimentToastTimer) { window.clearTimeout(this.sedimentToastTimer); this.sedimentToastTimer = 0; }
     if (this.sedimentAdvanceTimer) { window.clearTimeout(this.sedimentAdvanceTimer); this.sedimentAdvanceTimer = 0; }
@@ -7801,7 +7762,8 @@ class OutlineView extends obsidian.ItemView {
         "",
         "回答要求：",
         "- 直接回答问题，优先给结论。",
-        "- 必要时用短列表，保留纪要中的人名、事项、数字和风险。",
+        "- 必要时用短列表，保留纪要中的事项、数字、案例和风险。",
+        "- 以问题涉及的事情为中心回答；只有材料能确认且有助于理解关键观点、分歧或责任时，才自然注明是谁提出的，不要机械罗列每个人说了什么。",
         "- 纪要没有依据时，明确说“纪要中没有足够依据”。",
         "- 不要输出寒暄，不要生成完整纪要。",
       ].join("\n");
@@ -12993,6 +12955,14 @@ class OutlineView extends obsidian.ItemView {
     return isPathUnderRecentNoteRoots(p, getRecentNoteRoots(this.plugin));
   }
 
+  queueRecentVaultRefresh(delayMs = 180) {
+    if (this._recentVaultRefreshTimer) window.clearTimeout(this._recentVaultRefreshTimer);
+    this._recentVaultRefreshTimer = window.setTimeout(() => {
+      this._recentVaultRefreshTimer = 0;
+      this.forceRecentRender();
+    }, Math.max(60, Number(delayMs) || 180));
+  }
+
   // 强制重渲染最近面板：computeSignature 不含最近笔记文件名，必须清掉 _lastSig 才会真重建 DOM
   // （见 scheduleUpdate）。集中成一处，避免各调用点漏清 _lastSig 导致"看着没反应"。
   forceRecentRender() {
@@ -13718,7 +13688,8 @@ class LexVoicePlugin extends obsidian.Plugin {
       try { this.updateBusyStatus(); } catch { /* intentionally empty */ }
     }, 15_000));
     this.recorder = new RecorderService(this);
-    this.quickDictation = new QuickDictationController(this);
+    this.asrServiceCircuitKey = "";
+    this.asrServiceCircuitState = createLiveAsrCircuitState();
     this.queue = new TaskQueue(this);
     this.queue.load(this.persistedQueue);
     this.session = null;
@@ -13737,6 +13708,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     // 转写进度状态栏：常驻、一眼可见队列/转写跑到哪——消解"点了转写就黑盒"的焦虑。点击打开队列。
     this._importBusy = null;
     this._busyLabel = null;
+    this._busyContext = null;
     this.completedWorkLog = []; // 本次启动 OB 后已完成的处理（不持久化，重启清零），供"处理进度"面板展示
     this._taskMeter = null; // 单任务 token 计量窗口（beginTaskMeter→endTaskMeter）
     this.progressStatusEl = this.addStatusBarItem();
@@ -13761,12 +13733,6 @@ class LexVoicePlugin extends obsidian.Plugin {
     this.app.workspace.onLayoutReady(() => this.syncBubbleVisibility());
 
     this.addCommand({ id: "toggle-recording", name: "开始/停止录音", callback: () => this.toggleRecording() });
-    this.addCommand({ id: "quick-dictation-toggle", name: "即时听写 · 开始/结束", callback: () => { void this.quickDictation.toggle(this.settings.quickDictationTarget || "editor"); } });
-    this.addCommand({ id: "quick-dictation-copy-raw", name: "即时听写 · 复制上次转写原文", callback: () => {
-      const t = (this.quickDictation && this.quickDictation._lastRawText) || "";
-      if (!t) { new obsidian.Notice("还没有可复制的听写原文"); return; }
-      navigator.clipboard.writeText(t).then(() => new obsidian.Notice("已复制上次即时听写原文")).catch(() => new obsidian.Notice("复制失败", 5000));
-    }});
     this.addCommand({ id: "pause-resume-recording", name: "暂停/继续录音", callback: () => {
       const s = this.recorder.state;
       if (s === "recording") this.recorder.pause(); else if (s === "paused") this.recorder.resume();
@@ -13825,12 +13791,18 @@ class LexVoicePlugin extends obsidian.Plugin {
     this.registerEvent(this.app.vault.on("create", (file) => {
       this.handleInboxFile(file).catch(e => console.error("[LexVoice] inbox handler error", e));
     }));
+    // Nutstore Sync / Obsidian Sync may first create a placeholder and then fill it through modify events.
+    // Listen to both so a zero-byte placeholder never becomes the only chance to auto-import the file.
+    this.registerEvent(this.app.vault.on("modify", (file) => {
+      this.handleInboxFile(file).catch(e => console.error("[LexVoice] inbox modify handler error", e));
+    }));
 
     // 文件重命名时同步迁移队列里所有指向旧路径的任务，
     // 防止 merge 任务跑完后文件被改名 → 重试时找不到旧路径报"笔记不存在"
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
       if (file instanceof obsidian.TFile) {
         this.migrateQueueTasksAfterRename(oldPath, file.path);
+        this.handleInboxFile(file).catch(e => console.error("[LexVoice] inbox rename handler error", e));
       }
     }));
 
@@ -13842,6 +13814,11 @@ class LexVoicePlugin extends obsidian.Plugin {
     }));
 
     this.addCommand({ id: "scan-inbox", name: "扫描监听文件夹", callback: () => this.scanInboxFolder() });
+    this.externalInboxScanner = new ExternalInboxScanner();
+    this.registerInterval(window.setInterval(() => {
+      if (!this.settings.inboxAutoImport || !isAbsoluteExternalInboxPath(this.settings.inboxFolder)) return;
+      void this.scanExternalInboxFolder({ manual: false, source: "poll" });
+    }, EXTERNAL_INBOX_SCAN_INTERVAL_MS));
 
     // F4.3：招聘项目统计自动重算——JD 库下候选人纪要 create/modify/delete/rename 时，防抖重算其所在项目文件夹。
     // 防自激：consider() 过滤掉 JD 文件本身（basename==父文件夹名），故 recalc 写 JD 触发的 modify 不会再触发重算。
@@ -13986,7 +13963,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         menu.addItem((item) => {
           item.setTitle("LexVoice：转写并整理")
             .setIcon("mic")
-            .onClick(() => this.importAudioFiles([file.path]));
+            .onClick(() => this.openAudioImportOptions([file.path]));
         });
       }
     }));
@@ -14005,7 +13982,7 @@ class LexVoicePlugin extends obsidian.Plugin {
           sub.addItem((sub_i) => {
             sub_i.setTitle(`整合为${label}（${meta.prefix}模式）`)
               .setIcon("mic")
-              .onClick(() => this.importAudioFiles(paths, m));
+              .onClick(() => this.openAudioImportOptions(paths, m));
           });
         }
       });
@@ -14018,6 +13995,13 @@ class LexVoicePlugin extends obsidian.Plugin {
     this.app.workspace.onLayoutReady(() => {
       this.warnIfBuildManifestSkew();
       this.checkForUpdatesOnStartup();
+      this.refreshExternalInboxWatcher();
+      const inboxTimer = window.setTimeout(() => {
+        if (this.settings.inboxAutoImport && isAbsoluteExternalInboxPath(this.settings.inboxFolder)) {
+          void this.scanExternalInboxFolder({ manual: false, source: "startup" });
+        }
+      }, 4000);
+      this.register(() => window.clearTimeout(inboxTimer));
       const cleanupTimer = window.setTimeout(() => {
         void this.cleanupExpiredSegmentCacheFiles().catch((e) => console.error("[LexVoice] startup segment cache cleanup failed", e));
       }, 6000);
@@ -14027,13 +14011,13 @@ class LexVoicePlugin extends obsidian.Plugin {
 
   onunload() {
     try { if (this.outlineCoordinator) this.outlineCoordinator.dispose(); } catch { /* intentionally empty */ }
+    this.closeExternalInboxWatcher();
     try { if (this._taskQueueRetryTimer) window.clearTimeout(this._taskQueueRetryTimer); } catch { /* intentionally empty */ }
     this._taskQueueRetryTimer = null;
     this._taskQueueRetryAt = 0;
     void (async () => {
       try { if (this.recorder && this.recorder.state !== "idle") await this.recorder.stop(); } catch { /* intentionally empty */ }
     })();
-    try { if (this.quickDictation) this.quickDictation.cancel(); } catch { /* intentionally empty */ }
     if (this.bubble) this.bubble.unmount();
     // 清理招聘项目重算 Debouncer，避免卸载后 pending timer 触发已 detach 的实例
     try { if (this._recruitRecalcDebouncers) { this._recruitRecalcDebouncers.forEach(d => { try { if (d.cancel) d.cancel(); } catch { /* intentionally empty */ } }); this._recruitRecalcDebouncers.clear(); } } catch { /* intentionally empty */ }
@@ -14452,6 +14436,52 @@ class LexVoicePlugin extends obsidian.Plugin {
         steps: ["确认 OpenAI API 账户可用", "填写访问密钥", "运行连通性测试"],
         links: [["OpenAI 密钥", "https://platform.openai.com/api-keys"]],
       },
+      "openai-diarize": {
+        title: "OpenAI · 说话人分离",
+        badge: "说话人分离",
+        transcribeMode: "segmented",
+        speakerDiarization: true,
+        speakerLabelScope: "session",
+        requiresWholeSession: true,
+        requiresKey: true,
+        endpointPlaceholder: "https://api.openai.com/v1/audio/transcriptions",
+        modelPlaceholder: "gpt-4o-transcribe-diarize",
+        languagePlaceholder: "",
+        endpointHelp: "OpenAI 的音频转写服务地址。需要可访问 OpenAI API 的网络环境。",
+        keyHelp: "填写 OpenAI 项目的访问密钥。",
+        modelHelp: "使用 gpt-4o-transcribe-diarize。该模型会返回带时间和说话人标签的分段结果。",
+        description: "停止录音后统一识别整场音频，以保持说话人编号在本场录音内一致。识别完成后可确认每个编号对应的姓名，再进入 AI 整理。",
+        priceHint: "按音频用量计费，以 OpenAI 定价页为准。",
+        steps: ["确认 OpenAI API 账户可用", "填写访问密钥", "运行连通性测试", "停止录音后确认说话人姓名"],
+        links: [
+          ["OpenAI 密钥", "https://platform.openai.com/api-keys"],
+          ["说话人分离文档", "https://platform.openai.com/docs/api-reference/audio/createTranscription"],
+        ],
+        note: "为避免不同切片中的说话人编号重置，录音过程中不会分段上传；停止后才统一转写。原始逐字稿保留说话人编号，姓名映射用于 AI 整理。",
+      },
+      "dashscope-filetrans": {
+        title: "阿里云百炼 Fun-ASR",
+        badge: "长音频 · 说话人分离",
+        transcribeMode: "whole-file",
+        speakerDiarization: true,
+        speakerLabelScope: "session",
+        requiresWholeSession: true,
+        requiresKey: true,
+        endpointPlaceholder: "https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription",
+        modelPlaceholder: "fun-asr",
+        languagePlaceholder: "zh",
+        endpointHelp: "阿里云百炼录音文件识别接口，通常保持默认即可。",
+        keyHelp: "填写阿里云百炼 API Key。音频会临时上传到阿里云并异步识别。",
+        modelHelp: "推荐 fun-asr。支持整文件转写和说话人分离。",
+        description: "导入音频专用。LexVoice 直接提交整段音频，不在本地切成多个 ASR 任务。",
+        priceHint: "普通录音文件识别最长支持 12 小时；启用说话人分离时，官方建议单文件不超过 2 小时。",
+        steps: ["在百炼控制台创建 API Key", "保持默认服务地址和模型名", "运行连接测试", "在导入音频后确认说话人姓名"],
+        links: [
+          ["访问密钥", "https://help.aliyun.com/zh/model-studio/developer-reference/get-api-key"],
+          ["录音文件识别文档", "https://help.aliyun.com/zh/model-studio/non-realtime-speech-recognition-user-guide"],
+        ],
+        note: "整文件转写不会生成实时大纲。超过 2 小时仍可提交，但说话人分离的准确度可能下降。",
+      },
       apimimo: {
         title: "APIMiMo V2.5 ASR",
         badge: "云端转写",
@@ -14557,6 +14587,26 @@ class LexVoicePlugin extends obsidian.Plugin {
           ["Xinference 文档", "https://inference.readthedocs.io/en/latest/models/model_abilities/audio.html"],
           ["whisper.cpp", "https://github.com/ggml-org/whisper.cpp"],
         ],
+      },
+      whisperx: {
+        title: "WhisperX · 说话人分离",
+        badge: "本地分离",
+        transcribeMode: "segmented",
+        speakerDiarization: true,
+        speakerLabelScope: "session",
+        requiresWholeSession: true,
+        requiresKey: false,
+        endpointPlaceholder: "http://127.0.0.1:8000/v1/audio/transcriptions",
+        modelPlaceholder: "whisper-large-v3",
+        languagePlaceholder: "zh",
+        endpointHelp: "填写已启动的 WhisperX 或兼容说话人分离服务地址。",
+        keyHelp: "本地服务通常可以留空；如果你的网关要求鉴权，再填写访问密钥。",
+        modelHelp: "模型名称由本地服务决定。响应需要包含 segments[].speaker，或在 text 中内联 SPEAKER_00 等标签。",
+        description: "停止录音后由本地服务统一识别整场音频，并把说话人标签写入逐字稿。",
+        priceHint: "免费（消耗本机 GPU/CPU）。",
+        steps: ["安装并启动带 diarization 的 WhisperX 服务", "确认响应包含 speaker 字段", "运行连通性测试"],
+        links: [["WhisperX", "https://github.com/m-bain/whisperX"]],
+        note: "LexVoice 只负责调用已启动的服务，不负责安装模型。为保持说话人编号一致，录音停止后统一转写。",
       },
       custom: {
         title: "其他转写服务",
@@ -14783,7 +14833,10 @@ class LexVoicePlugin extends obsidian.Plugin {
     if (!task || !task.id || !this.taskActivityStore) return null;
     const id = this.queueTaskActivityId(task);
     const type = String(task.type || "");
-    const title = type === "transcribe" ? `分段转写 · 第 ${Math.max(0, Number(task.segmentIndex) || 0) + 1} 段`
+    const title = type === "transcribe"
+      ? (task.wholeFileImport
+        ? `整文件转写 · ${String(task.sourceAudioName || task.audioName || "导入音频")}`
+        : `分段转写 · 第 ${Math.max(0, Number(task.segmentIndex) || 0) + 1} 段`)
       : type === "merge" ? "AI 整理"
         : type === "generate-prompt" ? "生成提示词" : "后台任务";
     const isPartialBriefing = type === "merge" && /纪要整理部分完成/.test(String(task.lastError || ""));
@@ -14999,7 +15052,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     const phase = normalizeAudioImportStage(activity.phase);
     const labels = {
       prepare: "准备音频",
-      transcribe: "分段转写",
+      transcribe: "语音转写",
       persist: "写入原始转写",
       organize: "AI 整理",
       write: "写入纪要",
@@ -15009,28 +15062,39 @@ class LexVoicePlugin extends obsidian.Plugin {
       ? Math.max(0, Number(activity.writtenSegments) || 0)
       : Math.max(0, Number(activity.segmentDone) || 0);
     const failed = Math.max(0, Number(activity.failedSegments) || 0);
-    const progress = total > 0 ? Math.max(0, Math.min(100, (done / total) * 100)) : null;
+    const finished = Math.min(total, done + failed);
+    const failure = String(activity.error || "");
+    const progressCount = failure ? done : finished;
+    const progress = total > 0 ? Math.max(0, Math.min(100, (progressCount / total) * 100)) : null;
     const existing = this.taskActivityStore.get(id);
+    const completed = !!activity.completed;
     const patch = {
       id,
       kind: "audio-import",
       title: activity.file ? `导入音频 · ${activity.file}` : "导入音频",
-      subject: String(activity.file || ""),
-      status: "running",
+      subject: String(activity.mdPath || activity.file || ""),
+      status: failure ? "failed" : completed ? "done" : "running",
       stage: phase,
       stageLabel: labels[phase] || "处理音频",
       detail: failed > 0
-        ? `${failed} 段未成功，原始切片已保留并进入重试流程`
+        ? `${failed} 个音频文件未成功，原始音频已保留并进入重试流程`
         : String(activity.label || ""),
       progress,
-      count: total > 0 ? `${done}/${total} 段` : activity.total > 1 ? `${activity.done || 0}/${activity.total} 个文件` : "",
+      count: total > 0 ? `${done}/${total} 个文件` : activity.total > 1 ? `${activity.done || 0}/${activity.total} 个文件` : "",
       startedAt: Number(activity.startedAt) || Date.now(),
       updatedAt: Number(activity.updatedAt) || Date.now(),
-      actions: [],
+      error: failure,
+      actions: failure
+        ? [{ id: "open-task-note", label: "打开原始材料", primary: true }, { id: "dismiss-task", label: "关闭记录" }]
+        : completed
+          ? [{ id: "open-task-note", label: "打开纪要", primary: true }, { id: "dismiss-task", label: "关闭记录" }]
+          : [],
     };
-    const next = existing
+    let next = existing
       ? this.taskActivityStore.heartbeat(id, patch)
       : this.taskActivityStore.start(patch);
+    if (failure) next = this.failTaskActivity(id, failure, patch);
+    else if (completed) next = this.completeTaskActivity(id, patch);
     if (next && (!existing || existing.stage !== next.stage)) {
       this.taskActivityStore.event(id, {
         type: "stage",
@@ -15047,6 +15111,10 @@ class LexVoicePlugin extends obsidian.Plugin {
     try {
       if (actionId === "dismiss-task") {
         this.taskActivityStore.remove(taskId);
+        return;
+      }
+      if (actionId === "open-settings") {
+        this.openSettings("advanced");
         return;
       }
       if (actionId === "retry-outline") {
@@ -15068,7 +15136,15 @@ class LexVoicePlugin extends obsidian.Plugin {
             retries: Math.max(0, Math.min(Number(task.retries) || 0, (this.settings.maxRetries || 3) - 1)),
           });
         }
-        await this.queue.processOne(task);
+        if (task.type === "transcribe") this.resetAsrServiceCircuitForManualRetry("task-center");
+        try {
+          await this.queue.processOne(task);
+        } catch (error) {
+          if (task.type === "transcribe" && isAsrTransportError(error)) {
+            this.scheduleTaskQueueRetry(this.getAsrServiceRetryDelayMs(), "task-center-transport-failure");
+          }
+          throw error;
+        }
         return;
       }
       if (actionId === "cancel-queue-task") {
@@ -15196,7 +15272,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         const completed = Math.max(0, Number(ip.segmentDone) || 0);
         const total = Math.max(0, Number(ip.segmentTotal) || 0);
         const phaseLabel = phase === "prepare" ? "准备音频"
-          : phase === "transcribe" ? "分段转写"
+          : phase === "transcribe" ? "语音转写"
             : phase === "persist" ? "写入原始转写"
               : phase === "organize" ? "AI 整理" : "写入纪要";
         const chunkLabel = phase === "transcribe" && total > 1 ? ` ${completed}/${total} 段` : "";
@@ -15258,7 +15334,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       const task = background[0];
       const stateText = task.status === "retrying" ? "等待重试"
         : task.status === "waiting" ? "等待继续"
-          : task.status === "slow" ? "响应较慢" : (task.stageLabel || "后台处理中");
+          : task.status === "slow" ? (task.stageLabel || "处理中") : (task.stageLabel || "后台处理中");
       show(task.status === "waiting" || task.status === "retrying" ? "clock-3" : "loader-2",
         `${task.title} · ${stateText}`,
         task.status === "running" || task.status === "slow");
@@ -15306,8 +15382,8 @@ class LexVoicePlugin extends obsidian.Plugin {
     this._taskMeter = meter;
     return meter;
   }
-  addTaskMeter(inChars, outChars, usage) {
-    const m = this._taskMeter; if (!m) return;
+  addTaskMeter(inChars, outChars, usage, explicitMeter = null) {
+    const m = explicitMeter || this._taskMeter; if (!m) return;
     m.calls++;
     m.inChars += Number(inChars) || 0;
     m.outChars += Number(outChars) || 0;
@@ -15316,7 +15392,6 @@ class LexVoicePlugin extends obsidian.Plugin {
   }
   endTaskMeter(expectedMeter = null) {
     const m = expectedMeter || this._taskMeter;
-    if (expectedMeter && this._taskMeter !== expectedMeter) return null;
     if (this._taskMeter === m) this._taskMeter = null;
     if (!m || !m.calls) return null;
     const exact = m.hasExact && m.exactTokens > 0;
@@ -15349,6 +15424,84 @@ class LexVoicePlugin extends obsidian.Plugin {
     return null;
   }
 
+  updateImportActivity(patch = {}) {
+    const current = this._importBusy;
+    if (!current || current.workflow !== "audio-import") return null;
+    const now = Date.now();
+    const event = patch && patch.event ? patch.event : null;
+    const cleanPatch = Object.assign({}, patch);
+    delete cleanPatch.event;
+    const previousPhase = normalizeAudioImportStage(current.phase);
+    const nextPhase = normalizeAudioImportStage(cleanPatch.phase || current.phase);
+    const stageState = Object.assign({}, current.stageState || {});
+    const previousStage = Object.assign({}, stageState[previousPhase] || {});
+    const nextStage = Object.assign({}, stageState[nextPhase] || {});
+
+    if (!previousStage.startedAt) previousStage.startedAt = Number(current.phaseStartedAt) || Number(current.startedAt) || now;
+    if (previousPhase !== nextPhase && !previousStage.completedAt) {
+      previousStage.completedAt = now;
+      previousStage.updatedAt = now;
+      stageState[previousPhase] = previousStage;
+    }
+    if (!nextStage.startedAt) nextStage.startedAt = now;
+    nextStage.updatedAt = now;
+    stageState[nextPhase] = nextStage;
+
+    let requests = Array.isArray(cleanPatch.requests)
+      ? cleanPatch.requests
+      : Array.isArray(current.requests)
+        ? current.requests
+        : [];
+    const nextSegmentTotal = Math.max(0, Number(cleanPatch.segmentTotal ?? current.segmentTotal) || 0);
+    if (nextSegmentTotal > 0) {
+      requests = requests.map((request) => Object.assign({}, request, { chunkCount: nextSegmentTotal }));
+    }
+    let events = Array.isArray(current.events) ? current.events : [];
+    if (previousPhase !== nextPhase) {
+      events = appendActivityEvent(events, {
+        at: now,
+        stageId: nextPhase,
+        type: "stage",
+        label: ({
+          prepare: "开始准备音频",
+          transcribe: "开始语音转写",
+          persist: "开始写入原始转写",
+          organize: "开始 AI 整理",
+          write: "开始写入纪要",
+        })[nextPhase],
+      });
+    }
+    if (event) {
+      events = appendActivityEvent(events, Object.assign({}, event, {
+        stageId: event.stageId || nextPhase,
+        at: event.at || now,
+      }));
+    }
+
+    const next = Object.assign({}, current, cleanPatch, {
+      phase: nextPhase,
+      phaseStartedAt: previousPhase === nextPhase
+        ? Number(current.phaseStartedAt) || Number(current.startedAt) || now
+        : now,
+      stageState,
+      requests,
+      events,
+      updatedAt: now,
+    });
+    this._importBusy = next;
+    try { this.syncImportTaskActivity(next); } catch { /* progress must not interrupt import */ }
+    try { this.updateBusyStatus(); } catch { /* intentionally empty */ }
+    try { this.refreshOutlineView(); } catch { /* intentionally empty */ }
+    return next;
+  }
+
+  updateImportRequest(patch) {
+    const current = this._importBusy;
+    if (!current || current.workflow !== "audio-import" || !patch || !patch.key) return null;
+    const requests = upsertActivityRequest(current.requests, patch, 400);
+    return this.updateImportActivity({ requests });
+  }
+
   buildAudioImportActivityStages(activity, currentPhase) {
     const ip = activity && typeof activity === "object" ? activity : {};
     const phase = normalizeAudioImportStage(currentPhase || ip.phase);
@@ -15359,6 +15512,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     const segmentTotal = Math.max(0, Number(ip.segmentTotal) || 0);
     const writtenSegments = Math.max(0, Number(ip.writtenSegments) || 0);
     const failedSegments = Math.max(0, Number(ip.failedSegments) || 0);
+    const processedSegments = Math.min(segmentTotal, segmentDone);
     const lifecycleRequests = (Array.isArray(ip.requests) ? ip.requests : [])
       .map((request) => Object.assign({}, request, {
         liveness: classifyActivityRequest(request, now),
@@ -15367,7 +15521,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     const requestSummary = summarizeActivityRequests(lifecycleRequests, now);
     const stageState = ip.stageState && typeof ip.stageState === "object" ? ip.stageState : {};
     const lifecycleEvents = Array.isArray(ip.events) ? ip.events : [];
-    const rawStages = buildAudioImportStages(phase);
+    const rawStages = buildAudioImportStages(phase, !!ip.completed);
 
     return rawStages.map((stage) => {
       const telemetry = stageState[stage.id] || {};
@@ -15379,20 +15533,21 @@ class LexVoicePlugin extends obsidian.Plugin {
       let detail = "";
       let requests = [];
       if (stage.id === "prepare") {
-        summary = prepareTotal > 0 ? `${prepareDone}/${prepareTotal} 段已准备` : "";
-        detail = "读取音频、确认时长，并把长音频切成可恢复的小段。";
+        summary = prepareTotal > 0 ? `${prepareDone}/${prepareTotal} 个文件已准备` : "";
+        detail = "读取音频并确认文件、格式和时长。";
       } else if (stage.id === "transcribe") {
         requests = lifecycleRequests;
         summary = [
-          segmentTotal > 0 ? `${segmentDone}/${segmentTotal} 段已处理` : "",
-          requestSummary.running ? `${requestSummary.running} 段刚发出` : "",
-          requestSummary.waiting ? `${requestSummary.waiting} 段等待响应` : "",
-          requestSummary.slow ? `${requestSummary.slow} 段响应较慢` : "",
-          requestSummary.stalled ? `${requestSummary.stalled} 段超过预期` : "",
-          requestSummary.retrying ? `${requestSummary.retrying} 段等待重试` : "",
-          failedSegments ? `${failedSegments} 段待后续重试` : "",
+          stage.status === "active" ? String(ip.transcribeLabel || "") : "",
+          segmentTotal > 0 ? `${processedSegments}/${segmentTotal} 个文件转写成功` : "",
+          requestSummary.running ? `${requestSummary.running} 个请求已发出` : "",
+          requestSummary.waiting ? `${requestSummary.waiting} 个请求等待响应` : "",
+          requestSummary.slow ? `${requestSummary.slow} 个请求处理中` : "",
+          requestSummary.stalled ? `${requestSummary.stalled} 个请求超过预期` : "",
+          requestSummary.retrying ? `${requestSummary.retrying} 个请求等待重试` : "",
+          failedSegments ? `${failedSegments} 个文件待重试` : "",
         ].filter(Boolean).join(" · ");
-        detail = "每段独立请求转写服务；失败段会保留音频并登记到重试队列。";
+        detail = String(ip.transcribeDetail || "每个音频文件独立提交；失败时保留音频并登记到重试队列。");
         if (stage.status === "active") {
           liveness = getDominantActivityLiveness(requestSummary);
           if (liveness === "pending" || liveness === "done") {
@@ -15405,7 +15560,7 @@ class LexVoicePlugin extends obsidian.Plugin {
           liveness = "failed";
         }
       } else if (stage.id === "persist") {
-        summary = segmentTotal > 0 ? `${writtenSegments}/${segmentTotal} 段已写入` : "";
+        summary = segmentTotal > 0 ? `${writtenSegments}/${segmentTotal} 个文件已写入` : "";
         detail = "原始转写按时间顺序写入笔记，不会等待最终纪要后再一次性保存。";
       } else if (stage.id === "organize") {
         summary = String(ip.organizeLabel || "");
@@ -15417,6 +15572,10 @@ class LexVoicePlugin extends obsidian.Plugin {
       if (stage.status === "active" && stage.id !== "transcribe") {
         const quietMs = now - (Number(telemetry.updatedAt) || Number(ip.updatedAt) || now);
         liveness = quietMs >= 120_000 ? "stalled" : quietMs >= 30_000 ? "slow" : "running";
+      }
+      if (stage.status === "active" && ip.error) {
+        liveness = "failed";
+        detail = String(ip.error);
       }
       return Object.assign({}, stage, {
         liveness,
@@ -15451,25 +15610,26 @@ class LexVoicePlugin extends obsidian.Plugin {
         const writtenSegments = Math.max(0, Number(ip.writtenSegments) || 0);
         const activeSegments = Math.max(0, Number(ip.activeSegments) || 0);
         const failedSegments = Math.max(0, Number(ip.failedSegments) || 0);
+        const processedSegments = Math.min(segmentTotal, segmentDone);
         let step = "准备音频";
         let stepDetail = ip.file
-          ? `正在读取并分析 ${ip.file}；长音频会先切成可恢复的小段`
-          : "正在读取音频并准备分段";
+          ? `正在读取并分析 ${ip.file}`
+          : "正在读取音频并准备整文件转写任务";
         let percent = null;
         let count = total > 1 ? `第 ${n} / ${total} 个文件` : "";
         if (phase === "prepare" && prepareTotal > 1) {
           percent = Math.max(0, Math.min(100, (prepareDone / prepareTotal) * 100));
-          count = `已准备 ${prepareDone} / ${prepareTotal} 段`;
+          count = `已准备 ${prepareDone} / ${prepareTotal} 个文件`;
         }
         if (phase === "transcribe") {
-          step = "分段转写";
-          const runningText = activeSegments > 0 ? `${activeSegments} 段正在请求转写服务` : "正在等待转写服务返回";
+          step = "语音转写";
+          const runningText = activeSegments > 0 ? `${activeSegments} 个文件正在请求转写服务` : "正在等待转写服务返回";
           stepDetail = failedSegments > 0
-            ? `${runningText}；${failedSegments} 段未成功，已保留并进入重试流程`
+            ? `${runningText}；${failedSegments} 个文件未成功，已保留并进入重试流程`
             : runningText;
           if (segmentTotal > 1) {
-            percent = Math.max(0, Math.min(100, (segmentDone / segmentTotal) * 100));
-            count = `已处理 ${segmentDone} / ${segmentTotal} 段`;
+            percent = Math.max(0, Math.min(100, (processedSegments / segmentTotal) * 100));
+            count = `成功 ${processedSegments} / ${segmentTotal} 个文件`;
           } else {
             count = segmentTotal === 1 && segmentDone > 0 ? "当前音频已转写" : "正在转写当前音频";
           }
@@ -15481,8 +15641,15 @@ class LexVoicePlugin extends obsidian.Plugin {
             count = `已写入 ${writtenSegments} / ${segmentTotal} 段`;
           }
         } else if (phase === "organize") {
-          step = "准备 AI 整理";
-          stepDetail = "原始转写已保留，正在准备生成最终纪要";
+          step = String(ip.organizeLabel || "AI 整理");
+          stepDetail = String(ip.organizeDetail || "原始转写已保留，正在生成最终纪要");
+          percent = Number.isFinite(Number(ip.organizePercent)) ? Number(ip.organizePercent) : null;
+          count = segmentTotal > 0 ? `转写已完成 ${segmentDone} / ${segmentTotal} 段` : "";
+        } else if (phase === "write") {
+          step = String(ip.writeLabel || "写入纪要");
+          stepDetail = String(ip.writeDetail || "正在把整理结果写入 Obsidian");
+          percent = Number.isFinite(Number(ip.writePercent)) ? Number(ip.writePercent) : null;
+          count = segmentTotal > 0 ? `${segmentDone} / ${segmentTotal} 段已转写` : "";
         }
         const stages = this.buildAudioImportActivityStages(ip, phase);
         const lifecycleEvents = Array.isArray(ip.events) ? ip.events : [];
@@ -15495,7 +15662,7 @@ class LexVoicePlugin extends obsidian.Plugin {
           percent,
           count,
           stages,
-          liveness: activeStage ? activeStage.liveness : "running",
+          liveness: ip.error ? "failed" : ip.completed ? "done" : activeStage ? activeStage.liveness : "running",
           events: lifecycleEvents.slice(-20),
           startedAt: Number(ip.startedAt) || null,
           stageStartedAt: Number(ip.phaseStartedAt) || null,
@@ -15528,7 +15695,22 @@ class LexVoicePlugin extends obsidian.Plugin {
     }
     // A2) 通用长操作（重新整理 / 整篇重新润色）
     if (this._busyLabel) {
-      return { kind: "重新整理", modeLabel: "", step: String(this._busyLabel), stepDetail: "", percent: null, count: "" };
+      const context = this._busyContext && typeof this._busyContext === "object"
+        ? this._busyContext
+        : {};
+      return {
+        kind: String(context.kind || "重新整理"),
+        modeLabel: String(context.targetModeLabel || ""),
+        sourceFile: String(context.sourceFile || ""),
+        sourceFolder: String(context.sourceFolder || ""),
+        durationMs: Math.max(0, Number(context.durationMs) || 0),
+        sourceModeLabel: String(context.sourceModeLabel || ""),
+        targetModeLabel: String(context.targetModeLabel || ""),
+        step: String(this._busyLabel),
+        stepDetail: "",
+        percent: null,
+        count: "",
+      };
     }
     // B/C) 录音 / 段落转写 / 会后 AI 整理（this.session）
     const s = this.session;
@@ -16713,10 +16895,6 @@ class LexVoicePlugin extends obsidian.Plugin {
       new obsidian.Notice("当前已有录音进行中，请先停止后再继续录音。", 5000);
       return;
     }
-    if (this.quickDictation && this.quickDictation.isActive()) {
-      new obsidian.Notice("正在听写，请先结束后再录制纪要。", 5000);
-      return;
-    }
     const appendTargetFile = options && options.appendToFile instanceof obsidian.TFile ? options.appendToFile : null;
     let continuationInfo = null;
     if (appendTargetFile) {
@@ -16837,7 +17015,9 @@ class LexVoicePlugin extends obsidian.Plugin {
         this.scheduleRecruitInterviewBriefBackground(this.session);
       }
 
-      const segmentDurationMs = isStreaming
+      const requiresWholeSession = !!(activeProfile && activeProfile.requiresWholeSession)
+        || isSpeakerDiarizationProvider(activeProvider);
+      const segmentDurationMs = isStreaming || requiresWholeSession
         ? 0
         : (this.settings.enableInterimOutput
           ? Math.max(30, Math.floor(this.settings.segmentIntervalMinutes * 60)) * 1000
@@ -16919,7 +17099,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         sessionRef.speakerChannels = {};
         if (isStreaming && count > 1) {
           sessionRef.channelSeparationMode = "single";
-          new obsidian.Notice("即时听写不区分说话人；如需按说话人区分，请改用普通录音。", 9000);
+          new obsidian.Notice("实时转写暂不区分说话人；如需区分，请在导入音频时启用说话人识别。", 9000);
         }
         if (providerStreamReady) await providerStreamReady(mediaStream);
       };
@@ -16937,6 +17117,8 @@ class LexVoicePlugin extends obsidian.Plugin {
       const modeLabel = audioInputModeLabel(captureMode);
       const noticeText = isStreaming
         ? `录音中（${modeLabel}），${activeProfile.title || "流式服务"} 实时转写中`
+        : requiresWholeSession
+          ? `录音中（${modeLabel}），停止后统一转写并确认说话人`
         : (this.settings.enableInterimOutput
           ? `录音中（${modeLabel}），启动期快速出片，之后每 ${this.settings.segmentIntervalMinutes} 分钟即时转写`
           : `录音中（${modeLabel}），停止时统一处理`);
@@ -17030,6 +17212,20 @@ class LexVoicePlugin extends obsidian.Plugin {
     session.workProgress = Object.assign({}, session.workProgress || {}, patch || {}, {
       updatedAt: new Date().toISOString(),
     });
+    if (this._importBusy
+      && this._importBusy.workflow === "audio-import"
+      && String(this._importBusy.sessionId || "") === String(session.id || "")) {
+      const stage = audioImportStageFromWorkProgress(session.workProgress.stage);
+      this.updateImportActivity({
+        phase: stage,
+        organizeLabel: stage === "organize" ? String(session.workProgress.label || "AI 整理") : this._importBusy.organizeLabel,
+        organizeDetail: stage === "organize" ? String(session.workProgress.detail || "") : this._importBusy.organizeDetail,
+        organizePercent: stage === "organize" ? Number(session.workProgress.percent) || 0 : this._importBusy.organizePercent,
+        writeLabel: stage === "write" ? String(session.workProgress.label || "写入纪要") : this._importBusy.writeLabel,
+        writeDetail: stage === "write" ? String(session.workProgress.detail || "") : this._importBusy.writeDetail,
+        writePercent: stage === "write" ? Number(session.workProgress.percent) || 0 : this._importBusy.writePercent,
+      });
+    }
     try { this.refreshOutlineView(); } catch { /* intentionally empty */ }
   }
 
@@ -17322,10 +17518,75 @@ class LexVoicePlugin extends obsidian.Plugin {
     return this.saveMasterAudio(session, masterInput).finally(() => { masterInput.masterBlob = null; });
   }
 
+  getAsrServiceCircuitKey() {
+    try {
+      const provider = resolveTranscribeProvider(this);
+      const endpoint = String(provider && provider.endpoint || "").trim();
+      let host = endpoint;
+      try { host = new URL(endpoint).host || endpoint; } catch { /* keep normalized raw endpoint */ }
+      return [provider && provider.id || "", host, provider && provider.model || ""].join("|");
+    } catch {
+      return "unknown";
+    }
+  }
+
+  getAsrServiceCircuitState() {
+    const key = this.getAsrServiceCircuitKey();
+    if (this.asrServiceCircuitKey !== key) {
+      this.asrServiceCircuitKey = key;
+      this.asrServiceCircuitState = createLiveAsrCircuitState();
+    }
+    if (!this.asrServiceCircuitState) this.asrServiceCircuitState = createLiveAsrCircuitState();
+    return this.asrServiceCircuitState;
+  }
+
+  isAsrServiceCircuitOpen() {
+    return isLiveAsrCircuitOpen(this.getAsrServiceCircuitState());
+  }
+
+  getAsrServiceRetryDelayMs() {
+    const state = this.getAsrServiceCircuitState();
+    const openDelayMs = Math.max(0, Number(state.openUntilMs) || 0) - Date.now() + 1000;
+    if (openDelayMs > 1000) return openDelayMs;
+    const failures = Math.max(0, Number(state.consecutiveFailures) || 0);
+    if (failures > 0) return Math.min(2 * 60 * 1000, 30 * 1000 * (2 ** Math.max(0, failures - 1)));
+    return 1500;
+  }
+
+  recordAsrServiceAttemptFailure(error) {
+    if (!isAsrTransportError(error)) return this.getAsrServiceCircuitState();
+    this.asrServiceCircuitState = recordLiveAsrFailure(
+      this.getAsrServiceCircuitState(),
+      getErrorMessage(error),
+      true,
+    );
+    return this.asrServiceCircuitState;
+  }
+
+  recordAsrServiceAttemptSuccess() {
+    const previousFailures = Math.max(0, Number(this.getAsrServiceCircuitState().consecutiveFailures) || 0);
+    this.asrServiceCircuitState = recordLiveAsrSuccess();
+    if (previousFailures > 0) {
+      void this.logDiagnostic("info", "asr.service_circuit_recovered", "转写服务连接已恢复", { previousFailures });
+    }
+  }
+
+  resetAsrServiceCircuitForManualRetry(source = "manual") {
+    const previousFailures = Math.max(0, Number(this.getAsrServiceCircuitState().consecutiveFailures) || 0);
+    this.asrServiceCircuitState = recordLiveAsrSuccess();
+    if (previousFailures > 0) {
+      void this.logDiagnostic("info", "asr.service_circuit_manual_probe", "用户发起转写重试，已允许一次立即探测", {
+        source,
+        previousFailures,
+      });
+    }
+  }
+
   recordLiveAsrAttemptSuccess(session) {
     if (!session) return;
     const previousFailures = Math.max(0, Number(session.asrCircuitState && session.asrCircuitState.consecutiveFailures) || 0);
     session.asrCircuitState = recordLiveAsrSuccess();
+    this.recordAsrServiceAttemptSuccess();
     if (previousFailures > 0) {
       void this.logDiagnostic("info", "asr.live_circuit_recovered", "实时转写服务已恢复", { previousFailures });
     }
@@ -17339,6 +17600,7 @@ class LexVoicePlugin extends obsidian.Plugin {
       getErrorMessage(error),
       true,
     );
+    if (isAsrTransportError(error)) this.recordAsrServiceAttemptFailure(error);
     const afterOpen = isLiveAsrCircuitOpen(session.asrCircuitState);
     if (!beforeOpen && afterOpen) {
       session.hasDeferredAsrJobs = true;
@@ -17516,8 +17778,8 @@ class LexVoicePlugin extends obsidian.Plugin {
       && obsidian.normalizePath(String(t.audioPath || "")) === norm);
   }
 
-  async maybeDeleteSegmentCacheFile(path, excludeTaskId) {
-    if (this.settings.keepSegmentAudioFiles === true) return;
+  async maybeDeleteSegmentCacheFile(path, excludeTaskId, force = false) {
+    if (!force && this.settings.keepSegmentAudioFiles === true) return;
     if (!this.isSegmentCachePath(path)) return;
     if (this.isQueuedTranscribeAudioReferenced(path, excludeTaskId)) return;
     const file = this.app.vault.getAbstractFileByPath(obsidian.normalizePath(path));
@@ -17700,7 +17962,8 @@ class LexVoicePlugin extends obsidian.Plugin {
       err = new Error("流式转写连接未建立，请检查 API Key 与网络后重新录音。");
       console.error("[LexVoice]", err.message);
     } else {
-      const circuitOpen = isLiveAsrCircuitOpen(session.asrCircuitState || createLiveAsrCircuitState());
+      const circuitOpen = isLiveAsrCircuitOpen(session.asrCircuitState || createLiveAsrCircuitState())
+        || this.isAsrServiceCircuitOpen();
       if (session.asrDeferredMode || circuitOpen) {
         err = new Error(session.asrDeferredMode
           ? "实时转写积压超过保护阈值，已转入后台队列"
@@ -17899,7 +18162,7 @@ class LexVoicePlugin extends obsidian.Plugin {
 
     const playbackAudioName = session.masterAudioName || segmentAudioName;
     const playbackAudioPath = session.masterAudioPath || segmentAudioPath;
-    session.segments.push({
+    const segmentRecord = {
       index: segmentIndex,
       startOffsetMs: displayStartOffsetMs,
       endOffsetMs: displayEndOffsetMs,
@@ -17918,19 +18181,21 @@ class LexVoicePlugin extends obsidian.Plugin {
       //   mix-virtual   = 当前是混合录音，分不清；后续提交里会改成双 stream 分别打标
       // seg.source 优先（来自 RecordSession 未来的双流路径），fallback 到 session.captureMode
       source: (seg && seg.source) || session.captureMode || "mic",
-    });
+    };
+    session.segments.push(segmentRecord);
 
     if (err && !isStreamingProvider) {
       // 流式 provider(endpoint 是 wss://)的失败段不入 transcribe 重试队列——重试走 HTTP 必然再失败、
       // 把任务卡在 failed 永远清不掉。流式无法离线重切重传，留在笔记里标失败即可。
       if (err.asrDeferred || isTransientAsrError(err)) session.hasDeferredAsrJobs = true;
-      await this.keepLiveSegmentQueueTaskForRetry(session, Object.assign({}, seg, {
+      const retryTask = await this.keepLiveSegmentQueueTaskForRetry(session, Object.assign({}, seg, {
         segmentAudioPath,
         segmentAudioName,
         segmentIndex,
         displayStartOffsetMs,
         displayEndOffsetMs,
       }), err);
+      segmentRecord.queueTaskId = retryTask.id;
     }
 
     const segTitle = `### 段落 ${segNumber} (${formatElapsed(displayStartOffsetMs)}–${formatElapsed(displayEndOffsetMs)}) ${getAudioTimeLink(playbackAudioName, Math.max(0, Number(seg.startOffsetMs) || 0))}${seg.isFinal ? " · 结束" : ""}`;
@@ -17938,12 +18203,12 @@ class LexVoicePlugin extends obsidian.Plugin {
       "",
       segTitle,
       "",
-      seg.queueTaskId ? `<!-- lexvoice-transcribe-task:${seg.queueTaskId} -->` : "",
-      err ? (isStreamingProvider
-        ? `_[流式转写失败，需整篇结束后重整或重录：${err.message || err}]_`
-        : err.asrDeferred
-          ? `_[等待后台转写：${err.message || err}]_`
-          : `_[转写失败（已进入重试队列）：${err.message || err}]_`) : (text ? text : "_[此段无内容]_"),
+      segmentRecord.queueTaskId ? `<!-- lexvoice-transcribe-task:${segmentRecord.queueTaskId} -->` : "",
+      err ? getTranscribeSegmentPlaceholder(err, {
+        streaming: isStreamingProvider,
+        deferred: !!err.asrDeferred,
+        retryable: !isStreamingProvider && (err.asrDeferred || isTransientAsrError(err)),
+      }) : (text ? text : "_[此段无内容]_"),
       "",
     ].join("\n");
     await this.insertBeforeSegmentsEnd(session.mdPath, block, session.id);
@@ -18018,6 +18283,112 @@ class LexVoicePlugin extends obsidian.Plugin {
     }
   }
 
+  async confirmSpeakerNamesBeforeFinal(session, segments) {
+    const joined = (segments || []).map(segment => String(segment && segment.text || "")).join("\n");
+    const candidates = collectSpeakerCandidates(joined);
+    if (candidates.length < 2) return { segments, frontmatter: null };
+
+    const file = this.app.vault.getAbstractFileByPath(session.mdPath);
+    if (!(file instanceof obsidian.TFile)) return { segments, frontmatter: null };
+    const frontmatter = await readFileFrontmatter(this, file) || {};
+    const ids = candidates.map(candidate => candidate.id);
+    const initialMappings = normalizeSpeakerMappings(
+      Object.assign({}, session.speakerChannels || {}, frontmatter.lexvoice_speakers || {}),
+      ids,
+    );
+    const alreadyConfirmed = candidates.every(candidate => String(initialMappings[candidate.id] && initialMappings[candidate.id].personName || "").trim());
+    let mappings = initialMappings;
+
+    if (!alreadyConfirmed && !session._speakerNameConfirmationSkipped) {
+      this.setSessionWorkProgress(session, {
+        stage: "speaker-confirm",
+        label: "确认说话人",
+        percent: 52,
+        detail: `识别到 ${candidates.length} 位说话人，等待确认姓名后继续整理`,
+      });
+      this.refreshOutlineView();
+      const providerId = session.importTranscribeProviderId
+        || this.settings.activeTranscribeProvider
+        || "siliconflow";
+      const activeProvider = (this.settings.transcribeProviders || {})[providerId] || {};
+      const profile = this.getTranscribeProviderProfile(providerId, activeProvider);
+      const hardwareSeparated = Object.keys(session.speakerChannels || {}).length >= 2;
+      const stableAcrossSession = hardwareSeparated
+        || !!(profile && profile.speakerLabelScope === "session" && profile.requiresWholeSession)
+        || isSpeakerDiarizationProvider(activeProvider);
+      const names = await new Promise((resolve) => {
+        const modal = new SpeakerNameConfirmModal(
+          this.app,
+          this,
+          candidates,
+          initialMappings,
+          { unstableAcrossSegments: !stableAcrossSession },
+          resolve,
+        );
+        modal.open();
+      });
+      if (names) {
+        mappings = buildConfirmedSpeakerMappings(candidates, names, initialMappings);
+      } else {
+        session._speakerNameConfirmationSkipped = true;
+      }
+    }
+
+    const hasConfirmedName = Object.values(mappings).some(mapping => String(mapping && mapping.personName || "").trim());
+    if (hasConfirmedName) {
+      await this.app.fileManager.processFrontMatter(file, (nextFrontmatter) => {
+        nextFrontmatter.lexvoice_speakers = mappings;
+      });
+      session.speakerChannels = mappings;
+      let persistedReplacements = 0;
+      let namesPersisted = false;
+      try {
+        let markdown = await this.app.vault.read(file);
+        for (const [speakerId, mapping] of Object.entries(mappings)) {
+          const personName = String(mapping && mapping.personName || "").trim();
+          if (!personName) continue;
+          const updated = replaceSpeakerDisplayName(markdown, speakerId, personName);
+          markdown = updated.markdown;
+          persistedReplacements += updated.replacements;
+        }
+        if (persistedReplacements > 0) {
+          await this.app.vault.modify(file, markdown);
+          this.notePanelCacheKey = "";
+          this.notePanelCacheData = undefined;
+          this.notePanelLoading = false;
+        }
+        namesPersisted = true;
+      } catch (error) {
+        try {
+          await this.logDiagnostic("warn", "speaker.names_persist_failed", "说话人姓名已保存到属性，但正文更新失败", {
+            mdPath: file.path,
+            error: diagnosticError(error),
+          });
+        } catch { /* diagnostics must not change finalization behavior */ }
+        new obsidian.Notice("说话人姓名已保存，但原始转写中的显示名未能更新；可在大纲中再次保存。", 8000);
+      }
+      if (namesPersisted) {
+        try {
+          await this.logDiagnostic("info", "speaker.names_persisted", "说话人姓名已写入原始转写", {
+            mdPath: file.path,
+            confirmedCount: Object.values(mappings).filter(mapping => String(mapping && mapping.personName || "").trim()).length,
+            replacements: persistedReplacements,
+          });
+        } catch { /* diagnostics must not change finalization behavior */ }
+      }
+    }
+    const llmSegments = hasConfirmedName
+      ? segments.map(segment => Object.assign({}, segment, {
+          text: applySpeakerNamesForLlm(segment.text, mappings),
+          rawText: segment.rawText || segment.text,
+        }))
+      : segments;
+    return {
+      segments: llmSegments,
+      frontmatter: hasConfirmedName ? Object.assign({}, frontmatter, { lexvoice_speakers: mappings }) : null,
+    };
+  }
+
   async _finalizeSessionImpl(session) {
 
     // 静音统计快照：此刻录音刚结束、recorder 计数尚未被下一场 start() 重置，同步读取避免异步窗口被污染。
@@ -18085,6 +18456,20 @@ class LexVoicePlugin extends obsidian.Plugin {
       return;
     }
     session.finalizing = true;
+    let speakerPreparation = { segments: segmentsForFinal, frontmatter: null };
+    try {
+      speakerPreparation = await this.confirmSpeakerNamesBeforeFinal(session, segmentsForFinal);
+    } catch (error) {
+      console.warn("[LexVoice] speaker confirmation failed; continuing with generic labels", error);
+      try {
+        await this.logDiagnostic("warn", "speaker.confirmation_failed", "说话人姓名确认未完成，已保留编号继续整理", {
+          mdPath: session.mdPath,
+          error: diagnosticError(error),
+        });
+      } catch { /* intentionally empty */ }
+    }
+    const segmentsForLlm = speakerPreparation.segments || segmentsForFinal;
+    const speakerFrontmatter = speakerPreparation.frontmatter || null;
     this.setSessionWorkProgress(session, {
       stage: "finalize-start",
       label: textImportSession ? "读取文本完成" : "准备 AI 整理",
@@ -18098,6 +18483,12 @@ class LexVoicePlugin extends obsidian.Plugin {
     let taskMeter = null;
     let finalSessionMeta = null;
     try {
+      const llmConfigIssue = getLlmConfigIssue(this.settings);
+      if (llmConfigIssue) {
+        const configurationError = new Error(llmConfigIssue);
+        configurationError.nonRetryable = true;
+        throw configurationError;
+      }
       this.setSessionWorkProgress(session, {
         stage: "workbench",
         label: "整理上下文",
@@ -18135,8 +18526,9 @@ class LexVoicePlugin extends obsidian.Plugin {
         writeSession.recruitContext = session.recruitContext;
       }
       taskMeter = this.beginTaskMeter();
+      sessionMeta._taskMeter = taskMeter;
       session._finalizeTaskMeter = taskMeter;
-      polished = await mergeAndPolish(this, segmentsForFinal.map(s => ({
+      polished = await mergeAndPolish(this, segmentsForLlm.map(s => ({
         index: s.index, startOffsetMs: s.startOffsetMs, endOffsetMs: s.endOffsetMs, text: s.text,
         audioName: s.audioName,
         audioStartOffsetMs: s.audioStartOffsetMs,
@@ -18145,7 +18537,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         sourcePath: s.sourcePath,
         sourceUrl: s.sourceUrl,
         rawText: s.rawText,
-      })), session.mode, session.recruitContext, sessionMeta);
+      })), session.mode, session.recruitContext, sessionMeta, speakerFrontmatter);
       session._briefingCheckpointId = sessionMeta._briefingCheckpointId || "";
       this.setSessionWorkProgress(session, {
         stage: "write-note",
@@ -18172,37 +18564,37 @@ class LexVoicePlugin extends obsidian.Plugin {
         nonRetryable: nonRetryableMergeError,
         error: diagnosticError(mergeError),
       });
-      if (!nonRetryableMergeError) {
-        const lastSeg = segmentsForFinal[segmentsForFinal.length - 1];
-        await this.queue.add({
-          type: "merge",
-          sessionId: session.id,
-          mdPath: session.mdPath,
-          mode: session.mode,
-          segments: segmentsForFinal.map(s => ({
-            index: s.index, startOffsetMs: s.startOffsetMs, endOffsetMs: s.endOffsetMs, text: s.text,
-            audioName: s.audioName,
-            audioStartOffsetMs: s.audioStartOffsetMs,
-            audioEndOffsetMs: s.audioEndOffsetMs,
-            sourceName: s.sourceName,
-            sourcePath: s.sourcePath,
-            sourceUrl: s.sourceUrl,
-            rawText: s.rawText,
-          })),
+      const lastSeg = segmentsForFinal[segmentsForFinal.length - 1];
+      await this.queue.add({
+        type: "merge",
+        sessionId: session.id,
+        mdPath: session.mdPath,
+        mode: session.mode,
+        status: nonRetryableMergeError ? "blocked" : "pending",
+        segments: segmentsForLlm.map(s => ({
+          index: s.index, startOffsetMs: s.startOffsetMs, endOffsetMs: s.endOffsetMs, text: s.text,
+          audioName: s.audioName,
+          audioStartOffsetMs: s.audioStartOffsetMs,
+          audioEndOffsetMs: s.audioEndOffsetMs,
+          sourceName: s.sourceName,
+          sourcePath: s.sourcePath,
+          sourceUrl: s.sourceUrl,
+          rawText: s.rawText,
+        })),
+        source: session.source || "",
+        sourceMeta: session.sourceMeta || null,
+        textImportSources: session.textImportSources || [],
+        recruitContext: session.recruitContext || null,
+        speakerFrontmatter,
+        sessionMeta: finalSessionMeta || {
+          startedAt: session.startedAt,
+          duration: isTextImportSession(session) ? "" : (lastSeg ? formatElapsed(lastSeg.endOffsetMs || 0) : ""),
           source: session.source || "",
           sourceMeta: session.sourceMeta || null,
-          textImportSources: session.textImportSources || [],
-          recruitContext: session.recruitContext || null,
-          sessionMeta: finalSessionMeta || {
-            startedAt: session.startedAt,
-            duration: isTextImportSession(session) ? "" : (lastSeg ? formatElapsed(lastSeg.endOffsetMs || 0) : ""),
-            source: session.source || "",
-            sourceMeta: session.sourceMeta || null,
-            meetingWorkbench: normalizeMeetingWorkbench(session.meetingWorkbench),
-          },
-          lastError: mergeError.message || String(mergeError),
-        });
-      }
+          meetingWorkbench: normalizeMeetingWorkbench(session.meetingWorkbench),
+        },
+        lastError: mergeError.message || String(mergeError),
+      });
       session.finalizationError = getErrorMessage(mergeError);
       const partialBriefing = mergeError instanceof BriefingPipelineIncompleteError;
       this.setSessionWorkProgress(session, {
@@ -18239,7 +18631,7 @@ class LexVoicePlugin extends obsidian.Plugin {
           sessionId: session.id,
           mdPath: session.mdPath,
           mode: session.mode,
-          segments: segmentsForFinal.map(s => ({
+          segments: segmentsForLlm.map(s => ({
             index: s.index, startOffsetMs: s.startOffsetMs, endOffsetMs: s.endOffsetMs, text: s.text,
             audioName: s.audioName,
             audioStartOffsetMs: s.audioStartOffsetMs,
@@ -18253,6 +18645,7 @@ class LexVoicePlugin extends obsidian.Plugin {
           sourceMeta: session.sourceMeta || null,
           textImportSources: session.textImportSources || [],
           recruitContext: session.recruitContext || null,
+          speakerFrontmatter,
           sessionMeta: finalSessionMeta,
           lastError: `纪要写入失败：${getErrorMessage(writeError)}`,
         });
@@ -19198,11 +19591,13 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
     const startedAt = moment(session.startedAt);
     const totalMs = session.segments.length ? session.segments[session.segments.length - 1].endOffsetMs : 0;
     const textImport = isTextImportSession(session);
-    const masterAudioBlock = session.multiSourceAudio ? "" : buildMasterAudioDetails(session, totalMs);
+    const externalAudioImport = !!session.externalAudioSource;
+    const retainAudio = !textImport && !externalAudioImport;
+    const masterAudioBlock = retainAudio && !session.multiSourceAudio ? buildMasterAudioDetails(session, totalMs) : "";
     const audioRow = masterAudioBlock || session.segments.map((s, i) => getAudioSegmentListItem(s, i)).filter(Boolean).join("\n");
     const realtimeOutlineBlock = buildRealtimeOutlineDetails(session);
     const interviewBriefBlock = buildInterviewBriefDetails(session);
-    const playbackTimelineBlock = buildPlaybackTimelineDetails(session);
+    const playbackTimelineBlock = retainAudio ? buildPlaybackTimelineDetails(session) : "";
     const meetingWorkbenchBlock = buildMeetingWorkbenchDetails(session);
     const recordingInfoBlock = textImport ? buildTextImportInfoDetails(session, meta.prefix, this.settings.llmModel) : buildRecordingInfoDetails({
       startedAt: session.startedAt,
@@ -19212,12 +19607,16 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
       model: this.settings.llmModel,
     });
     const textImportSourceBlock = textImport ? buildTextImportSourceDetails(session) : "";
+    const externalAudioSourceBlock = externalAudioImport ? buildExternalAudioSourceDetails(session) : "";
 
     const rawBlocks = textImport ? "" : session.segments.map(s => {
       const n = s.index + 1;
       const head = `### 段落 ${n} (${formatElapsed(s.startOffsetMs)}–${formatElapsed(s.endOffsetMs)}) ${getAudioTimeLink(s.audioName, getSegmentAudioLinkOffsetMs(s))}${s.isFinal ? " · 结束" : ""}`;
-      const body = s.error ? `_[转写失败：${s.error}]_` : (s.text || "_[此段无内容]_");
-      return `${head}\n\n${body}\n`;
+      const marker = s.queueTaskId ? `<!-- lexvoice-transcribe-task:${s.queueTaskId} -->\n` : "";
+      const body = s.error
+        ? getTranscribeSegmentPlaceholder(s.error, { retryable: !!s.queueTaskId })
+        : (s.text || "_[此段无内容]_");
+      return `${head}\n\n${marker}${body}\n`;
     }).join("\n");
 
     const emptyBriefingFallback = buildEmptyLlmOutputFallback();
@@ -19240,6 +19639,8 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
       "",
       recordingInfoBlock || null,
       recordingInfoBlock ? "" : null,
+      externalAudioSourceBlock || null,
+      externalAudioSourceBlock ? "" : null,
       interviewBriefBlock || null,
       interviewBriefBlock ? "" : null,
       meetingWorkbenchBlock || null,
@@ -19248,13 +19649,13 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
       realtimeOutlineBlock ? "" : null,
       textImport ? textImportSourceBlock || null : playbackTimelineBlock || null,
       textImport ? (textImportSourceBlock ? "" : null) : (playbackTimelineBlock ? "" : null),
-      textImport ? null : (masterAudioBlock ? null : "<details>"),
-      textImport ? null : (masterAudioBlock ? null : `<summary>原始音频（${session.segments.length} 段，${formatElapsed(totalMs)}）</summary>`),
-      textImport ? null : "",
-      textImport ? null : audioRow,
-      textImport ? null : "",
-      textImport ? null : (masterAudioBlock ? null : "</details>"),
-      textImport ? null : "",
+      retainAudio ? (masterAudioBlock ? null : "<details>") : null,
+      retainAudio ? (masterAudioBlock ? null : `<summary>原始音频（${session.segments.length} 段，${formatElapsed(totalMs)}）</summary>`) : null,
+      retainAudio ? "" : null,
+      retainAudio ? audioRow : null,
+      retainAudio ? "" : null,
+      retainAudio ? (masterAudioBlock ? null : "</details>") : null,
+      retainAudio ? "" : null,
       textImport ? null : "<details>",
       textImport ? null : `<summary>分段原始转写（${session.segments.length} 段）</summary>`,
       textImport ? null : "",
@@ -19283,8 +19684,10 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
     const sediment = splitOutSedimentBlock(polishedParts.body);
     const polishedBody = sediment.body.trim() || emptyBriefingFallback;
     const textImport = isTextImportSession(session);
+    const externalAudioImport = !!session.externalAudioSource;
+    const retainAudio = !textImport && !externalAudioImport;
     const realtimeOutlineBlock = buildRealtimeOutlineDetails(session);
-    const playbackTimelineBlock = buildPlaybackTimelineDetails(session);
+    const playbackTimelineBlock = retainAudio ? buildPlaybackTimelineDetails(session) : "";
     const recordingInfoBlock = textImport ? buildTextImportInfoDetails(session, meta.prefix, this.settings.llmModel) : buildRecordingInfoDetails({
       startedAt: session.startedAt,
       totalMs,
@@ -19293,7 +19696,8 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
       model: this.settings.llmModel,
     });
     const textImportSourceBlock = textImport ? buildTextImportSourceDetails(session) : "";
-    const masterAudioBlock = session.multiSourceAudio ? "" : buildMasterAudioDetails(session, totalMs);
+    const externalAudioSourceBlock = externalAudioImport ? buildExternalAudioSourceDetails(session) : "";
+    const masterAudioBlock = retainAudio && !session.multiSourceAudio ? buildMasterAudioDetails(session, totalMs) : "";
     const meetingWorkbenchBlock = buildMeetingWorkbenchDetails(session);
     const failureText = mergeError
       ? (nonRetryableMergeError
@@ -19308,6 +19712,8 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
       "",
       recordingInfoBlock || null,
       recordingInfoBlock ? "" : null,
+      externalAudioSourceBlock || null,
+      externalAudioSourceBlock ? "" : null,
       textImport ? textImportSourceBlock || null : masterAudioBlock || null,
       textImport ? (textImportSourceBlock ? "" : null) : (masterAudioBlock ? "" : null),
       meetingWorkbenchBlock || null,
@@ -20997,6 +21403,20 @@ ${source}`;
         }
       }
       this._busyLabel = `重新整理中（${meta.prefix}）…`;
+      const sourceMode = detectRecentNoteMode(this, file, fmCache);
+      const sourceModeLabel = sourceMode && sourceMode !== "off"
+        ? ((getModeMeta(this.settings, sourceMode) || {}).label || sourceMode)
+        : "未标注";
+      this._busyContext = {
+        kind: "重新整理",
+        sourceFile: file.basename,
+        sourceFolder: file.parent && file.parent.path ? file.parent.path : "知识库根目录",
+        durationMs: getLexVoiceSegmentsDurationMs(segments) || getSessionMetaDurationMs(sessionMeta),
+        sourceModeLabel,
+        targetModeLabel: [meta.label || meta.prefix, repolishOptions && repolishOptions.label]
+          .filter(Boolean)
+          .join(" · "),
+      };
       taskStarted = true;
       this.startTaskActivity({
         id: taskId,
@@ -21006,13 +21426,21 @@ ${source}`;
         status: "running",
         stage: "llm",
         stageLabel: "AI 重新整理",
-        detail: preferenceLabel ? `整理偏好：${preferenceLabel.replace(/^\s*·\s*/, "")}` : "正在根据原始转写生成新版本",
-        progress: null,
+        detail: preferenceLabel ? `正在准备原始转写 · ${preferenceLabel.replace(/^\s*·\s*/, "")}` : "正在准备原始转写",
+        progress: 3,
         actions: [],
       });
       this.updateBusyStatus();
       taskMeter = this.beginTaskMeter();
+      sessionMeta = Object.assign({}, sessionMeta || {}, { _taskActivityId: taskId, _taskMeter: taskMeter });
       const polished = await mergeAndPolish(this, segments, mode, recruitContext, sessionMeta, originalFmForRegen, repolishOptions);
+      this.patchTaskActivity(taskId, {
+        stage: "writing",
+        stageLabel: "正在生成新版本",
+        detail: "AI 正文已经完成，正在写入 Markdown",
+        progress: 94,
+        deadlineAt: 0,
+      });
 
       // 重新整理只生成派生纪要，不重命名、不修改母本。角色映射只作为本次
       // LLM 输入使用，原始转写和用户已经保存的 YAML 必须保持可追溯。
@@ -21041,6 +21469,13 @@ ${source}`;
         mode,
         versionStyle,
       );
+      this.patchTaskActivity(taskId, {
+        stage: "postprocess",
+        stageLabel: "正在完成文件处理",
+        detail: derivedFile instanceof obsidian.TFile ? derivedFile.path : "新版本已经写入",
+        progress: 98,
+        deadlineAt: 0,
+      });
       await clearCommittedBriefingCheckpoint(this, sessionMeta);
       let versionCacheError = "";
       try {
@@ -21074,6 +21509,7 @@ ${source}`;
         stageLabel: "新版本已生成",
         detail: versionCacheError ? `${outputPath} · 版本索引未同步：${versionCacheError}` : outputPath,
         subject: outputPath,
+        progress: 100,
         actions: [
           { id: "open-task-note", label: "打开纪要", primary: true },
           { id: "dismiss-task", label: "关闭记录" },
@@ -21098,6 +21534,7 @@ ${source}`;
       if (repolishLockAcquired && this._repolishInFlight) this._repolishInFlight.delete(taskId);
       if (taskMeter) this.endTaskMeter(taskMeter);
       this._busyLabel = null;
+      this._busyContext = null;
       this.updateBusyStatus();
     }
   }
@@ -21185,6 +21622,18 @@ ${source}`;
       const baseTitle = sourceFile.basename;
       taskId = `clean:${sourceFile.path}`;
       this._busyLabel = "清稿生成中…";
+      const sourceFm = ((this.app.metadataCache.getFileCache(sourceFile) || {}).frontmatter) || {};
+      const sourceMode = detectRecentNoteMode(this, sourceFile, sourceFm);
+      this._busyContext = {
+        kind: "生成清稿",
+        sourceFile: sourceFile.basename,
+        sourceFolder: sourceFile.parent && sourceFile.parent.path ? sourceFile.parent.path : "知识库根目录",
+        durationMs: getLexVoiceSegmentsDurationMs(segments),
+        sourceModeLabel: sourceMode && sourceMode !== "off"
+          ? ((getModeMeta(this.settings, sourceMode) || {}).label || sourceMode)
+          : "未标注",
+        targetModeLabel: "清稿",
+      };
       taskStarted = true;
       this.startTaskActivity({
         id: taskId,
@@ -21247,7 +21696,460 @@ ${source}`;
     } finally {
       if (taskMeter) this.endTaskMeter(taskMeter);
       this._busyLabel = null;
+      this._busyContext = null;
       this.updateBusyStatus();
+    }
+  }
+
+  getExternalInboxStatePath() {
+    const pluginDir = String(this.manifest && this.manifest.dir
+      ? this.manifest.dir
+      : `${this.app.vault.configDir}/plugins/${this.manifest.id}`);
+    return obsidian.normalizePath(`${pluginDir}/external-inbox-state.json`);
+  }
+
+  getExternalInboxRuntime() {
+    const fsModule = getDesktopModule("fs");
+    const pathModule = getDesktopModule("path");
+    const promises = fsModule && fsModule.promises;
+    if (!promises || typeof promises.readdir !== "function" || typeof promises.stat !== "function" || !pathModule) {
+      return null;
+    }
+    return {
+      fsModule,
+      promises,
+      pathModule,
+      fileSystem: {
+        join: (...parts) => pathModule.join(...parts),
+        readdir: async (folderPath) => {
+          const entries = await promises.readdir(folderPath, { withFileTypes: true });
+          return entries.map((entry) => ({
+            name: String(entry && entry.name || ""),
+            isFile: !!(entry && typeof entry.isFile === "function" && entry.isFile()),
+            isDirectory: !!(entry && typeof entry.isDirectory === "function" && entry.isDirectory()),
+          }));
+        },
+        stat: async (filePath) => {
+          const stat = await promises.stat(filePath);
+          return {
+            size: Math.max(0, Number(stat && stat.size) || 0),
+            mtimeMs: Math.max(0, Number(stat && stat.mtimeMs) || 0),
+            isFile: !!(stat && typeof stat.isFile === "function" && stat.isFile()),
+          };
+        },
+      },
+    };
+  }
+
+  async chooseExternalInboxFolder() {
+    if (isLexVoiceMobileRuntime()) {
+      new obsidian.Notice("电脑文件夹自动导入仅支持桌面端");
+      return "";
+    }
+    let dialog = null;
+    const electron = getDesktopModule("electron");
+    if (electron && electron.dialog) dialog = electron.dialog;
+    if (!dialog && electron && electron.remote && electron.remote.dialog) dialog = electron.remote.dialog;
+    if (!dialog) {
+      const remote = getDesktopModule("@electron/remote");
+      if (remote && remote.dialog) dialog = remote.dialog;
+    }
+    if (!dialog || typeof dialog.showOpenDialog !== "function") {
+      new obsidian.Notice("当前桌面环境无法打开文件夹选择器，请直接粘贴同步文件夹路径");
+      return "";
+    }
+    const result = await dialog.showOpenDialog({
+      title: "选择自动导入文件夹",
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (!result || result.canceled || !Array.isArray(result.filePaths) || !result.filePaths[0]) return "";
+    return String(result.filePaths[0]);
+  }
+
+  async loadExternalInboxLedger() {
+    if (this._externalInboxLedger) return this._externalInboxLedger;
+    const adapter = this.app.vault.adapter;
+    const statePath = this.getExternalInboxStatePath();
+    let ledger = createExternalInboxLedger();
+    try {
+      if (await adapter.exists(statePath)) {
+        ledger = normalizeExternalInboxLedger(JSON.parse(await adapter.read(statePath)));
+      }
+    } catch (e) {
+      console.error("[LexVoice] external inbox state read failed", e);
+    }
+    let recovered = false;
+    for (const entry of Object.values(ledger.entries)) {
+      if (entry.status !== "processing") continue;
+      entry.status = "failed";
+      entry.nextRetryAt = 0;
+      entry.error = "上次处理在插件关闭前未完成";
+      entry.updatedAt = Date.now();
+      recovered = true;
+    }
+    this._externalInboxLedger = ledger;
+    if (recovered) await this.saveExternalInboxLedger();
+    return ledger;
+  }
+
+  async saveExternalInboxLedger() {
+    if (!this._externalInboxLedger) return;
+    const adapter = this.app.vault.adapter;
+    this._externalInboxLedger = pruneExternalInboxLedger(this._externalInboxLedger);
+    try {
+      await adapter.write(this.getExternalInboxStatePath(), JSON.stringify(this._externalInboxLedger, null, 2));
+    } catch (e) {
+      console.error("[LexVoice] external inbox state write failed", e);
+    }
+  }
+
+  closeExternalInboxWatcher() {
+    try { if (this._externalInboxWatcher) this._externalInboxWatcher.close(); } catch { /* intentionally empty */ }
+    this._externalInboxWatcher = null;
+    this._externalInboxWatchedPath = "";
+    if (this._externalInboxEventTimer) window.clearTimeout(this._externalInboxEventTimer);
+    this._externalInboxEventTimer = null;
+    if (this._externalInboxStabilityTimer) window.clearTimeout(this._externalInboxStabilityTimer);
+    this._externalInboxStabilityTimer = null;
+  }
+
+  refreshExternalInboxWatcher() {
+    const folder = String(this.settings.inboxFolder || "").trim();
+    const enabled = !!this.settings.inboxAutoImport && isAbsoluteExternalInboxPath(folder) && !isLexVoiceMobileRuntime();
+    if (!enabled) {
+      this.closeExternalInboxWatcher();
+      return;
+    }
+    if (this._externalInboxWatcher && this._externalInboxWatchedPath === folder) return;
+    this.closeExternalInboxWatcher();
+    const runtime = this.getExternalInboxRuntime();
+    if (!runtime || !runtime.fsModule || typeof runtime.fsModule.watch !== "function") return;
+    const onChange = () => {
+      if (this._externalInboxEventTimer) window.clearTimeout(this._externalInboxEventTimer);
+      this._externalInboxEventTimer = window.setTimeout(() => {
+        this._externalInboxEventTimer = null;
+        void this.scanExternalInboxFolder({ manual: false, source: "event" });
+      }, 1200);
+    };
+    try {
+      try {
+        this._externalInboxWatcher = runtime.fsModule.watch(folder, { persistent: false, recursive: true }, onChange);
+      } catch {
+        this._externalInboxWatcher = runtime.fsModule.watch(folder, { persistent: false }, onChange);
+      }
+      this._externalInboxWatchedPath = folder;
+      if (this._externalInboxWatcher && typeof this._externalInboxWatcher.on === "function") {
+        this._externalInboxWatcher.on("error", (error) => {
+          console.warn("[LexVoice] external inbox watcher error", error);
+          this.closeExternalInboxWatcher();
+        });
+      }
+    } catch (e) {
+      console.warn("[LexVoice] external inbox watcher unavailable; polling remains active", e);
+    }
+  }
+
+  isForegroundAudioWorkActive() {
+    const recorderState = this.recorder && this.recorder.state;
+    return !!(
+      (recorderState && recorderState !== "idle")
+      || this._importBusy
+      || (this.session && !this.session.finalized)
+    );
+  }
+
+  externalInboxActivityId(file) {
+    return `external-inbox:${file.fingerprint}`;
+  }
+
+  markExternalInboxWaiting(file, detail) {
+    const id = this.externalInboxActivityId(file);
+    const current = this.taskActivityStore && this.taskActivityStore.get(id);
+    const patch = {
+      id,
+      kind: "external-audio-import",
+      title: `自动导入 · ${file.name}`,
+      subject: file.name,
+      status: "waiting",
+      stage: "waiting-source",
+      stageLabel: "等待导入",
+      detail,
+      progress: 5,
+    };
+    if (current) this.patchTaskActivity(id, patch);
+    else this.startTaskActivity(patch);
+  }
+
+  async scanExternalInboxFolder(options = {}) {
+    const manual = !!options.manual;
+    const folder = String(this.settings.inboxFolder || "").trim();
+    if (!isAbsoluteExternalInboxPath(folder)) {
+      if (manual) new obsidian.Notice("当前来源不是电脑文件夹");
+      return { queued: 0, waiting: 0, skipped: 0 };
+    }
+    if (isLexVoiceMobileRuntime()) {
+      if (manual) new obsidian.Notice("电脑文件夹自动导入仅支持桌面端");
+      return { queued: 0, waiting: 0, skipped: 0 };
+    }
+    if (this._externalInboxScanPromise) return this._externalInboxScanPromise;
+    const run = (async () => {
+      const runtime = this.getExternalInboxRuntime();
+      if (!runtime) throw new Error("当前桌面环境无法读取电脑文件夹");
+      if (!this.externalInboxScanner) this.externalInboxScanner = new ExternalInboxScanner();
+      const quietMs = Math.max(3000, Number(this.settings.inboxStabilizeDelayMs) || 0);
+      const result = await this.externalInboxScanner.scan(runtime.fileSystem, folder, AUDIO_EXT, {
+        quietMs,
+        maxDepth: 6,
+        maxFiles: 2000,
+      });
+      if (result.waiting.length && !this._externalInboxStabilityTimer) {
+        this._externalInboxStabilityTimer = window.setTimeout(() => {
+          this._externalInboxStabilityTimer = null;
+          void this.scanExternalInboxFolder({ manual: false, source: "stability-check" });
+        }, quietMs + 500);
+      }
+      if (result.errors.length && result.scanned === 0) {
+        const first = result.errors[0];
+        throw new Error(first && first.message ? first.message : "无法读取自动导入文件夹");
+      }
+      const ledger = await this.loadExternalInboxLedger();
+      const now = Date.now();
+      for (const file of result.waiting.slice(0, 20)) {
+        this.markExternalInboxWaiting(file, "等待文件同步完成");
+        if (!ledger.entries[file.fingerprint]) {
+          ledger.entries[file.fingerprint] = {
+            fingerprint: file.fingerprint,
+            fullPath: file.fullPath,
+            name: file.name,
+            size: file.size,
+            mtimeMs: file.mtimeMs,
+            status: "waiting",
+            attempts: 0,
+            firstSeenAt: now,
+            updatedAt: now,
+            nextRetryAt: 0,
+            notePath: "",
+            error: "",
+          };
+        }
+      }
+      const scheduled = this._externalInboxScheduled || (this._externalInboxScheduled = new Set());
+      const candidates = result.ready.filter((file) =>
+        !scheduled.has(file.fingerprint)
+        && shouldImportExternalInboxFile(file, ledger, { manual, now, maxAttempts: 3 }));
+      if (this.isForegroundAudioWorkActive()) {
+        for (const file of candidates.slice(0, 20)) this.markExternalInboxWaiting(file, "当前正在录音，录音结束后自动处理");
+        await this.saveExternalInboxLedger();
+        if (manual && candidates.length) new obsidian.Notice(`发现 ${candidates.length} 个音频；当前正在录音，稍后自动处理`);
+        return { queued: 0, waiting: result.waiting.length + candidates.length, skipped: result.ready.length - candidates.length };
+      }
+      for (const file of candidates) {
+        scheduled.add(file.fingerprint);
+        const existing = ledger.entries[file.fingerprint];
+        ledger.entries[file.fingerprint] = Object.assign({
+          fingerprint: file.fingerprint,
+          fullPath: file.fullPath,
+          name: file.name,
+          size: file.size,
+          mtimeMs: file.mtimeMs,
+          status: "waiting",
+          attempts: 0,
+          firstSeenAt: now,
+          updatedAt: now,
+          nextRetryAt: 0,
+          notePath: "",
+          error: "",
+        }, existing || {}, {
+          fullPath: file.fullPath,
+          name: file.name,
+          size: file.size,
+          mtimeMs: file.mtimeMs,
+          status: "waiting",
+          updatedAt: now,
+        });
+        this.markExternalInboxWaiting(file, "已发现新音频，等待处理");
+        this._externalInboxLock = (this._externalInboxLock || Promise.resolve())
+          .then(() => this.processExternalInboxFile(file))
+          .catch((error) => console.error("[LexVoice] external inbox queue error", error));
+      }
+      await this.saveExternalInboxLedger();
+      if (manual) {
+        if (candidates.length) new obsidian.Notice(`发现 ${candidates.length} 个新音频，已加入处理队列`);
+        else if (result.waiting.length) new obsidian.Notice(`${result.waiting.length} 个音频仍在同步，稍后自动处理`);
+        else new obsidian.Notice("没有新的音频文件");
+      }
+      if (result.truncated) new obsidian.Notice("自动导入文件夹超过 2000 个音频，本次只扫描前 2000 个", 8000);
+      return { queued: candidates.length, waiting: result.waiting.length, skipped: result.ready.length - candidates.length };
+    })();
+    this._externalInboxScanPromise = run;
+    try {
+      return await run;
+    } catch (e) {
+      await this.logDiagnostic("error", "inbox.external_scan_failed", "外部音频文件夹扫描失败", {
+        source: options.source || "manual",
+        error: diagnosticError(e),
+      });
+      if (manual) new obsidian.Notice(`扫描失败：${getTaskErrorMessage(e)}`, 8000);
+      return { queued: 0, waiting: 0, skipped: 0 };
+    } finally {
+      if (this._externalInboxScanPromise === run) this._externalInboxScanPromise = null;
+    }
+  }
+
+  async copyExternalInboxFileToCache(file) {
+    const runtime = this.getExternalInboxRuntime();
+    if (!runtime) throw new Error("当前桌面环境无法读取电脑文件夹");
+    await this.ensureSegmentCacheFolder();
+    const safeStem = sanitizeFilename(String(file.name || "audio").replace(/\.[^.]+$/, "")) || "audio";
+    const extension = String(file.extension || "audio").toLowerCase();
+    const cacheName = `${file.fingerprint}-${safeStem}.${extension}`;
+    const cachePath = obsidian.normalizePath(`${this.getSegmentCacheFolder()}/${cacheName}`);
+    const adapter = this.app.vault.adapter;
+    if (await adapter.exists(cachePath)) await adapter.remove(cachePath);
+    const fullCachePath = typeof adapter.getFullPath === "function" ? adapter.getFullPath(cachePath) : "";
+    if (fullCachePath && typeof runtime.promises.copyFile === "function") {
+      await runtime.promises.copyFile(file.fullPath, fullCachePath);
+    } else {
+      const bytes = await runtime.promises.readFile(file.fullPath);
+      const arrayBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      await adapter.writeBinary(cachePath, arrayBuffer);
+    }
+    const current = await runtime.fileSystem.stat(file.fullPath);
+    if (current.size !== file.size || current.mtimeMs !== file.mtimeMs) {
+      try { if (await adapter.exists(cachePath)) await adapter.remove(cachePath); } catch { /* intentionally empty */ }
+      const changed = new Error("文件仍在同步，稍后重试");
+      changed.code = "EXTERNAL_FILE_CHANGED";
+      throw changed;
+    }
+    const copied = await adapter.stat(cachePath);
+    if (!copied || Number(copied.size) !== file.size) {
+      try { if (await adapter.exists(cachePath)) await adapter.remove(cachePath); } catch { /* intentionally empty */ }
+      throw new Error("临时音频复制不完整，稍后重试");
+    }
+    return cachePath;
+  }
+
+  async processExternalInboxFile(file) {
+    const scheduled = this._externalInboxScheduled || (this._externalInboxScheduled = new Set());
+    const ledger = await this.loadExternalInboxLedger();
+    const activityId = this.externalInboxActivityId(file);
+    let cachePath = "";
+    try {
+      if (this.isForegroundAudioWorkActive()) {
+        this.markExternalInboxWaiting(file, "当前正在录音，录音结束后自动处理");
+        return;
+      }
+      const now = Date.now();
+      const previous = ledger.entries[file.fingerprint];
+      const attempt = Math.max(0, Number(previous && previous.attempts) || 0) + 1;
+      ledger.entries[file.fingerprint] = Object.assign({}, previous || {}, {
+        fingerprint: file.fingerprint,
+        fullPath: file.fullPath,
+        name: file.name,
+        size: file.size,
+        mtimeMs: file.mtimeMs,
+        status: "processing",
+        attempts: attempt,
+        firstSeenAt: Number(previous && previous.firstSeenAt) || now,
+        updatedAt: now,
+        nextRetryAt: 0,
+        error: "",
+      });
+      await this.saveExternalInboxLedger();
+      this.patchTaskActivity(activityId, {
+        status: "running",
+        stage: "copying-source",
+        stageLabel: "读取音频",
+        detail: "正在读取同步文件",
+        progress: 10,
+        attempt,
+        maxAttempts: 3,
+      });
+      cachePath = await this.copyExternalInboxFileToCache(file);
+      this.patchTaskActivity(activityId, {
+        status: "running",
+        stage: "transcribing",
+        stageLabel: "转写与整理",
+        detail: "音频已就绪，正在生成纪要",
+        progress: 20,
+      });
+      await this.logDiagnostic("info", "inbox.external_import_started", "开始自动导入外部音频", {
+        audioName: file.name,
+        size: file.size,
+        fingerprint: file.fingerprint,
+      });
+      const result = await this.importAudioFiles([cachePath], "synthesis", {
+        externalSource: {
+          name: file.name,
+          fingerprint: file.fingerprint,
+        },
+      });
+      const entry = ledger.entries[file.fingerprint];
+      const pendingTranscriptionCount = Math.max(0, Number(result && result.pendingTranscriptionCount) || 0);
+      entry.status = "imported";
+      entry.updatedAt = Date.now();
+      entry.nextRetryAt = 0;
+      entry.notePath = result && result.mdPath ? result.mdPath : "";
+      entry.error = "";
+      await this.saveExternalInboxLedger();
+      this.completeTaskActivity(activityId, {
+        stage: "done",
+        stageLabel: pendingTranscriptionCount ? "纪要已创建" : "自动导入完成",
+        detail: pendingTranscriptionCount
+          ? `纪要已创建；${pendingTranscriptionCount} 个片段已保留并等待转写重试`
+          : entry.notePath ? `纪要已写入 ${entry.notePath}` : "纪要已写入库中",
+        progress: 100,
+      });
+      await this.logDiagnostic("info", "inbox.external_import_completed", "外部音频自动导入完成", {
+        audioName: file.name,
+        size: file.size,
+        fingerprint: file.fingerprint,
+        mdPath: entry.notePath,
+      });
+    } catch (e) {
+      this._importBusy = null;
+      this.updateBusyStatus();
+      const entry = ledger.entries[file.fingerprint] || {
+        fingerprint: file.fingerprint,
+        fullPath: file.fullPath,
+        name: file.name,
+        size: file.size,
+        mtimeMs: file.mtimeMs,
+        attempts: 1,
+        firstSeenAt: Date.now(),
+      };
+      const changedWhileSyncing = e && e.code === "EXTERNAL_FILE_CHANGED";
+      const attemptIndex = Math.max(0, Math.min(EXTERNAL_INBOX_RETRY_DELAYS_MS.length - 1, (Number(entry.attempts) || 1) - 1));
+      entry.status = changedWhileSyncing ? "waiting" : "failed";
+      entry.updatedAt = Date.now();
+      entry.nextRetryAt = Date.now() + (changedWhileSyncing ? 30_000 : EXTERNAL_INBOX_RETRY_DELAYS_MS[attemptIndex]);
+      entry.notePath = entry.notePath || "";
+      entry.error = getTaskErrorMessage(e);
+      ledger.entries[file.fingerprint] = entry;
+      await this.saveExternalInboxLedger();
+      if (changedWhileSyncing) {
+        this.markExternalInboxWaiting(file, "文件仍在同步，稍后自动处理");
+      } else {
+        this.failTaskActivity(activityId, e, {
+          stage: "failed",
+          stageLabel: "自动导入未完成",
+          detail: entry.error,
+          actions: [{ id: "open-settings", label: "检查设置" }],
+        });
+      }
+      await this.logDiagnostic("error", "inbox.external_import_failed", "外部音频自动导入失败", {
+        audioName: file.name,
+        size: file.size,
+        fingerprint: file.fingerprint,
+        attempt: entry.attempts,
+        retryAt: entry.nextRetryAt,
+        error: diagnosticError(e),
+      });
+    } finally {
+      scheduled.delete(file.fingerprint);
+      if (cachePath) {
+        try { await this.maybeDeleteSegmentCacheFile(cachePath, undefined, true); } catch { /* queue references keep required retry files */ }
+      }
     }
   }
 
@@ -21255,7 +22157,7 @@ ${source}`;
     if (!(file instanceof obsidian.TFile)) return;
     if (!AUDIO_EXT.has((file.extension || "").toLowerCase())) return;
     const inbox = this.settings.inboxFolder;
-    if (!inbox) return;
+    if (!inbox || isAbsoluteExternalInboxPath(inbox)) return;
     const inboxNorm = obsidian.normalizePath(inbox);
     if (!file.path.startsWith(inboxNorm + "/") && file.path !== inboxNorm) return;
     const archiveSub = this.settings.inboxArchiveSubfolder || "";
@@ -21272,41 +22174,61 @@ ${source}`;
     }
     if (!this.settings.inboxAutoImport) return;
 
-    this._inboxRecent = this._inboxRecent || new Map();
-    if (this._inboxRecent.has(file.path)) return;
-    this._inboxRecent.set(file.path, Date.now());
-
     // 显式判断而非 || 3000：让"填 0 = 立即处理"真正生效（0 是合法值，|| 会把它吞成 3000）
     const rawDelay = Number(this.settings.inboxStabilizeDelayMs);
     const delay = Number.isFinite(rawDelay) && rawDelay >= 0 ? rawDelay : 3000;
-    this._inboxLock = (this._inboxLock || Promise.resolve()).then(async () => {
-      await new Promise((r) => window.setTimeout(r, delay));
+    this._inboxPending = this._inboxPending || new Map();
+    const previous = this._inboxPending.get(file.path);
+    if (previous && previous.timer) window.clearTimeout(previous.timer);
+    const observedSize = Math.max(0, Number(file.stat && file.stat.size) || 0);
+    const observedMtime = Math.max(0, Number(file.stat && file.stat.mtime) || 0);
+    const timer = window.setTimeout(() => {
+      this._inboxPending.delete(file.path);
       const fresh = this.app.vault.getAbstractFileByPath(file.path);
       if (!(fresh instanceof obsidian.TFile)) return;
-      new obsidian.Notice(`收件箱新增音频：${file.name}，处理中…`);
-      try {
-        await this.importAudioFiles([file.path]);
-        if (archiveSub) {
-          const archivePath = obsidian.normalizePath(`${inboxNorm}/${archiveSub}/${file.name}`);
-          await this.ensureFolder(`${inboxNorm}/${archiveSub}`);
-          const stillExists = this.app.vault.getAbstractFileByPath(file.path);
-          if (stillExists instanceof obsidian.TFile) {
-            try { await this.app.fileManager.renameFile(stillExists, archivePath); }
-            catch (e) { console.error("[LexVoice] archive rename failed", e); }
-          }
-        }
-      } catch (e) {
-        console.error("[LexVoice] inbox auto-import failed", e);
-        new obsidian.Notice(`收件箱处理失败：${e.message || e}`);
-      } finally {
-        window.setTimeout(() => this._inboxRecent && this._inboxRecent.delete(file.path), 60000);
+      const freshSize = Math.max(0, Number(fresh.stat && fresh.stat.size) || 0);
+      const freshMtime = Math.max(0, Number(fresh.stat && fresh.stat.mtime) || 0);
+      if (freshSize <= 0) return;
+      if (freshSize !== observedSize || freshMtime !== observedMtime) {
+        void this.handleInboxFile(fresh);
+        return;
       }
-    }).catch((e) => { console.error("[LexVoice] inbox queue error", e); });
+      this._inboxProcessing = this._inboxProcessing || new Set();
+      if (this._inboxProcessing.has(file.path)) return;
+      this._inboxProcessing.add(file.path);
+      this._inboxLock = (this._inboxLock || Promise.resolve()).then(async () => {
+        new obsidian.Notice(`发现新音频：${file.name}，正在生成纪要…`);
+        try {
+          await this.importAudioFiles([file.path]);
+          if (archiveSub) {
+            await this.ensureFolder(`${inboxNorm}/${archiveSub}`);
+            const archivePath = this.getAvailableVaultPath(obsidian.normalizePath(`${inboxNorm}/${archiveSub}/${file.name}`));
+            const stillExists = this.app.vault.getAbstractFileByPath(file.path);
+            if (archivePath && stillExists instanceof obsidian.TFile) {
+              try { await this.app.fileManager.renameFile(stillExists, archivePath); }
+              catch (e) { console.error("[LexVoice] archive rename failed", e); }
+            }
+          }
+        } catch (e) {
+          console.error("[LexVoice] inbox auto-import failed", e);
+          new obsidian.Notice(`自动导入未完成：${e.message || e}`);
+        } finally {
+          this._inboxProcessing.delete(file.path);
+        }
+      }).catch((e) => {
+        this._inboxProcessing.delete(file.path);
+        console.error("[LexVoice] inbox queue error", e);
+      });
+    }, delay);
+    this._inboxPending.set(file.path, { timer, size: observedSize, mtime: observedMtime });
   }
 
   async scanInboxFolder() {
     const inbox = this.settings.inboxFolder;
     if (!inbox) { new obsidian.Notice("未配置监听文件夹"); return; }
+    if (isAbsoluteExternalInboxPath(inbox)) {
+      return this.scanExternalInboxFolder({ manual: true, source: "command" });
+    }
     const inboxNorm = obsidian.normalizePath(inbox);
     const folder = this.app.vault.getAbstractFileByPath(inboxNorm);
     if (!(folder instanceof obsidian.TFolder)) {
@@ -21327,111 +22249,34 @@ ${source}`;
     for (const f of candidates) await this.handleInboxFile(f);
   }
 
-  async prepareImportTranscriptionChunks(file, blob, durationMs, sessionStamp, fileIndex) {
-    const single = [{
-      blob,
-      mime: blob.type || mimeFromExt(file.extension),
-      startOffsetMs: 0,
-      endOffsetMs: Number(durationMs) || 0,
-      retryAudioPath: file.path,
-      retryAudioName: file.name,
-      cleanupPath: "",
-    }];
-    const shouldChunk = shouldChunkImportedAudio(blob, durationMs);
-    const shouldTranscode = shouldTranscodeImportedAudio(file, blob.type || mimeFromExt(file.extension));
-    if (!shouldChunk && !shouldTranscode) return single;
-
-    try {
-      if (shouldChunk) new obsidian.Notice(`长音频已启用后台分块：${file.name}`);
-      else if (shouldTranscode) new obsidian.Notice(`AAC 音频将先转为临时 WAV 再转写：${file.name}`);
-      const audioBuffer = await decodeAudioBlob(blob);
-      const totalMs = Math.max(1, Math.round(audioBuffer.duration * 1000));
-      const chunks = [];
-      const cacheFolder = this.getSegmentCacheFolder();
-      await this.ensureFolder(cacheFolder);
-      const safeBase = sanitizeFilename(file.basename || "audio") || "audio";
-      if (!shouldChunk && shouldTranscode) {
-        if (this._importBusy && this._importBusy.workflow === "audio-import") {
-          this.updateImportActivity({ phase: "preparing", prepareDone: 0, prepareTotal: 1 });
-        }
-        const chunkBlob = await renderAudioBufferSliceToWav(audioBuffer, 0, totalMs);
-        const chunkName = `import-${sessionStamp}-${pad(fileIndex + 1)}-${safeBase}.wav`;
-        const chunkPath = this.getAvailableVaultPath(obsidian.normalizePath(`${cacheFolder}/${chunkName}`));
-        if (!chunkPath) throw new Error("无法生成 AAC 转写缓存路径");
-        await this.app.vault.createBinary(chunkPath, await chunkBlob.arrayBuffer());
-        if (this._importBusy && this._importBusy.workflow === "audio-import") {
-          this.updateImportActivity({ phase: "preparing", prepareDone: 1, prepareTotal: 1 });
-        }
-        return [{
-          blob: chunkBlob,
-          mime: "audio/wav",
-          startOffsetMs: 0,
-          endOffsetMs: totalMs,
-          retryAudioPath: chunkPath,
-          retryAudioName: chunkPath.split("/").pop() || chunkName,
-          cleanupPath: chunkPath,
-        }];
-      }
-      // MiMo 单块 base64 ≤10MB：5 分钟 16k WAV（base64 ≈12.8MB）必超限、会被二次解码再切——
-      // 选 MiMo 时导入直接按其块长切，省一遍转码；其它服务保持 5 分钟（切点少、边界破词少）。
-      let importChunkMs = IMPORT_LONG_AUDIO_CHUNK_MS;
-      try { if (isApimimoAsrProvider(resolveTranscribeProvider(this))) importChunkMs = APIMIMO_ASR_CHUNK_MS; } catch { /* intentionally empty */ }
-      let part = 0;
-      const totalParts = Math.max(1, Math.ceil(totalMs / importChunkMs));
-      if (this._importBusy && this._importBusy.workflow === "audio-import") {
-        this.updateImportActivity({ phase: "preparing", prepareDone: 0, prepareTotal: totalParts });
-      }
-      for (let start = 0; start < totalMs; start += importChunkMs) {
-        const end = Math.min(totalMs, start + importChunkMs);
-        const chunkBlob = await renderAudioBufferSliceToWav(audioBuffer, start, end);
-        const chunkName = `import-${sessionStamp}-${pad(fileIndex + 1)}-${pad(part + 1)}-${safeBase}.wav`;
-        const chunkPath = this.getAvailableVaultPath(obsidian.normalizePath(`${cacheFolder}/${chunkName}`));
-        if (!chunkPath) throw new Error("无法生成长音频分块缓存路径");
-        await this.app.vault.createBinary(chunkPath, await chunkBlob.arrayBuffer());
-        // 分块 WAV 已落盘，不在描述符里保留 blob；转写 worker 通过 adapter 从 .cache 点目录按需读回。
-        // 这样既避开 vault 文件树不索引点目录的问题，也避免全部分块同时驻留内存。
-        chunks.push({
-          blob: null,
-          cachePath: chunkPath,
-          mime: "audio/wav",
-          startOffsetMs: start,
-          endOffsetMs: end,
-          retryAudioPath: chunkPath,
-          retryAudioName: chunkPath.split("/").pop() || chunkName,
-          cleanupPath: chunkPath,
-        });
-        part++;
-        if (this._importBusy && this._importBusy.workflow === "audio-import") {
-          this.updateImportActivity({ phase: "preparing", prepareDone: part, prepareTotal: totalParts });
-        }
-      }
-      return chunks.length ? chunks : single;
-    } catch (e) {
-      console.error("[LexVoice] import chunking failed", e);
-      await this.logDiagnostic("error", "import.chunking_failed", "导入长音频分块失败", {
-        file: file.name,
-        extension: file.extension,
-        size: blob && blob.size,
-        durationMs,
-        shouldTranscode,
-        error: diagnosticError(e),
-      });
-      // MiMo 场景禁止整文件兜底：需要分块的大文件本机又解不了码时，把原始大文件直发 MiMo
-      // 必然在 buildApimimoAsrChunks 里永久失败（仅收 wav/mp3 小块）= 整文件丢失 + 白烧重试。
-      let apimimo = false;
-      try { apimimo = isApimimoAsrProvider(resolveTranscribeProvider(this)); } catch { /* intentionally empty */ }
-      if (shouldChunk && apimimo) {
-        new obsidian.Notice(`「${file.name}」无法本机解码分块（MiMo 只收 wav/mp3 小块）：请先转成 wav/mp3 或改用其它转写服务后重试；本次已跳过，文件未动。`, 12000);
-        return null;
-      }
-      new obsidian.Notice(`${shouldTranscode ? "AAC 转码" : "长音频分块"}失败，改用原文件转写：${(e && e.message) || e}`, 8000);
-      return single;
-    }
+  openAudioImportOptions(paths, modeOverride) {
+    const selectedPaths = Array.isArray(paths) ? paths.filter(Boolean) : [];
+    if (!selectedPaths.length) return;
+    const modal = new AudioImportOptionsModal(this.app, this, {
+      paths: selectedPaths,
+      mode: modeOverride || this.settings.polishMode,
+      onConfirm: async (selection) => {
+        await this.importAudioFiles(selectedPaths, selection.mode);
+      },
+    });
+    modal.open();
   }
-
-  async importAudioFiles(paths, modeOverride) {
+  async importAudioFiles(paths, modeOverride, options = {}) {
     if (!paths || !paths.length) return;
     paths.sort();
+    const externalSource = options && options.externalSource
+      ? {
+        name: String(options.externalSource.name || "").trim(),
+        fingerprint: String(options.externalSource.fingerprint || "").trim(),
+      }
+      : null;
+    const importProvider = resolveImportTranscribeProvider(this);
+    const importProfile = this.getTranscribeProviderProfile(importProvider.id, importProvider);
+    const speakerDiarization = this.settings.importSpeakerDiarization !== false
+      && !!(importProfile && importProfile.speakerDiarization);
+    const speakerCount = speakerDiarization
+      ? Math.max(0, Math.min(100, Math.floor(Number(this.settings.importSpeakerCount) || 0)))
+      : 0;
     const moment = window.moment;
     const startedAt = moment();
     const sessionStamp = startedAt.format("YYYYMMDD-HHmmss");
@@ -21441,10 +22286,9 @@ ${source}`;
     const mode = getEffectivePolishMode(this.settings, requestedMode);
     const meta = getModeMeta(this.settings, mode);
     const mdName = `${startedAt.format(this.settings.noteFileNameFormatNew)} · 导入`;
-    const mdPath = obsidian.normalizePath(`${this.settings.mdFolder}/${mdName}.md`);
+    const mdPath = this.getAvailableMarkdownPath(obsidian.normalizePath(`${this.settings.mdFolder}/${mdName}.md`));
     await this.ensureFolder(this.settings.mdFolder);
 
-    // 招聘面试模式整合多文件音频时，也需要 recruit context；先弹 Modal 让用户确认
     let recruitContext = null;
     if (mode === "recruit") {
       const result = await new Promise((resolve) => {
@@ -21460,12 +22304,13 @@ ${source}`;
       }
       if (result.action !== "skip") recruitContext = result.ctx;
     }
+
     const session = {
       id: genId(),
       sessionStamp,
       startedAt: startedAt.toDate().toISOString(),
       mdPath,
-      mode: mode,
+      mode,
       source: "import",
       segments: [],
       realtimeOutline: "",
@@ -21477,184 +22322,407 @@ ${source}`;
       realtimeOutlineWorkbenchSignature: "",
       finalized: false,
       recruitContext,
+      externalAudioSource: externalSource,
+      importTranscribeProviderId: importProvider.id,
+      importSpeakerDiarization: speakerDiarization,
     };
 
     const header = [
       `# ${startedAt.format("YYYY-MM-DD HH:mm")} · ${meta.prefix}（导入处理中…）`,
       "",
-      `> [!info] 导入信息`,
-      `> 文件数：${paths.length} · 模式：${meta.prefix} · 模型：${this.settings.transcribeModel} → ${this.settings.llmModel}`,
+      "> [!info] 导入信息",
+      `> 文件数：${paths.length} · 模式：${meta.prefix} · 转写：整文件${speakerDiarization ? " · 区分说话人" : ""}`,
+      `> 模型：${importProvider.model || importProvider.id} → ${this.settings.llmModel}`,
+      externalSource && externalSource.name ? `> 来源：自动导入 · ${externalSource.name}` : null,
       "",
       `<!-- lexvoice-session:${session.id} -->`,
       `<!-- lexvoice-segments-start:${session.id} -->`,
       `<!-- lexvoice-segments-end:${session.id} -->`,
       "",
-    ].join("\n");
+    ].filter((line) => line !== null).join("\n");
     await this.appendToNote(mdPath, header);
 
     new obsidian.Notice(`开始导入 ${paths.length} 个音频文件…`);
-    this._importBusy = { done: 0, total: paths.length, mode };
-    this.updateBusyStatus();
+    const importStartedAt = Date.now();
+    this._importBusy = {
+      workflow: "audio-import",
+      sessionId: session.id,
+      mdPath: session.mdPath,
+      done: 0,
+      total: paths.length,
+      mode,
+      phase: "prepare",
+      phaseStartedAt: importStartedAt,
+      startedAt: importStartedAt,
+      updatedAt: importStartedAt,
+      prepareDone: 0,
+      prepareTotal: paths.length,
+      segmentDone: 0,
+      segmentTotal: paths.length,
+      activeSegments: 0,
+      failedSegments: 0,
+      writtenSegments: 0,
+      requests: [],
+      events: [],
+      stageState: {},
+      asrConcurrency: 1,
+    };
+    this.updateImportActivity({
+      event: {
+        stageId: "prepare",
+        type: "created",
+        label: "导入任务已建立",
+        detail: `整文件转写 · ${importProfile.title || importProvider.id}${speakerDiarization ? " · 区分说话人" : ""}`,
+      },
+    });
 
     let cumOffsetMs = 0;
+    let processedFiles = 0;
+    let successfulTranscriptions = 0;
     for (let i = 0; i < paths.length; i++) {
       const audioPath = paths[i];
-      const file = this.app.vault.getAbstractFileByPath(audioPath);
-      if (!(file instanceof obsidian.TFile)) {
-        new obsidian.Notice(`跳过：${audioPath} 不存在`);
+      const indexedFile = this.app.vault.getAbstractFileByPath(audioPath);
+      const externalCache = !!externalSource && this.isSegmentCachePath(audioPath);
+      const adapter = this.app.vault.adapter;
+      const sourceExists = indexedFile instanceof obsidian.TFile
+        || (externalCache && await adapter.exists(obsidian.normalizePath(audioPath)));
+      if (!sourceExists) {
+        new obsidian.Notice(`跳过：${externalSource && externalSource.name ? externalSource.name : audioPath} 不存在`);
         continue;
       }
-      this._importBusy = { done: i, total: paths.length, label: `导入转写 ${i + 1}/${paths.length}`, mode, file: file.name };
-      this.updateBusyStatus();
-      new obsidian.Notice(`转写中 ${i + 1}/${paths.length}：${file.name}`);
 
-      let ab, blob, mime, durationMs;
+      const fallbackName = String(externalSource && externalSource.name || audioPath.split("/").pop() || "audio");
+      const extension = (fallbackName.includes(".") ? fallbackName.split(".").pop() : "") || "audio";
+      const file = indexedFile instanceof obsidian.TFile ? indexedFile : {
+        path: obsidian.normalizePath(audioPath),
+        name: fallbackName,
+        basename: fallbackName.replace(/\.[^.]+$/, ""),
+        extension: extension.toLowerCase(),
+      };
+      const displayName = externalSource && externalSource.name ? externalSource.name : file.name;
+      const keepSourceAudio = !externalSource;
+      const requestKey = `${session.id}:${i}`;
+      this.updateImportActivity({
+        phase: "prepare",
+        done: i,
+        total: paths.length,
+        label: `准备音频 ${i + 1}/${paths.length}`,
+        mode,
+        file: displayName,
+      });
+
+      let blob;
+      let mime;
+      let durationMs = 0;
       try {
-        ab = await this.app.vault.readBinary(file);
-        // 空文件（0 字节）：没有可转写的音频。明确提示并跳过——别把空 blob 送去 ASR，
-        // 否则只会换来含糊的"Failed to fetch"/服务端错误，还会进重试队列反复失败。
-        // 常见成因：录音/导出未完成、复制不完整、或云盘占位文件尚未下载到本地。
+        const ab = indexedFile instanceof obsidian.TFile
+          ? await this.app.vault.readBinary(indexedFile)
+          : await adapter.readBinary(obsidian.normalizePath(audioPath));
         if (!ab || ab.byteLength === 0) {
-          new obsidian.Notice(`跳过：${file.name} 是空文件（0 字节），没有可转写的音频。请确认文件已完整下载 / 导出后再试。`, 9000);
-          await this.logDiagnostic("warn", "import.empty_file", "导入音频为空文件", { audioName: file.name, size: 0 });
+          new obsidian.Notice(`跳过：${displayName} 是空文件（0 字节）。请确认文件已完整下载后再试。`, 9000);
+          await this.logDiagnostic("warn", "import.empty_file", "导入音频为空文件", { audioName: displayName, size: 0 });
           continue;
         }
         mime = mimeFromExt(file.extension);
         blob = new Blob([ab], { type: mime });
         durationMs = await getAudioDurationMs(blob);
-        if (paths.length === 1) {
-          session.masterAudioName = file.name;
+        if (speakerDiarization && durationMs > 2 * 60 * 60 * 1000 && isDashScopeFileTransProvider(importProvider)) {
+          new obsidian.Notice("该音频超过 2 小时。仍会整文件提交，但阿里云建议说话人分离单文件不超过 2 小时。", 9000);
+        }
+        if (paths.length === 1 && keepSourceAudio) {
+          session.masterAudioName = displayName;
           session.masterAudioPath = audioPath;
         }
-      } catch (e) {
-        console.error(e);
-        new obsidian.Notice(`读取失败：${file.name}`);
+      } catch (error) {
+        console.error(error);
+        new obsidian.Notice(`读取失败：${displayName}`);
         continue;
       }
 
-      const chunks = await this.prepareImportTranscriptionChunks(file, blob, durationMs, sessionStamp, i);
-      // null = 无法分块且直发必败（MiMo 解码失败场景）：跳过该文件，提示已在 prepare 内给出，文件未动。
-      if (!chunks) continue;
-      const fileDurationMs = chunks.length
-        ? Math.max(Number(durationMs) || 0, chunks[chunks.length - 1].endOffsetMs || 0)
-        : (Number(durationMs) || 0);
-
-      const asrConcurrency = normalizeAsrConcurrency(this.settings.asrConcurrency);
-      if (chunks.length > 1 && asrConcurrency > 1) {
-        new obsidian.Notice(`长音频分块转写：${chunks.length} 段，并发 ${asrConcurrency}`);
-      }
-      const baseSegIndex = session.segments.length;
-      const chunkResults = await mapLimit(chunks, asrConcurrency, async (chunk, c) => {
-        const startOffset = cumOffsetMs + (chunk.startOffsetMs || 0);
-        const endOffset = cumOffsetMs + (chunk.endOffsetMs || 0);
-        const isFinal = i === paths.length - 1 && c === chunks.length - 1;
-
-        let text = ""; let err = null; let softEmpty = false;
-        let chunkBlob = chunk.blob;
-        try {
-          if (!chunkBlob && chunk.cachePath) {
-            // segment-cache 在 .cache 点目录，必须走 adapter（可访问点目录）而非
-            // getAbstractFileByPath（对点目录恒返回 null，会误判缓存不存在）。
-            const cp = obsidian.normalizePath(chunk.cachePath);
-            const adapter = this.app.vault.adapter;
-            if (!(await adapter.exists(cp))) throw new Error(`分块缓存不存在：${chunk.cachePath}`);
-            chunkBlob = new Blob([await adapter.readBinary(cp)], { type: chunk.mime || "audio/wav" });
-          }
-          text = await transcribeImportAudioChunk(this, chunkBlob, chunk.mime || mime, asrConcurrency);
-          const chunkDurMs = (Number(chunk.endOffsetMs) || 0) - (Number(chunk.startOffsetMs) || 0);
-          const durationKnownShort = chunkDurMs > 0 && chunkDurMs < 30 * 1000;
-          if (!String(text || "").trim() && !durationKnownShort) {
-            // 空结果软失败：≥30 秒（或时长未知）的块拿到 HTTP 200 但无文字，按转写失败对待——
-            // 保留缓存 WAV、进重试队列、留痕；否则整块内容被静默标成"无内容"且缓存被删 = 不可恢复丢段。
-            softEmpty = true;
-            err = new Error("转写返回空结果（服务 HTTP 200 但无文字）");
-            await this.logDiagnostic("warn", "asr.import_chunk_empty", "导入音频分块转写返回空结果", {
-              chunkIndex: c,
-              chunkCount: chunks.length,
-              startOffsetMs: startOffset,
-              endOffsetMs: endOffset,
-            });
-          } else if (chunk.cleanupPath) {
-            await this.maybeDeleteSegmentCacheFile(chunk.cleanupPath);
-          }
-        } catch (e) {
-          err = e;
-          console.error(e);
-          await this.logDiagnostic("error", "asr.import_chunk_failed", "导入音频分块转写失败", {
-            provider: this.settings.activeTranscribeProvider,
-            model: ((this.settings.transcribeProviders || {})[this.settings.activeTranscribeProvider] || {}).model || this.settings.transcribeModel,
-            audioName: file.name,
-            chunkName: chunk.retryAudioName,
-            mime: chunk.mime || mime,
-            size: chunkBlob && chunkBlob.size,
-            startOffsetMs: startOffset,
-            endOffsetMs: endOffset,
-            asrConcurrency,
-            error: diagnosticError(e),
-          });
-        }
-        return { chunk, startOffset, endOffset, isFinal, text, err, softEmpty };
+      processedFiles++;
+      this.updateImportActivity({
+        phase: "transcribe",
+        activeSegments: 1,
+        requests: upsertActivityRequest(
+          Array.isArray(this._importBusy && this._importBusy.requests) ? this._importBusy.requests : [],
+          {
+            key: requestKey,
+            chunkIndex: i,
+            chunkCount: paths.length,
+            status: "requesting",
+            attempt: 1,
+            maxAttempts: Math.max(1, Number(this.settings.maxRetries) || 3),
+            startedAt: Date.now(),
+            updatedAt: Date.now(),
+            deadlineAt: 0,
+            retryAt: 0,
+            receivedChars: 0,
+            error: "",
+          },
+          400,
+        ),
+        event: {
+          stageId: "transcribe",
+          type: "started",
+          label: `开始转写 ${displayName}`,
+          detail: "整文件提交，不切分为多个 ASR 任务",
+        },
       });
 
-      for (let c = 0; c < chunkResults.length; c++) {
-        const result = chunkResults[c];
-        const chunk = result.chunk;
-        const segIndex = baseSegIndex + c;
-        session.segments.push({
-          index: segIndex,
-          startOffsetMs: result.startOffset,
-          endOffsetMs: result.endOffset,
-          audioName: file.name,
-          audioPath,
-          segmentAudioName: chunk.retryAudioName,
-          segmentAudioPath: chunk.retryAudioPath,
-          text: result.text,
-          error: result.err ? (result.err.message || String(result.err)) : null,
-          isFinal: result.isFinal,
-          // 导入音频不来自双流录音，统一标 "import"
-          source: "import",
+      let result = null;
+      let error = null;
+      let lastImportProgressPhase = "";
+      try {
+        result = await transcribeImportedAudio(this, blob, mime, {
+          providerId: importProvider.id,
+          diarization: speakerDiarization,
+          speakerCount,
+          fileName: displayName,
+          audioDurationMs: durationMs,
+          onProgress: (progress) => {
+            const phaseChanged = progress.phase !== lastImportProgressPhase;
+            lastImportProgressPhase = progress.phase;
+            const requests = upsertActivityRequest(
+              Array.isArray(this._importBusy && this._importBusy.requests) ? this._importBusy.requests : [],
+              {
+                key: requestKey,
+                chunkIndex: i,
+                chunkCount: paths.length,
+                status: "requesting",
+                updatedAt: Date.now(),
+              },
+              400,
+            );
+            this.updateImportActivity({
+              phase: "transcribe",
+              requests,
+              transcribeLabel: progress.label,
+              transcribeDetail: progress.detail || displayName,
+              event: phaseChanged ? {
+                stageId: "transcribe",
+                type: progress.phase,
+                label: progress.label,
+                detail: progress.detail || displayName,
+              } : null,
+            });
+          },
         });
-
-        if (result.err) {
-          await this.queue.add({
-            type: "transcribe",
-            sessionId: session.id, mdPath: session.mdPath,
-            audioPath: chunk.retryAudioPath || audioPath, segmentIndex: segIndex,
-            sourceAudioPath: audioPath,
-            sourceAudioName: file.name,
-            masterAudioPath: audioPath,
-            masterAudioName: file.name,
-            startOffsetMs: result.startOffset, endOffsetMs: result.endOffset,
-            audioName: chunk.retryAudioName || file.name, mode: session.mode, isFinal: result.isFinal,
-            lastError: result.err.message || String(result.err),
-          });
+        successfulTranscriptions++;
+        this.updateImportRequest({
+          key: requestKey,
+          chunkIndex: i,
+          chunkCount: paths.length,
+          status: "done",
+          updatedAt: Date.now(),
+          deadlineAt: 0,
+          receivedChars: String(result.text || "").length,
+          error: "",
+        });
+        this.updateImportActivity({
+          activeSegments: 0,
+          segmentDone: Math.max(0, Number(this._importBusy && this._importBusy.segmentDone) || 0) + 1,
+        });
+        if (externalSource) {
+          await this.maybeDeleteSegmentCacheFile(audioPath, undefined, true);
         }
-
-        const segNumber = segIndex + 1;
-        const segTitle = `### 段落 ${segNumber} (${formatElapsed(result.startOffset)}–${formatElapsed(result.endOffset)}) ${getAudioTimeLink(file.name, result.startOffset)}${result.isFinal ? " · 结束" : ""}`;
-        const block = [
-          "",
-          segTitle,
-          "",
-          result.err
-            ? (result.softEmpty ? "_[转写失败（空结果，已进入重试队列）]_" : `_[转写失败（已进入重试队列）：${result.err.message || result.err}]_`)
-            : (result.text || "_[此段无内容]_"),
-          "",
-        ].join("\n");
-        await this.insertBeforeSegmentsEnd(session.mdPath, block, session.id);
+      } catch (caught) {
+        const originalError = caught instanceof Error ? caught : new Error(String(caught));
+        const exceedsDiarizationRecommendation = speakerDiarization
+          && durationMs > 2 * 60 * 60 * 1000
+          && isDashScopeFileTransProvider(importProvider);
+        error = exceedsDiarizationRecommendation
+          ? new Error(`${originalError.message}。本文件超过说话人分离建议的 2 小时，可关闭“区分说话人”后重试`)
+          : originalError;
+        console.error(error);
+        this.updateImportRequest({
+          key: requestKey,
+          chunkIndex: i,
+          chunkCount: paths.length,
+          status: "failed",
+          updatedAt: Date.now(),
+          deadlineAt: 0,
+          error: error.message,
+        });
+        this.updateImportActivity({
+          activeSegments: 0,
+          failedSegments: Math.max(0, Number(this._importBusy && this._importBusy.failedSegments) || 0) + 1,
+        });
+        await this.logDiagnostic("error", "asr.import_whole_file_failed", "导入音频整文件转写失败", {
+          provider: importProvider.id,
+          model: importProvider.model || "",
+          audioName: displayName,
+          mime,
+          size: blob && blob.size,
+          durationMs,
+          speakerDiarization,
+          speakerCount,
+          error: diagnosticError(error),
+        });
       }
 
-      cumOffsetMs += fileDurationMs;
+      const segIndex = session.segments.length;
+      const effectiveDurationMs = Math.max(0, Number(result && result.durationMs) || Number(durationMs) || 0);
+      const startOffsetMs = cumOffsetMs;
+      const endOffsetMs = cumOffsetMs + effectiveDurationMs;
+      const isFinal = i === paths.length - 1;
+      let retryTask = null;
+      if (error) {
+        retryTask = await this.queue.add({
+          type: "transcribe",
+          sessionId: session.id,
+          mdPath: session.mdPath,
+          audioPath,
+          segmentIndex: segIndex,
+          sourceAudioPath: keepSourceAudio ? audioPath : "",
+          sourceAudioName: keepSourceAudio ? displayName : "",
+          masterAudioPath: keepSourceAudio ? audioPath : "",
+          masterAudioName: keepSourceAudio ? displayName : "",
+          ephemeralAudio: !!externalSource,
+          startOffsetMs,
+          endOffsetMs,
+          audioName: keepSourceAudio ? displayName : "",
+          mode: session.mode,
+          isFinal,
+          source: "import",
+          providerId: importProvider.id,
+          wholeFileImport: true,
+          speakerDiarization,
+          speakerCount,
+          lastError: error.message,
+        });
+      }
+
+      const segmentRecord = {
+        index: segIndex,
+        startOffsetMs,
+        endOffsetMs,
+        audioName: keepSourceAudio ? displayName : "",
+        audioPath: keepSourceAudio ? audioPath : "",
+        segmentAudioName: displayName,
+        segmentAudioPath: audioPath,
+        text: result ? result.text : "",
+        error: error ? error.message : null,
+        isFinal,
+        source: "import",
+        queueTaskId: retryTask ? retryTask.id : undefined,
+      };
+      session.segments.push(segmentRecord);
+
+      const audioAnchor = keepSourceAudio ? getAudioTimeLink(displayName, startOffsetMs) : "";
+      const block = [
+        "",
+        `### 音频 ${segIndex + 1}${audioAnchor ? ` ${audioAnchor}` : ""}${isFinal ? " · 结束" : ""}`,
+        "",
+        retryTask ? `<!-- lexvoice-transcribe-task:${retryTask.id} -->` : "",
+        error
+          ? getTranscribeSegmentPlaceholder(error, { retryable: true })
+          : (result.text || "_[此音频无内容]_"),
+        "",
+      ].join("\n");
+      await this.insertBeforeSegmentsEnd(session.mdPath, block, session.id);
+      this.updateImportActivity({
+        done: i + 1,
+        writtenSegments: session.segments.length,
+        prepareDone: i + 1,
+      });
+      cumOffsetMs = endOffsetMs;
     }
 
-    this._importBusy = null;
-    // 让会后 AI 整理阶段的进度（整理上下文 / 生成大纲 / 合并润色…）能在状态栏和处理进度面板显示，
-    // 与文本导入一致（finalizeSession 收尾时在 this.session === session 处自动清空，无残留）。
-    this.session = session;
-    this.updateBusyStatus();
-    await this.finalizeSession(session);
-  }
+    if (processedFiles === 0) {
+      const error = new Error("没有可处理的音频文件");
+      this.updateImportActivity({ error: error.message });
+      this._importBusy = null;
+      this.updateBusyStatus();
+      throw error;
+    }
 
+    this.session = session;
+    const pendingTranscriptionCount = session.segments.filter((segment) => !!segment.error).length;
+    if (successfulTranscriptions === 0) {
+      const message = pendingTranscriptionCount > 0
+        ? "语音转写未完成；音频已保留，可在处理进度中重试"
+        : "没有获得可用于整理的有效转写文本";
+      this.updateImportActivity({
+        phase: "transcribe",
+        error: message,
+        label: "语音转写未完成",
+      });
+      new obsidian.Notice(message, 9000);
+      return {
+        mdPath: session.mdPath,
+        sessionId: session.id,
+        segmentCount: session.segments.length,
+        pendingTranscriptionCount,
+      };
+    }
+    const transcriptFile = this.app.vault.getAbstractFileByPath(session.mdPath);
+    if (!(transcriptFile instanceof obsidian.TFile)) {
+      throw new Error("原始转写写入后未找到对应笔记，已停止 AI 整理");
+    }
+    const persistedMarkdown = await this.app.vault.read(transcriptFile);
+    const transcriptCheckpoint = verifyTranscriptCheckpoint(persistedMarkdown, session.segments);
+    if (!transcriptCheckpoint.ok) {
+      const checkpointError = new Error(
+        `原始转写尚未完整写入笔记（${transcriptCheckpoint.persistedSegments}/${transcriptCheckpoint.expectedSegments}），已停止 AI 整理`,
+      );
+      this.updateImportActivity({
+        phase: "persist",
+        error: checkpointError.message,
+        label: "原始转写写入未完成",
+      });
+      await this.logDiagnostic("error", "asr.import_transcript_checkpoint_failed", "导入音频原始转写检查点未通过", {
+        mdPath: session.mdPath,
+        expectedSegments: transcriptCheckpoint.expectedSegments,
+        persistedSegments: transcriptCheckpoint.persistedSegments,
+        expectedChars: transcriptCheckpoint.expectedChars,
+        missingSegmentIndexes: transcriptCheckpoint.missingSegmentIndexes,
+      });
+      throw checkpointError;
+    }
+    await this.logDiagnostic("info", "asr.import_transcript_persisted", "导入音频原始转写已写入，允许进入 AI 整理", {
+      mdPath: session.mdPath,
+      segmentCount: transcriptCheckpoint.expectedSegments,
+      transcriptChars: transcriptCheckpoint.expectedChars,
+      provider: importProvider.id,
+    });
+    this.updateImportActivity({
+      phase: "organize",
+      organizeLabel: "准备 AI 整理",
+      organizeDetail: "原始转写已完整写入，正在按当前纪要模板生成正文。",
+    });
+    await this.finalizeSession(session);
+    const finalizationError = String(session.finalizationError || "").trim()
+      || (session.workProgress && session.workProgress.stage === "transcript-empty"
+        ? "没有获得可用于整理的有效转写文本"
+        : "");
+    if (finalizationError) {
+      this.updateImportActivity({
+        phase: audioImportStageFromWorkProgress(session.workProgress && session.workProgress.stage),
+        error: finalizationError,
+      });
+    } else {
+      this.updateImportActivity({
+        phase: "write",
+        completed: true,
+        writeLabel: "处理完成",
+        writeDetail: "纪要已经写入 Obsidian。",
+      });
+    }
+    const completedImportId = session.id;
+    window.setTimeout(() => {
+      if (this._importBusy && String(this._importBusy.sessionId || "") === String(completedImportId)) {
+        this._importBusy = null;
+        this.updateBusyStatus();
+        this.refreshOutlineView();
+      }
+    }, finalizationError ? 0 : 1800);
+    return {
+      mdPath: session.mdPath,
+      sessionId: session.id,
+      segmentCount: session.segments.length,
+      pendingTranscriptionCount,
+    };
+  }
   async importTextFiles(paths, modeOverride) {
     if (!paths || !paths.length) return;
     const uniquePathSet = new Set<string>();
@@ -21853,7 +22921,11 @@ ${source}`;
 
   scheduleDeferredAsrRetry(session) {
     if (!session || !session.hasDeferredAsrJobs) return;
-    const openUntilMs = Math.max(0, Number(session.asrCircuitState && session.asrCircuitState.openUntilMs) || 0);
+    const openUntilMs = Math.max(
+      0,
+      Number(session.asrCircuitState && session.asrCircuitState.openUntilMs) || 0,
+      Number(this.getAsrServiceCircuitState().openUntilMs) || 0,
+    );
     const delayMs = Math.max(1500, openUntilMs > Date.now() ? openUntilMs - Date.now() + 1000 : 0);
     this.scheduleTaskQueueRetry(delayMs, "session-deferred-asr");
   }
@@ -21883,7 +22955,7 @@ ${source}`;
     const maxR = this.settings.maxRetries || 3;
     const runnable = this.queue.tasks.filter((task) => task
       && task.status !== "blocked" && task.status !== "missing" && task.status !== "running" && task.status !== LIVE_ASR_TASK_STATUS
-      && (Number(task.retries) || 0) < maxR);
+      && ((Number(task.retries) || 0) < maxR || (task.type === "transcribe" && isAsrTransportError(task.lastError || ""))));
     if (!runnable.length) {
       const missingN = this.queue.tasks.filter((t) => t && t.status === "missing").length;
       const exhaustedN = this.queue.tasks.filter((t) => t && t.status === "failed" && (Number(t.retries) || 0) >= maxR).length;
@@ -21893,6 +22965,13 @@ ${source}`;
       new obsidian.Notice(hints.length ? `没有可自动重试的任务（${hints.join("；")}）` : "没有可自动重试的任务", hints.length ? 9000 : 4000);
       return;
     }
+    if (runnable.some((task) => task.type === "transcribe")) {
+      this.resetAsrServiceCircuitForManualRetry("retry-all");
+      for (const task of runnable) {
+        if (task.type === "transcribe") task.nextRetryAt = undefined;
+      }
+      await this.saveAll();
+    }
     new obsidian.Notice(`重试 ${runnable.length} 个任务…`);
     await this.queue.processAll();
     new obsidian.Notice(`剩余 ${this.queue.tasks.length} 个任务`);
@@ -21900,7 +22979,8 @@ ${source}`;
 
   async retryTranscribeTasksForMarkdown(file) {
     if (!(file instanceof obsidian.TFile) || file.extension !== "md") return;
-    const tasks = getQueueTasksForMarkdown(this, file, { types: ["transcribe"], failedOnly: true });
+    const tasks = getQueueTasksForMarkdown(this, file, { types: ["transcribe"] })
+      .filter((task) => ["failed", "missing", "pending"].includes(task.status || "pending") && !!task.lastError);
     if (!tasks.length) {
       new obsidian.Notice("这篇纪要当前没有可重试的转写任务。", 5000);
       return;
@@ -21908,22 +22988,30 @@ ${source}`;
     new obsidian.Notice(`LexVoice：正在重试 ${tasks.length} 个转写片段…`);
     let ok = 0;
     let failed = 0;
+    let paused = false;
     const batch = tasks.slice();
     // 批量游标喂状态栏：重新转写逐段 done/total 实时可见（之前直接 for 循环没设游标 → 状态栏黑盒）。
     this.queue._batchTotal = batch.length;
     this.queue._batchDone = 0;
     this.updateBusyStatus();
+    this.resetAsrServiceCircuitForManualRetry("note-retry");
     try {
       for (const task of batch) {
+        if (this.isAsrServiceCircuitOpen()) break;
         try {
           await this.queue.processOne(task);
           ok++;
         } catch (e) {
           failed++;
           console.error("[LexVoice] retry transcribe task from note list failed", e);
+          if (isAsrTransportError(e)) {
+            this.scheduleTaskQueueRetry(this.getAsrServiceRetryDelayMs(), "note-retry-transport-failure");
+            paused = true;
+          }
         }
         this.queue._batchDone++;
         this.updateBusyStatus();
+        if (paused) break;
       }
     } finally {
       this.queue._batchTotal = 0;
@@ -21932,7 +23020,9 @@ ${source}`;
     }
     await this.saveAll();
     this.refreshOutlineView();
-    new obsidian.Notice(`转写重试完成：成功 ${ok} 个${failed ? `，失败 ${failed} 个` : ""}`, 8000);
+    new obsidian.Notice(paused
+      ? `转写服务仍不可用：本次成功 ${ok} 个，失败 ${failed} 个；其余片段已保留，稍后继续`
+      : `转写重试完成：成功 ${ok} 个${failed ? `，失败 ${failed} 个` : ""}`, 8000);
   }
 
   async readTranscribeTaskAudioBlob(task) {
@@ -22053,11 +23143,17 @@ ${source}`;
 
   async retryTranscribeTask(task) {
     const mdFile = this.app.vault.getAbstractFileByPath(task.mdPath);
-    const failMark = /_\[等待后台转写：[^\]]*\]_|_\[转写失败（空结果，已进入重试队列）\]_|_\[转写失败(?:（已进入重试队列）)?：[^\]]*\]_/;
+    const failMark = /_\[(?:等待后台转写，音频已保留|此段尚未完成转写，音频已保留)\]_|_\[等待后台转写：[^\]]*\]_|_\[转写失败（空结果，已进入重试队列）\]_|_\[转写失败(?:（已进入重试队列）)?：[^\]]*\]_/;
     const taskMarker = task.id ? `<!-- lexvoice-transcribe-task:${task.id} -->` : "";
     const taskPattern = taskMarker
       ? new RegExp(`${escapeRegExp(taskMarker)}\\s*(?:${failMark.source})`)
       : null;
+    const segmentNumber = Math.max(0, Number(task.segmentIndex) || 0) + 1;
+    const segmentStart = formatElapsed(Math.max(0, Number(task.startOffsetMs) || 0));
+    const segmentEnd = formatElapsed(Math.max(Number(task.startOffsetMs) || 0, Number(task.endOffsetMs) || 0));
+    const legacySegmentPattern = new RegExp(
+      `((?:^|\\n)###\\s+段落\\s+${segmentNumber}\\s+\\(${escapeRegExp(segmentStart)}[–-]${escapeRegExp(segmentEnd)}\\)[^\\n]*\\n(?:\\s*\\n)?(?:<!--\\s*lexvoice-transcribe-task:[^>]+-->\\s*)?)(?:${failMark.source})`,
+    );
     let currentMarkdown = "";
     if (mdFile instanceof obsidian.TFile && taskMarker) {
       currentMarkdown = await this.app.vault.read(mdFile);
@@ -22068,26 +23164,37 @@ ${source}`;
       }
     }
     const audio = await this.readTranscribeTaskAudioBlob(task);
-    const reportedChannelCount = Math.max(1, Number(task.audioChannelCount) || 1);
-    const channelMode = normalizeAudioChannelMode(task.audioChannelMode || this.settings.audioChannelMode);
-    const runtimeChannelMode = task.audioChannelRuntimeMode
-      || initialAudioChannelRuntimeMode(channelMode, reportedChannelCount);
-    const inspectRecordedChannels = task.captureMode === "mic" && runtimeChannelMode !== "mono";
-    const expectedChannelCount = inspectRecordedChannels
-      ? MAX_SPEAKER_CHANNELS
-      : reportedChannelCount;
-    const channelTranscription = inspectRecordedChannels
-      ? await transcribeAudioByChannels(
-        this,
-        audio.blob,
-        audio.blob.type || "audio/wav",
-        expectedChannelCount,
-        { requireSeparatedChannels: channelMode === "auto" && runtimeChannelMode === "probing" },
-      )
-      : null;
-    const text = channelTranscription
-      ? channelTranscription.text
-      : await transcribeAudio(this, audio.blob, audio.blob.type || "audio/wav");
+    let text = "";
+    if (task.wholeFileImport) {
+      const result = await transcribeImportedAudio(this, audio.blob, audio.blob.type || "audio/wav", {
+        providerId: task.providerId,
+        diarization: task.speakerDiarization !== false,
+        speakerCount: task.speakerCount,
+        fileName: task.sourceAudioName || task.audioName || "import-audio",
+      });
+      text = result.text;
+    } else {
+      const reportedChannelCount = Math.max(1, Number(task.audioChannelCount) || 1);
+      const channelMode = normalizeAudioChannelMode(task.audioChannelMode || this.settings.audioChannelMode);
+      const runtimeChannelMode = task.audioChannelRuntimeMode
+        || initialAudioChannelRuntimeMode(channelMode, reportedChannelCount);
+      const inspectRecordedChannels = task.captureMode === "mic" && runtimeChannelMode !== "mono";
+      const expectedChannelCount = inspectRecordedChannels
+        ? MAX_SPEAKER_CHANNELS
+        : reportedChannelCount;
+      const channelTranscription = inspectRecordedChannels
+        ? await transcribeAudioByChannels(
+          this,
+          audio.blob,
+          audio.blob.type || "audio/wav",
+          expectedChannelCount,
+          { requireSeparatedChannels: channelMode === "auto" && runtimeChannelMode === "probing" },
+        )
+        : null;
+      text = channelTranscription
+        ? channelTranscription.text
+        : await transcribeAudio(this, audio.blob, audio.blob.type || "audio/wav");
+    }
     if (!String(text || "").trim()) {
       // 重试仍为空 = 失败（不再替换成"暂无有效转写"并删缓存了事）：
       // 抛错让队列按失败记录 + 计重试次数，缓存音频保留，后续还能继续重试。
@@ -22104,7 +23211,9 @@ ${source}`;
       const cur = currentMarkdown || await this.app.vault.read(mdFile);
       const next = taskPattern && taskPattern.test(cur)
         ? cur.replace(taskPattern, `${taskMarker}\n${text}`)
-        : cur.replace(failMark, text);
+        : legacySegmentPattern.test(cur)
+          ? cur.replace(legacySegmentPattern, `$1${taskMarker}\n${text}`)
+          : cur.replace(failMark, text);
       if (next !== cur) {
         await this.app.vault.modify(mdFile, next);
         replaced = true;
@@ -22131,7 +23240,17 @@ ${source}`;
       await this.insertBeforeSegmentsEnd(task.mdPath, recoveredBlock, task.sessionId);
       replaced = true;
     }
-    if (!audio.recovered) await this.maybeDeleteSegmentCacheFile(task.audioPath, task.id);
+    if (!audio.recovered && (!task.wholeFileImport || task.ephemeralAudio)) {
+      await this.maybeDeleteSegmentCacheFile(task.audioPath, task.id, !!task.ephemeralAudio);
+    }
+    if (replaced && task.wholeFileImport && task.speakerDiarization !== false) {
+      await this.confirmSpeakerNamesBeforeFinal({
+        id: task.sessionId,
+        mdPath: task.mdPath,
+        source: "import",
+        importTranscribeProviderId: task.providerId,
+      }, [{ text }]);
+    }
     if (replaced) this.maybeAutoRepolishAfterTranscribeRetry(task, mdFile);
   }
 
@@ -22212,7 +23331,14 @@ ${source}`;
   }
 
   async retryMergeTask(task) {
-    const polished = await mergeAndPolish(this, task.segments || [], task.mode, task.recruitContext || null, task.sessionMeta || null);
+    const polished = await mergeAndPolish(
+      this,
+      task.segments || [],
+      task.mode,
+      task.recruitContext || null,
+      task.sessionMeta || null,
+      task.speakerFrontmatter || null,
+    );
     if (!polished) throw new Error("合并返回为空");
     const file = this.app.vault.getAbstractFileByPath(task.mdPath);
     if (!(file instanceof obsidian.TFile)) throw new Error(`笔记不存在：${task.mdPath}`);

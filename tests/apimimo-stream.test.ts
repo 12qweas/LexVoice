@@ -12,6 +12,7 @@ import {
   estimateApimimoAudioSeconds,
   getApimimoNativeAudioPlan,
   pickAsrRetryDelayMs,
+  reserveApimimoTpmSlot,
   requestApimimoAsrChunkWithEmptyRetry,
 } from "../src/asr/transcribe";
 
@@ -128,20 +129,46 @@ describe("pickAsrRetryDelayMs", () => {
     }
   });
 
-  it("不把 4290 之类的数字误判为 429", () => {
+  it("不把 4290 之类的数字误判为 429，但仍按 500 网络故障退避", () => {
     const ms = pickAsrRetryDelayMs("转写失败 500；trace 42900", 1);
-    expect(ms).toBeGreaterThanOrEqual(1200);
-    expect(ms).toBeLessThan(2000);
+    expect(ms).toBeGreaterThanOrEqual(5000);
+    expect(ms).toBeLessThan(6000);
   });
 
-  it("普通瞬时错误 / 空消息 → 1.2-2s 短退避", () => {
-    for (const msg of ["转写请求超时：120 秒内没有响应", "network error", ""]) {
+  it("网络与超时按尝试次数指数退避", () => {
+    for (const msg of ["转写请求超时：120 秒内没有响应", "network error", "Failed to fetch"]) {
+      const first = pickAsrRetryDelayMs(msg, 1);
+      const second = pickAsrRetryDelayMs(msg, 2);
+      const third = pickAsrRetryDelayMs(msg, 3);
+      expect(first).toBeGreaterThanOrEqual(5000);
+      expect(first).toBeLessThan(6000);
+      expect(second).toBeGreaterThanOrEqual(10000);
+      expect(second).toBeLessThan(11000);
+      expect(third).toBeGreaterThanOrEqual(20000);
+      expect(third).toBeLessThan(21000);
+    }
+  });
+
+  it("空消息仍使用短退避", () => {
+    for (const msg of ["", "empty result"]) {
       for (let i = 0; i < 20; i++) {
         const ms = pickAsrRetryDelayMs(msg, i + 1);
         expect(ms).toBeGreaterThanOrEqual(1200);
         expect(ms).toBeLessThan(2000);
       }
     }
+  });
+});
+
+describe("reserveApimimoTpmSlot", () => {
+  it("在等待前原子预留连续 FIFO 时段", () => {
+    const first = reserveApimimoTpmSlot(0, 10_000, 1_000);
+    const second = reserveApimimoTpmSlot(first.nextAllowedAt, 10_000, 1_000);
+    const third = reserveApimimoTpmSlot(second.nextAllowedAt, 10_000, 1_000);
+
+    expect(first).toEqual({ waitMs: 0, nextAllowedAt: 11_000 });
+    expect(second).toEqual({ waitMs: 10_000, nextAllowedAt: 21_000 });
+    expect(third).toEqual({ waitMs: 20_000, nextAllowedAt: 31_000 });
   });
 });
 

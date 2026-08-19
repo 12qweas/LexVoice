@@ -172,8 +172,22 @@ export function getLlmRequestPriority(options) {
 }
 
 export function runQueuedLlmRequest(options, run) {
-  if (options && options.skipQueue) return run();
-  return LLM_REQUEST_QUEUE.enqueue(getLlmRequestPriority(options || {}), run, options && options.signal);
+  const safeNotify = (name, payload) => {
+    try {
+      const callback = options && options[name];
+      if (typeof callback === "function") callback(payload);
+    } catch { /* task telemetry must never block the request */ }
+  };
+  if (options && options.skipQueue) {
+    safeNotify("onStart", { queuedMs: 0 });
+    return run();
+  }
+  const enqueuedAt = Date.now();
+  safeNotify("onQueued", { enqueuedAt });
+  return LLM_REQUEST_QUEUE.enqueue(getLlmRequestPriority(options || {}), () => {
+    safeNotify("onStart", { queuedMs: Math.max(0, Date.now() - enqueuedAt) });
+    return run();
+  }, options && options.signal);
 }
 
 export function accumulateLlmSseDataLine(line, state) {
@@ -315,6 +329,12 @@ export async function requestLlmChatCompletion(plugin, messages, options) {
       if (timer) window.clearTimeout(timer);
       timer = window.setTimeout(() => controller.abort(), timeoutMs);
     };
+    const reportResponseActivity = () => {
+      armTimer();
+      try {
+        if (options && typeof options.onActivity === "function") options.onActivity();
+      } catch { /* task telemetry must never block response reading */ }
+    };
     armTimer();
     let res;
     try {
@@ -428,11 +448,13 @@ export async function requestLlmChatCompletion(plugin, messages, options) {
       }
       if (streamWanted) {
         armTimer(); // 给"首个 token 到达"一个完整的空闲窗口
-        const { content, finishReason, usage } = await readLlmSseStream(res, armTimer);
+        const { content, finishReason, usage } = await readLlmSseStream(res, reportResponseActivity);
         // 透传 finish_reason，让上层能检测"length"截断（流式重包此前会把它丢掉 → 截断无从察觉）。
         return { choices: [{ message: { role: "assistant", content }, finish_reason: finishReason || null }], usage: usage || undefined };
       }
-      return await res.json();
+      const json = await res.json();
+      reportResponseActivity();
+      return json;
     } catch (e) {
       // HTTP 状态错误已在上方完整记录并带 status/nonRetryable 语义，不能再误记成响应读取错误。
       if (e && e.status) throw e;
@@ -699,7 +721,7 @@ export async function callLlmWithMeta(plugin, system, user, options) {
   // 流式响应通常不带 usage（这里 usage=null），由计量器按字符估算；非流式有 usage 时取精确值。
   try {
     if (plugin && typeof plugin.addTaskMeter === "function") {
-      plugin.addTaskMeter(String(system || "").length + String(user || "").length, text.length, usage);
+      plugin.addTaskMeter(String(system || "").length + String(user || "").length, text.length, usage, options && options.taskMeter);
     }
   } catch { /* intentionally empty */ }
   return { text, finishReason: extractLlmFinishReason(data), usage };
@@ -809,7 +831,7 @@ export async function callLlmWithContinuation(plugin, system, user, options, opt
     usage = addLlmUsage(usage, data && data.usage);
     try {
       if (plugin && typeof plugin.addTaskMeter === "function") {
-        plugin.addTaskMeter(messages.reduce((n, m) => n + String(m.content || "").length, 0), piece.length, (data && data.usage) || null);
+        plugin.addTaskMeter(messages.reduce((n, m) => n + String(m.content || "").length, 0), piece.length, (data && data.usage) || null, effectiveOptions && effectiveOptions.taskMeter);
       }
     } catch { /* intentionally empty */ }
     if (!piece) {

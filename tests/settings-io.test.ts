@@ -112,16 +112,6 @@ describe("settings-io round-trip（白名单防丢键兜底）", () => {
     a.peopleContextMode = "hotwords";
     a.polishMode = "meeting";
 
-    // 嵌套持久化：快速口述（asr 子对象 + prompt + 落点）
-    a.quickDictationTarget = "clipboard";
-    a.quickDictationPrompt = "自定义X";
-    a.quickDictationAsr = {
-      endpoint: "https://asr.example.com/v1/audio/transcriptions",
-      apiKey: "sk-qd-test",
-      model: "whisper-test",
-      language: "zh",
-    };
-
     // LLM 工作字段 + 配置库
     a.llmEndpoint = "https://llm.example.com/v1/chat/completions";
     a.llmApiKey = "sk-llm-test";
@@ -133,6 +123,9 @@ describe("settings-io round-trip（白名单防丢键兜底）", () => {
 
     // 转写 provider 注册表（嵌套 bag）
     a.activeTranscribeProvider = "openai";
+    a.importTranscribeProvider = "dashscope-filetrans";
+    a.importSpeakerDiarization = false;
+    a.importSpeakerCount = 4;
     a.transcribeProviders.siliconflow.apiKey = "sk-asr-test";
 
     // 招聘模块
@@ -174,15 +167,6 @@ describe("settings-io round-trip（白名单防丢键兜底）", () => {
     expect(b.peopleContextMode).toBe("hotwords");
     expect(b.polishMode).toBe("meeting");
 
-    expect(b.quickDictationTarget).toBe("clipboard");
-    expect(b.quickDictationPrompt).toBe("自定义X");
-    expect(b.quickDictationAsr).toEqual({
-      endpoint: "https://asr.example.com/v1/audio/transcriptions",
-      apiKey: "sk-qd-test",
-      model: "whisper-test",
-      language: "zh",
-    });
-
     expect(b.llmEndpoint).toBe("https://llm.example.com/v1/chat/completions");
     expect(b.llmApiKey).toBe("sk-llm-test");
     expect(b.llmModel).toBe("test-model");
@@ -192,6 +176,9 @@ describe("settings-io round-trip（白名单防丢键兜底）", () => {
     expect(b.activeLlmProfile).toBe("p1");
 
     expect(b.activeTranscribeProvider).toBe("openai");
+    expect(b.importTranscribeProvider).toBe("dashscope-filetrans");
+    expect(b.importSpeakerDiarization).toBe(false);
+    expect(b.importSpeakerCount).toBe(4);
     expect(b.transcribeProviders.siliconflow.apiKey).toBe("sk-asr-test");
 
     expect(b.recruitFeatureUnlocked).toBe(true);
@@ -235,10 +222,6 @@ describe("settings-io round-trip（白名单防丢键兜底）", () => {
           lastCheckedAt: 123,
           available: { version: "2.0.0", files: "not-an-array" },
         },
-        quickDictation: {
-          asr: { endpoint: { bad: true }, model: "qd-model" },
-          target: "file",
-        },
       },
     });
 
@@ -262,8 +245,6 @@ describe("settings-io round-trip（白名单防丢键兜底）", () => {
     expect(settings.floatingBallPos).toEqual({ left: DEFAULT_SETTINGS.floatingBallPos.left, top: 25 });
     expect(settings.lastUpdateCheckAt).toBe(DEFAULT_SETTINGS.lastUpdateCheckAt);
     expect(settings.availableUpdate).toBeNull();
-    expect(settings.quickDictationAsr).toEqual({ endpoint: "", apiKey: "", model: "qd-model", language: "" });
-    expect(settings.quickDictationTarget).toBe(DEFAULT_SETTINGS.quickDictationTarget);
   });
 
   it("旧版扁平字段继续迁移，包含 provider 与旧 prompt 覆盖", () => {
@@ -282,8 +263,6 @@ describe("settings-io round-trip（白名单防丢键兜底）", () => {
         },
       },
       polishPromptMeeting: "旧版会议提示词",
-      quickDictationPrompt: "旧版快速口述提示词",
-      quickDictationTarget: "clipboard",
     });
 
     expect(settings.audioFolder).toBe("旧版/录音");
@@ -298,8 +277,6 @@ describe("settings-io round-trip（白名单防丢键兜底）", () => {
     expect(settings.transcribeProviders.siliconflow.apiKey).toBe("legacy-asr-key");
     expect(settings.transcribeProviders.siliconflow.model).toBe("legacy-asr-model");
     expect(settings.promptTemplates["builtin-meeting"].prompt).toBe("旧版会议提示词");
-    expect(settings.quickDictationPrompt).toBe("旧版快速口述提示词");
-    expect(settings.quickDictationTarget).toBe("clipboard");
   });
 
   it("prompt/provider/招聘上下文/更新状态等合法结构 round-trip 后保持", () => {
@@ -357,7 +334,6 @@ describe("settings-io round-trip（白名单防丢键兜底）", () => {
   it("二次 round-trip 稳定（不会每次保存都漂移一点）", () => {
     const a = normalizeLexVoiceSettings({});
     a.sedimentAutoExtract = true;
-    a.quickDictationTarget = "clipboard";
     const b = roundTrip(a);
     const c = roundTrip(b);
     for (const key of Object.keys(DEFAULT_SETTINGS)) {

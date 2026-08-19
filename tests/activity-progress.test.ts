@@ -134,6 +134,26 @@ describe("audio import activity progress", () => {
     expect(events.map((event) => event.label)).toEqual(["event-2", "event-3", "event-4"]);
   });
 
+  it("updates repeated polling events instead of filling the timeline with duplicates", () => {
+    const first = appendActivityEvent([], {
+      at: 1_000,
+      stageId: "transcribe",
+      type: "waiting",
+      label: "正在发送给云端识别整段音频",
+      detail: "音频时长 3:00:00 · 预计约 5–15 分钟完成",
+    });
+    const second = appendActivityEvent(first, {
+      at: 4_000,
+      stageId: "transcribe",
+      type: "waiting",
+      label: "正在发送给云端识别整段音频",
+      detail: "音频时长 3:00:00 · 预计约 5–15 分钟完成",
+    });
+
+    expect(second).toHaveLength(1);
+    expect(second[0].at).toBe(4_000);
+  });
+
   it("summarizes concurrent chunks and surfaces the most urgent state", () => {
     const now = 3_000_000;
     const requests = [

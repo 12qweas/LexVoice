@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- LexVoice's settings/data layer is intentionally dynamically typed (files use @ts-nocheck and read untyped JSON from loadData); these type-only rules yield no actionable findings here and are tracked for incremental typing */
 // 由 main.ts 抽出（模块化拆解，提升工程稳定性；纯搬迁、零行为改动）。
-import { delayMs, extFromMime, isTransientAsrError } from '../shared/util-audio';
+import { delayMs, extFromMime, isAsrTransportError, isTransientAsrError } from '../shared/util-audio';
 import { extractLlmContent } from '../shared/util-json';
 import { isLocalServiceEndpoint } from '../shared/util-note';
 import { assertSafeServiceEndpoint, canOmitServiceApiKey } from '../shared/util-llm-endpoint';
@@ -9,6 +9,7 @@ import { buildPeopleHotwordsForAsr } from '../people';
 import { lexvoiceArrayBufferToBase64 } from './clients';
 import { extractTranscriptText } from './speaker-labels';
 import { cleanApimimoAsrRepeatedLoops } from './apimimo-clean';
+import { getSpeakerDiarizationRequestOptions } from './diarization';
 
 export type AsrLifecycleSignalType =
   | "attempt-start"
@@ -139,13 +140,17 @@ export async function mapLimit(items, limit, worker) {
 // 1) 错误信息带 Retry-After 提示 → 按服务端要求的秒数等（+0-2s 随机抖动，封顶 90s）；
 // 2) 限流类（429 / 限流 / rate limit / too many request）→ 30-45s 随机（MiMo 的 10K TPM 按分钟窗滚动，
 //    1-2s 的短退避只会立刻再撞限流，白烧一次重试机会）；
-// 3) 其它瞬时错误（超时/5xx/网络）→ 保持旧行为 1.2-2s 短退避。
+// 3) 网络/超时/5xx → 5s 起步指数退避，避免服务不可达时连续发送无效请求；
+// 4) 空结果等其它软失败 → 维持 1.2-2s 短退避。
 export function pickAsrRetryDelayMs(errorMessage, attempt?) {
-  void attempt; // 预留参数：目前各档退避均不随尝试次数缩放
   const msg = String(errorMessage || "");
   const retryAfter = msg.match(/retry-after[:：]?\s*(\d+)/i);
   if (retryAfter) return Math.min(90000, Number(retryAfter[1]) * 1000 + Math.floor(Math.random() * 2000));
   if (/(^|\D)429(\D|$)|限流|rate.?limit|too many request/i.test(msg)) return 30000 + Math.floor(Math.random() * 15000);
+  if (/\b(500|502|503|504)\b|timeout|timed?\s*out|network(?:error)?|failed to fetch|fetch failed|err_(?:internet|network|connection)|dns|enotfound|econn(?:reset|refused|aborted)|etimedout|net::|超时|流中断|连接(?:失败|中断|关闭)|网络(?:错误|不可用)/i.test(msg)) {
+    const retryIndex = Math.max(0, Math.min(3, (Math.floor(Number(attempt) || 1) - 1)));
+    return Math.min(30000, 5000 * (2 ** retryIndex)) + Math.floor(Math.random() * 1000);
+  }
   return 1200 + Math.floor(Math.random() * 800);
 }
 
@@ -415,13 +420,25 @@ export function estimateApimimoAudioSeconds(blob, mime) {
 // 才不超额；取 160ms/秒（+7% 安全余量），封顶 45s。原先各块背靠背直发，3 分钟块 ≈ 5.2K token，
 // 连发两块就撞 TPM → 429/超时/空结果。
 // 间隔从"本次请求发起"起算——token 在服务端摄取音频时即已消耗，若请求本身耗时 ≥ 间隔，下一次无需再等。
-// 体感：听写短音频（~10s → 1.6s 间隔）几乎无感；3 分钟导入块 → ~29s 间隔，恰好贴住 10K TPM。
+  // 体感：短音频（~10s → 1.6s 间隔）几乎无感；3 分钟导入块 → ~29s 间隔，恰好贴住 10K TPM。
 let _apimimoNextAllowedAt = 0;
+export function reserveApimimoTpmSlot(nextAllowedAt, gapMs, nowMs = Date.now()) {
+  const now = Math.max(0, Number(nowMs) || 0);
+  const slotAt = Math.max(now, Math.max(0, Number(nextAllowedAt) || 0));
+  return {
+    waitMs: Math.max(0, slotAt - now),
+    nextAllowedAt: slotAt + Math.max(0, Number(gapMs) || 0),
+  };
+}
+
 export async function waitApimimoTpmSlot(blob, mime) {
   const now = Date.now();
-  if (_apimimoNextAllowedAt > now) await delayMs(_apimimoNextAllowedAt - now);
   const gapMs = Math.max(0, Math.min(45000, Math.round(estimateApimimoAudioSeconds(blob, mime) * 160)));
-  _apimimoNextAllowedAt = Date.now() + gapMs;
+  // 先同步预留时段、再等待。JavaScript 在首次 await 前会完整执行这段，多个并发调用
+  // 因而会拿到不同的 FIFO 时段，不会在同一个旧时间点一起醒来。
+  const reservation = reserveApimimoTpmSlot(_apimimoNextAllowedAt, gapMs, now);
+  _apimimoNextAllowedAt = reservation.nextAllowedAt;
+  if (reservation.waitMs > 0) await delayMs(reservation.waitMs);
 }
 
 // SSE 事件累加器（纯函数，供测试）。acc = { text, finishReason, done }。
@@ -621,6 +638,17 @@ export async function requestApimimoAsrChunk(
       // 保留"超时"关键字：isTransientAsrError 据此归为瞬时错误，导入重试链路才会自动重试。
       throw new Error(`转写请求超时：${abortHint || "等待响应超时"}；录音文件已保留，可稍后重试或降低 ASR 并发数`);
     }
+    if (isAsrTransportError(e)) {
+      const originalMessage = String((e && e.message) || e || "网络连接失败");
+      const transportError = new Error("无法连接转写服务；音频已保留，恢复连接后可继续重试") as Error & {
+        asrTransport?: boolean;
+        statusDetail?: string;
+      };
+      transportError.name = "AsrTransportError";
+      transportError.asrTransport = true;
+      transportError.statusDetail = originalMessage;
+      throw transportError;
+    }
     throw e;
   } finally {
     if (phaseTimer !== null) window.clearTimeout(phaseTimer);
@@ -738,14 +766,16 @@ export async function transcribeAudio(
     return await transcribeAudioWithApimimo(plugin, p, blob, mime, vocabularyGroups, observer);
   }
   const form = new FormData();
+  const diarizationOptions = getSpeakerDiarizationRequestOptions(p);
   const ext = extFromMime(mime);
   form.append("file", blob, `recording.${ext}`);
   form.append("model", p.model);
   if (p.language && p.language !== "auto") form.append("language", p.language);
-  form.append("response_format", "json");
+  form.append("response_format", diarizationOptions.responseFormat);
+  if (diarizationOptions.chunkingStrategy) form.append("chunking_strategy", diarizationOptions.chunkingStrategy);
   const peopleHotwords = await buildPeopleHotwordsForAsr(plugin, p);
   const promptText = buildVocabularyPrompt(vocabularyGroups, peopleHotwords);
-  if (promptText) form.append("prompt", promptText);
+  if (promptText && diarizationOptions.supportsPrompt) form.append("prompt", promptText);
   const timeoutMs = getTranscribeRequestTimeoutMs(p, blob && blob.size);
   const requestStartedAt = Date.now();
   emitAsrLifecycle(observer, {

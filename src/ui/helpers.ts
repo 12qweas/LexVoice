@@ -81,6 +81,7 @@ export function noteHasSuccessfulLlmBriefing(content) {
 export function noteHasUsableRawTranscriptDespiteFailures(content) {
   const cleaned = String(content || "")
     .replace(/_\[转写失败(?:（已进入重试队列）)?：[^\]]*\]_/g, "")
+    .replace(/_\[(?:等待后台转写，音频已保留|此段尚未完成转写，音频已保留)\]_/g, "")
     .replace(/_\[合并润色失败（已加入重试队列）：[^\]]*\]_/g, "")
     .replace(/_\[AI 整理失败：[^\]]*\]_/g, "")
     .replace(/_\[(?:此段暂无有效转写|此段无内容|无输出)\]_/g, "");
@@ -94,7 +95,7 @@ export function getRecentNoteProcessingState(content) {
   // 关键：失败标记的匹配同样要先剥掉 <details> 历史归档，
   // 避免旧版本里的 "_[合并润色失败...]_" 永久把当前纪要标成警告态。
   const visibleText = stripArchivedDetailsBlocks(fullText);
-  if (/合并润色失败|AI 整理失败|转写失败|已进入重试队列|转写重试|Transcription failed|transcribe failed/i.test(visibleText)) {
+  if (/合并润色失败|AI 整理失败|转写失败|已进入重试队列|等待后台转写|尚未完成转写|转写重试|Transcription failed|transcribe failed/i.test(visibleText)) {
     const hasMergeFailure = /合并润色失败|AI 整理失败/i.test(visibleText);
     if (noteHasUsableRawTranscriptDespiteFailures(visibleText)) {
       return {

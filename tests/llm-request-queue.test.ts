@@ -61,7 +61,7 @@ describe("LlmRequestQueue", () => {
     expect(order).toEqual(["first", "question", "outline"]);
   });
 
-  it("runs an overdue background outline before newer interactive work", async () => {
+  it("keeps newer interactive work ahead of an overdue background outline", async () => {
     let now = 0;
     const queue = new LlmRequestQueue({
       now: () => now,
@@ -88,9 +88,9 @@ describe("LlmRequestQueue", () => {
     releaseFirst();
     await Promise.all([first, outline, question, suggestion]);
 
-    expect(order).toEqual(["first", "outline", "question", "suggestion"]);
+    expect(order).toEqual(["first", "question", "outline", "suggestion"]);
   });
-  it("runs an overdue outline during sustained interactive traffic", async () => {
+  it("does not let background work interrupt sustained interactive traffic", async () => {
     let now = 0;
     const queue = new LlmRequestQueue({
       now: () => now,
@@ -115,6 +115,33 @@ describe("LlmRequestQueue", () => {
     releaseFirst();
     await Promise.all([first, outline, ...questions]);
 
-    expect(order).toEqual(["first", "outline", "question-1", "question-2", "question-3"]);
+    expect(order).toEqual(["first", "question-1", "question-2", "question-3", "outline"]);
+  });
+
+  it("lets an overdue outline move ahead of normal automatic work", async () => {
+    let now = 0;
+    const queue = new LlmRequestQueue({
+      now: () => now,
+      backgroundMaxWaitMs: 15_000,
+    });
+    const order: string[] = [];
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const first = queue.enqueue(1, async () => {
+      await firstGate;
+      order.push("first");
+    });
+    const outline = queue.enqueue(2, async () => {
+      order.push("outline");
+    });
+    now = 16_000;
+    const automatic = queue.enqueue(1, async () => {
+      order.push("automatic");
+    });
+
+    releaseFirst();
+    await Promise.all([first, outline, automatic]);
+
+    expect(order).toEqual(["first", "outline", "automatic"]);
   });
 });

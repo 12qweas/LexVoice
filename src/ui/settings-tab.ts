@@ -9,10 +9,9 @@ import { isLocalServiceEndpoint } from '../shared/util-note';
 import { compareVersions, isLexVoiceMobileRuntime } from '../shared/util-platform';
 import { getEffectivePolishMode, getModeMeta, getVisibleModeEntries } from '../shared/mode-meta';
 import { LLM_SERVICE_PRESETS, ONE_CARD_PROVIDERS, applyLlmProfileToWorkingConfig, findLlmProfile, getActiveLlmServicePresetId, getLlmServicePreset, inferLlmServicePresetId, normalizeLlmProfiles, syncWorkingConfigToLlmProfile } from '../llm/config';
-import { fetchLlmModelList, testLlmConnection } from '../llm/core';
+import { fetchLlmModelList, getLlmConfigIssue, testLlmConnection } from '../llm/core';
 import { snapshotActiveAsr, syncWorkingAsrToActiveScheme } from '../llm/asr-scheme';
 import { normalizeAsrConcurrency, resolveTranscribeProvider, transcribeAudio } from '../asr/transcribe';
-import { QUICK_DICTATION_DEFAULT_TEMPLATE } from '../prompts/clean-transcript';
 import { countVocabularyGroups, formatVocabularyMarkdown, isStructuredVocabularyMarkdown, parseVocabularyGroups, summarizeVocabularyGroups } from '../vocabulary';
 import { hasPeopleHotwordsConsent, loadPeopleDirectory, normalizePeopleContextMode, normalizePeopleSuggestionCache, normalizePeopleSuggestionIgnores } from '../people';
 import { isRecruitFeatureUnlocked } from '../recruit';
@@ -25,6 +24,7 @@ import {
   normalizeAudioChannelMode,
 } from '../audio/channel-speakers';
 import { analyzeRecordedAudioChannels } from '../asr/channel-transcription';
+import { fetchImportTranscribeModels, testImportTranscribeProvider } from '../asr/long-audio-transcription';
 
 function pickChannelProbeMime() {
   const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
@@ -71,6 +71,7 @@ export const LV_SETTINGS_TABS = [
   { id: "home",     label: "LexVoice" },
   { id: "general",  label: "常规" },
   { id: "api",      label: "API" },
+  { id: "speaker",  label: "说话人" },
   { id: "ai",       label: "AI 整理" },
   { id: "knowledge", label: "资料库" },
   { id: "advanced", label: "进阶" },
@@ -131,6 +132,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       case "home":     this.renderHome(content); break;
       case "general":  this.renderGeneral(content); break;
       case "api":      this.renderApi(content); break;
+      case "speaker":  this.renderSpeaker(content); break;
       case "ai":       this.renderAI(content); break;
       case "knowledge": this.renderKnowledge(content); break;
       case "recruit":  this.renderRecruit(content); break;
@@ -1103,8 +1105,8 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     this.renderApiSchemeSelector(c);
 
     new obsidian.Setting(c)
-      .setName("纪要转写")
-      .setDesc("配置会议录音、长音频导入和纪要原始文本使用的转写服务。")
+      .setName("实时录音")
+      .setDesc("配置会议录音使用的转写服务。导入音频使用独立服务，在“说话人”中设置。")
       .setHeading();
 
     this.renderDataRiskNotice(c, "is-api");
@@ -1205,97 +1207,9 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         }
       }));
 
-    if (!this.plugin.settings.quickDictationAsr) {
-      this.plugin.settings.quickDictationAsr = { endpoint: "", apiKey: "", model: "", language: "" };
-    }
-    const qa = this.plugin.settings.quickDictationAsr;
-
-    new obsidian.Setting(c)
-      .setName("即时听写")
-      .setDesc("配置短语音输入。留空可复用纪要转写服务，也可以单独使用流式听写服务。")
-      .setHeading();
-
-    const fillBailianStream = async (model) => {
-      qa.endpoint = "wss://dashscope.aliyuncs.com/api-ws/v1/inference";
-      qa.model = model;
-      // 密钥留给用户自己填（dashscope API Key）
-      await this.plugin.saveSettings();
-      this.renderSettings();
-    };
-    new obsidian.Setting(c).setName("听写服务")
-      .setDesc("留空时复用纪要转写服务。也可以选择下方流式预设，获得边说边出的实时字幕。")
-      .addButton(b => b.setButtonText("Fun-ASR").setTooltip("阿里云百炼 Fun-ASR 流式（推荐·新一代、高精度、支持热词）").onClick(() => fillBailianStream("fun-asr-realtime")))
-      .addButton(b => b.setButtonText("Paraformer-v2").setTooltip("阿里云百炼 Paraformer 流式（成熟通用、多语言、通常最便宜）").onClick(() => fillBailianStream("paraformer-realtime-v2")))
-      .addButton(b => b.setButtonText("Paraformer-8k").setTooltip("阿里云百炼 Paraformer 8k 流式（电话 / 8kHz 音频）").onClick(() => fillBailianStream("paraformer-realtime-8k-v2")));
-
-    const dictationHelp = c.createEl("details", { cls: "lexvoice-setting-details" });
-    dictationHelp.createEl("summary", { text: "地址填写说明" });
-    dictationHelp.createDiv({
-      cls: "lexvoice-setting-details-copy",
-      text: "wss:// 流式地址会边说边出字幕；普通 https:// 批量地址会在说完后统一转写。阿里云百炼流式地址通常以 /api-ws/v1/inference 结尾，OpenAI 兼容的 /compatible-mode/v1 不是实时字幕接口。独立听写服务需要同时填写地址、密钥和模型。",
-    });
-
-    new obsidian.Setting(c).setName("转写地址")
-      .addText(t => t
-        .setPlaceholder("https://api.example.com/v1/audio/transcriptions")
-        .setValue(qa.endpoint || "")
-        .onChange(async v => { qa.endpoint = v.trim(); await this.plugin.saveSettings(); }));
-
-    new obsidian.Setting(c).setName("密钥")
-      .addText(t => {
-        t.inputEl.type = "password";
-        t.setPlaceholder("该转写服务的 API Key");
-        t.setValue(qa.apiKey || "");
-        t.onChange(async v => { qa.apiKey = v.trim(); await this.plugin.saveSettings(); });
-      });
-
-    new obsidian.Setting(c).setName("模型")
-      .addText(t => t
-        .setPlaceholder("流式如 fun-asr-realtime / paraformer-realtime-v2；批量填对应模型名")
-        .setValue(qa.model || "")
-        .onChange(async v => { qa.model = v.trim(); await this.plugin.saveSettings(); }));
-
-    new obsidian.Setting(c).setName("语言")
-      .setDesc("可留空自动识别；部分服务支持 zh / en / auto。")
-      .addText(t => t
-        .setPlaceholder("留空 = 自动")
-        .setValue(qa.language || "")
-        .onChange(async v => { qa.language = v.trim(); await this.plugin.saveSettings(); }));
-
-    const quickPromptSetting = new obsidian.Setting(c)
-      .setName("自定义整理提示词")
-      .setDesc("自定义听写的 AI 整理提示词。留空用默认。用 {{转写}} 表示转写原文的位置（不写则自动拼在末尾）。");
-    const quickPromptTa = c.createEl("textarea", { cls: "lexvoice-textarea lexvoice-textarea-mono" });
-    quickPromptTa.rows = 10;
-    quickPromptTa.value = this.plugin.settings.quickDictationPrompt || "";
-    quickPromptTa.placeholder = QUICK_DICTATION_DEFAULT_TEMPLATE;
-    quickPromptTa.addEventListener("change", async () => {
-      this.plugin.settings.quickDictationPrompt = quickPromptTa.value.trim();
-      await this.plugin.saveSettings();
-    });
-    quickPromptSetting.addButton(b => b.setButtonText("恢复默认").onClick(async () => {
-      // 写回空串而非默认全文快照：空 = 跟随内置默认，插件升级改进模板时自动生效；
-      // 存快照会把用户永久冻结在旧版模板上（textarea 的 placeholder 已展示当前默认全文）。
-      this.plugin.settings.quickDictationPrompt = "";
-      quickPromptTa.value = "";
-      await this.plugin.saveSettings();
-      new obsidian.Notice("已恢复为内置默认（留空即自动跟随模板更新）");
-    }));
-
-    new obsidian.Setting(c).setName("写入位置")
-      .setDesc("选择即时听写结果的写入位置。")
-      .addDropdown(d => d
-        .addOption("editor", "当前光标（无活动笔记时复制到剪贴板）")
-        .addOption("clipboard", "剪贴板")
-        .setValue(this.plugin.settings.quickDictationTarget === "clipboard" ? "clipboard" : "editor")
-        .onChange(async v => {
-          this.plugin.settings.quickDictationTarget = v === "clipboard" ? "clipboard" : "editor";
-          await this.plugin.saveSettings();
-        }));
-
     new obsidian.Setting(c)
       .setName("AI 整理服务")
-      .setDesc("用于纪要整理、问一问、沉淀、招聘提纲、听写清理、重整和翻译。")
+      .setDesc("用于纪要整理、问一问、沉淀、招聘提纲、重整和翻译。")
       .setHeading();
     // 「已保存配置」已升级为顶部「API 方案」（同时含转写 + AI 整理），不再在此处单列 LLM-only 版本。
 
@@ -1414,6 +1328,313 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
 
     // 「默认润色模式」原在此处有第二入口，与「AI 整理」页的「当前默认提示词」同写 polishMode
     // 且两处互不联动刷新——已删除本处副本，统一在 AI 整理页设置。
+  }
+
+  renderSpeaker(c) {
+    new obsidian.Setting(c)
+      .setName("导入音频")
+      .setDesc("整文件转写并识别说话人，不参与实时录音分段。")
+      .setHeading();
+
+    this.renderDataRiskNotice(c, "is-api");
+
+    const providers = this.plugin.settings.transcribeProviders || {};
+    const supportedIds = Object.keys(providers).filter((id) => {
+      const profile = this.getTranscribeProviderProfile(id, providers[id] || {});
+      return id === "dashscope-filetrans" || !!profile.requiresWholeSession;
+    });
+    const activeId = supportedIds.includes(this.plugin.settings.importTranscribeProvider)
+      ? this.plugin.settings.importTranscribeProvider
+      : (supportedIds[0] || "dashscope-filetrans");
+    if (this.plugin.settings.importTranscribeProvider !== activeId) {
+      this.plugin.settings.importTranscribeProvider = activeId;
+    }
+    const provider = providers[activeId] || {};
+    const profile = this.getTranscribeProviderProfile(activeId, provider);
+
+    new obsidian.Setting(c).setName("转写服务")
+      .setDesc("仅用于导入音频，不影响实时录音。")
+      .addDropdown((dropdown) => {
+        for (const id of supportedIds) {
+          const item = providers[id] || {};
+          const itemProfile = this.getTranscribeProviderProfile(id, item);
+          dropdown.addOption(id, itemProfile.title || item.name || id);
+        }
+        dropdown.setValue(activeId).onChange(async (value) => {
+          this.plugin.settings.importTranscribeProvider = value;
+          await this.plugin.saveSettings();
+          this.renderSettings();
+        });
+      });
+
+    this.renderTranscribeProviderGuide(c, activeId, provider, profile);
+    const writeProvider = async (key, value) => {
+      if (!this.plugin.settings.transcribeProviders[activeId]) {
+        this.plugin.settings.transcribeProviders[activeId] = {};
+      }
+      this.plugin.settings.transcribeProviders[activeId][key] = value;
+      await this.plugin.saveSettings();
+    };
+
+    const providerNeedsKey = !!profile.requiresKey && !canOmitServiceApiKey(provider.endpoint);
+    new obsidian.Setting(c).setName(providerNeedsKey ? "访问密钥" : "访问密钥（可选）")
+      .setDesc(profile.keyHelp || "按转写服务要求填写。")
+      .addText((text) => {
+        text.inputEl.type = "password";
+        text.setValue(provider.apiKey || "").onChange((value) => writeProvider("apiKey", value));
+      });
+
+    new obsidian.Setting(c).setName("服务地址")
+      .setDesc(profile.endpointHelp || "导入音频转写接口地址。")
+      .addText((text) => text
+        .setValue(provider.endpoint || "")
+        .setPlaceholder(profile.endpointPlaceholder || "")
+        .onChange((value) => writeProvider("endpoint", value.trim())));
+
+    new obsidian.Setting(c).setName("模型名称")
+      .setDesc(profile.modelHelp || "填写服务支持的长音频转写模型。")
+      .addText((text) => text
+        .setValue(provider.model || "")
+        .setPlaceholder(profile.modelPlaceholder || "")
+        .onChange((value) => writeProvider("model", value.trim())))
+      .addButton((button) => button
+        .setButtonText("获取模型")
+        .onClick(async () => {
+          button.setDisabled(true);
+          button.setButtonText("获取中…");
+          try {
+            const models = await fetchImportTranscribeModels(this.plugin, activeId);
+            if (!models.length) {
+              new obsidian.Notice("服务没有返回可用模型，请手动填写模型名称。", 6000);
+              return;
+            }
+            openLexVoicePickListModal(this.app, `选择导入音频模型（共 ${models.length} 个）`, models, async (model) => {
+              await writeProvider("model", model);
+              new obsidian.Notice(`已选择模型：${model}`, 4000);
+              this.renderSettings();
+            });
+          } catch (error) {
+            new obsidian.Notice(`获取模型失败：${(error && error.message) || error}`, 8000);
+          } finally {
+            button.setDisabled(false);
+            button.setButtonText("获取模型");
+          }
+        }));
+
+    new obsidian.Setting(c)
+      .setName("连接测试")
+      .setDesc("验证服务地址、访问密钥和模型是否可用，不上传录音内容。")
+      .addButton((button) => button
+        .setButtonText("测试连接")
+        .onClick(async () => {
+          button.setDisabled(true);
+          button.setButtonText("测试中…");
+          try {
+            const result = await testImportTranscribeProvider(this.plugin, activeId);
+            new obsidian.Notice(`连接正常：${result.model} · ${result.detail}`, 7000);
+          } catch (error) {
+            new obsidian.Notice(`连接失败：${(error && error.message) || error}`, 9000);
+          } finally {
+            button.setDisabled(false);
+            button.setButtonText("测试连接");
+          }
+        }));
+
+    if (!profile.hideLanguage) {
+      new obsidian.Setting(c).setName("识别语言")
+        .setDesc(profile.languageHelp || "留空或 auto 表示自动检测。")
+        .addText((text) => text
+          .setValue(provider.language || "")
+          .setPlaceholder(profile.languagePlaceholder || "")
+          .onChange((value) => writeProvider("language", value.trim())));
+    }
+
+    new obsidian.Setting(c)
+      .setName("区分说话人")
+      .setDesc("转写完成后确认“说话人 1、2、3”对应的姓名，再进入 AI 整理。")
+      .addToggle((toggle) => toggle
+        .setValue(this.plugin.settings.importSpeakerDiarization !== false)
+        .onChange(async (value) => {
+          this.plugin.settings.importSpeakerDiarization = value;
+          await this.plugin.saveSettings();
+          this.renderSettings();
+        }));
+
+    if (this.plugin.settings.importSpeakerDiarization !== false) {
+      new obsidian.Setting(c)
+        .setName("说话人数")
+        .setDesc("留空表示自动识别；已知人数时填写可提高区分稳定性。")
+        .addText((text) => {
+          text.inputEl.type = "number";
+          text.inputEl.min = "2";
+          text.inputEl.max = "100";
+          text.inputEl.step = "1";
+          text.setPlaceholder("自动");
+          text.setValue(this.plugin.settings.importSpeakerCount > 0
+            ? String(this.plugin.settings.importSpeakerCount)
+            : "");
+          text.onChange(async (value) => {
+            const number = Math.floor(Number(value) || 0);
+            this.plugin.settings.importSpeakerCount = number >= 2 ? Math.min(100, number) : 0;
+            await this.plugin.saveSettings();
+          });
+        });
+    }
+
+    new obsidian.Setting(c)
+      .setName("AI 整理")
+      .setDesc("原始转写写入笔记并确认说话人后，再按当前纪要模板生成正文。")
+      .setHeading();
+
+    const llmProfiles = normalizeLlmProfiles(this.plugin.settings.llmProfiles);
+    new obsidian.Setting(c)
+      .setName("整理配置")
+      .setDesc("选择已保存的大模型配置。这里只切换 AI 整理服务，不改变实时录音或导入音频的转写服务。")
+      .addDropdown((dropdown) => {
+        dropdown.addOption("", "当前临时配置");
+        for (const item of llmProfiles) dropdown.addOption(item.id, item.name || item.id);
+        dropdown.setValue(this.plugin.settings.activeLlmProfile || "");
+        dropdown.onChange(async (id) => {
+          if (!id) {
+            this.plugin.settings.activeLlmProfile = "";
+          } else {
+            const selected = findLlmProfile(this.plugin.settings, id);
+            if (selected) {
+              this.plugin.settings.llmEndpoint = selected.endpoint || "";
+              this.plugin.settings.llmApiKey = selected.apiKey || "";
+              this.plugin.settings.llmModel = selected.model || "";
+              this.plugin.settings.activeLlmProfile = selected.id;
+              this.plugin.settings.llmServicePreset = inferLlmServicePresetId(this.plugin.settings);
+            }
+          }
+          await this.plugin.saveSettings();
+          this.renderSettings();
+        });
+      });
+
+    const activeLlmPresetId = getActiveLlmServicePresetId(this.plugin.settings);
+    new obsidian.Setting(c)
+      .setName("大模型服务")
+      .setDesc("选择服务后会填入兼容接口地址；访问密钥不会被覆盖。")
+      .addDropdown((dropdown) => {
+        dropdown.addOption("", "自定义服务");
+        for (const preset of LLM_SERVICE_PRESETS) dropdown.addOption(preset.id, preset.label);
+        dropdown.setValue(activeLlmPresetId || "");
+        dropdown.onChange(async (id) => {
+          const preset = getLlmServicePreset(id);
+          this.plugin.settings.llmServicePreset = id || "";
+          if (preset?.endpoint) this.plugin.settings.llmEndpoint = preset.endpoint;
+          syncWorkingConfigToLlmProfile(this.plugin.settings, this.plugin.settings.activeLlmProfile);
+          await this.plugin.saveSettings();
+          this.renderSettings();
+        });
+      });
+
+    const activeLlmPreset = getLlmServicePreset(activeLlmPresetId);
+    new obsidian.Setting(c)
+      .setName("服务地址")
+      .setDesc(activeLlmPreset?.endpointHelp || "填写大模型服务的 OpenAI 兼容接口地址。")
+      .addText((text) => text
+        .setValue(this.plugin.settings.llmEndpoint || "")
+        .setPlaceholder(activeLlmPreset?.endpoint || "https://api.example.com/v1")
+        .onChange(async (value) => {
+          this.plugin.settings.llmEndpoint = value.trim();
+          this.plugin.settings.llmServicePreset = inferLlmServicePresetId(this.plugin.settings);
+          syncWorkingConfigToLlmProfile(this.plugin.settings, this.plugin.settings.activeLlmProfile);
+          await this.plugin.saveSettings();
+        }));
+
+    const llmKeySetting = new obsidian.Setting(c)
+      .setName(canOmitServiceApiKey(this.plugin.settings.llmEndpoint) ? "访问密钥（可选）" : "访问密钥")
+      .setDesc(activeLlmPreset?.keyHelp || "填写大模型服务的 API Key。")
+      .addText((text) => {
+        text.inputEl.type = "password";
+        text.setValue(this.plugin.settings.llmApiKey || "")
+          .setPlaceholder("API Key")
+          .onChange(async (value) => {
+            this.plugin.settings.llmApiKey = value.trim();
+            syncWorkingConfigToLlmProfile(this.plugin.settings, this.plugin.settings.activeLlmProfile);
+            await this.plugin.saveSettings();
+          });
+      });
+    if (activeLlmPresetId === "dashscope" && activeId === "dashscope-filetrans" && provider.apiKey) {
+      llmKeySetting.addButton((button) => button
+        .setButtonText("复用转写密钥")
+        .onClick(async () => {
+          this.plugin.settings.llmApiKey = provider.apiKey;
+          syncWorkingConfigToLlmProfile(this.plugin.settings, this.plugin.settings.activeLlmProfile);
+          await this.plugin.saveSettings();
+          new obsidian.Notice("已复用阿里云百炼转写密钥。", 4000);
+          this.renderSettings();
+        }));
+    }
+
+    new obsidian.Setting(c)
+      .setName("AI 模型")
+      .setDesc("用于生成最终纪要；不会改变语音转写模型。")
+      .addText((text) => text
+        .setValue(this.plugin.settings.llmModel || "")
+        .setPlaceholder("选择或填写模型标识")
+        .onChange(async (value) => {
+          this.plugin.settings.llmModel = value.trim();
+          syncWorkingConfigToLlmProfile(this.plugin.settings, this.plugin.settings.activeLlmProfile);
+          await this.plugin.saveSettings();
+        }))
+      .addButton((button) => button
+        .setButtonText("获取模型")
+        .onClick(async () => {
+          if (!this.plugin.settings.llmEndpoint) {
+            new obsidian.Notice("请先选择大模型服务或填写服务地址。", 5000);
+            return;
+          }
+          button.setDisabled(true);
+          button.setButtonText("获取中…");
+          try {
+            const models = await fetchLlmModelList(this.plugin.settings.llmEndpoint, this.plugin.settings.llmApiKey);
+            if (!models.length) {
+              new obsidian.Notice("服务没有返回模型列表，请手动填写模型标识。", 6000);
+              return;
+            }
+            openLexVoicePickListModal(this.app, `选择 AI 模型（共 ${models.length} 个）`, models, async (model) => {
+              this.plugin.settings.llmModel = model;
+              syncWorkingConfigToLlmProfile(this.plugin.settings, this.plugin.settings.activeLlmProfile);
+              await this.plugin.saveSettings();
+              new obsidian.Notice(`已选择 AI 模型：${model}`, 4000);
+              this.renderSettings();
+            });
+          } catch (error) {
+            new obsidian.Notice(`获取模型失败：${(error && error.message) || error}`, 8000);
+          } finally {
+            button.setDisabled(false);
+            button.setButtonText("获取模型");
+          }
+        }));
+
+    const llmIssue = getLlmConfigIssue(this.plugin.settings);
+    new obsidian.Setting(c)
+      .setName("连接测试")
+      .setDesc(llmIssue || "发送极短文本检查 AI 整理服务，不上传录音或转写内容。")
+      .addButton((button) => button
+        .setButtonText("测试连接")
+        .onClick(async () => {
+          button.setDisabled(true);
+          button.setButtonText("测试中…");
+          try {
+            const result = await testLlmConnection(this.plugin);
+            new obsidian.Notice(`AI 整理服务正常：${result.model || "未命名模型"}`, 6000);
+          } catch (error) {
+            new obsidian.Notice(`连接失败：${(error && error.message) || error}`, 8000);
+          } finally {
+            button.setDisabled(false);
+            button.setButtonText("测试连接");
+          }
+        }))
+      .addButton((button) => button
+        .setButtonText("完整设置")
+        .onClick(() => {
+          this.activeTab = "api";
+          this.renderSettings();
+        }));
   }
 
   renderAI(c) {
@@ -2141,18 +2362,38 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       .setDesc("监控一个收件箱文件夹，自动处理从云盘或其他设备同步进来的音频。")
       .setHeading();
 
+    let inboxFolderInput: obsidian.TextComponent | null = null;
     new obsidian.Setting(c).setName("监听文件夹")
-      .setDesc("Obsidian 库内的相对路径。任何音频出现在此文件夹会被自动转写并归档。留空则禁用此功能。")
-      .addText(t => t.setValue(this.plugin.settings.inboxFolder || "")
-        .setPlaceholder("LexVoice/录音/inbox")
-        .onChange(async v => { this.plugin.settings.inboxFolder = v; await this.plugin.saveSettings(); }));
+      .setDesc("可填写库内相对路径，或选择坚果云等同步到电脑的文件夹。新音频同步完成后会自动生成综合纪要，源文件保持原位。")
+      .addText(t => {
+        inboxFolderInput = t;
+        t.setValue(this.plugin.settings.inboxFolder || "")
+          .setPlaceholder("LexVoice/录音/inbox 或电脑文件夹")
+          .onChange(async v => {
+            this.plugin.settings.inboxFolder = v.trim();
+            await this.plugin.saveSettings();
+            this.plugin.refreshExternalInboxWatcher();
+          });
+      })
+      .addButton(b => b.setButtonText("选择").onClick(async () => {
+        const folder = await this.plugin.chooseExternalInboxFolder();
+        if (!folder) return;
+        this.plugin.settings.inboxFolder = folder;
+        inboxFolderInput?.setValue(folder);
+        await this.plugin.saveSettings();
+        this.plugin.refreshExternalInboxWatcher();
+      }));
 
     new obsidian.Setting(c).setName("自动处理新文件")
       .setDesc("关闭后可从命令面板手动扫描监听文件夹。")
-      .addToggle(t => t.setValue(this.plugin.settings.inboxAutoImport).onChange(async v => { this.plugin.settings.inboxAutoImport = v; await this.plugin.saveSettings(); }));
+      .addToggle(t => t.setValue(this.plugin.settings.inboxAutoImport).onChange(async v => {
+        this.plugin.settings.inboxAutoImport = v;
+        await this.plugin.saveSettings();
+        this.plugin.refreshExternalInboxWatcher();
+      }));
 
     new obsidian.Setting(c).setName("归档子文件夹")
-      .setDesc("处理完成后移到此子文件夹。留空将不归档，可能导致重复处理。")
+      .setDesc("仅用于库内监听文件夹。处理完成后移到此子文件夹；电脑同步文件夹中的源音频不会移动或删除。")
       .addText(t => t.setValue(this.plugin.settings.inboxArchiveSubfolder || "")
         .setPlaceholder("processed")
         .onChange(async v => { this.plugin.settings.inboxArchiveSubfolder = v; await this.plugin.saveSettings(); }));

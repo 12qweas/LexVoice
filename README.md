@@ -71,9 +71,6 @@ Edit owner, due date and sub-tasks inline at the candidate stage — no dialogs.
 - Compatible independent multichannel input can be detected and transcribed by channel, with speaker labels that can be mapped to names. Separation stays off when independent channels cannot be verified.
 - Deleting a transcript offers to delete its audio file too.
 
-### Quick dictation
-Use **Quick dictation** for short speech-to-text input into the current editor or a configured note. It is deliberately lightweight and does **not** save an audio recording. Use meeting recording when the audio itself must be retained.
-
 ### Export
 From one set of notes you can generate an HTML report, an HTML slide deck, an editable `.pptx`, or an `.eml` email draft — same content, different skins.
 

@@ -3,8 +3,10 @@ import {
   LIVE_ASR_BACKLOG_CRITICAL_MS,
   LIVE_ASR_BACKLOG_WARN_MS,
   LIVE_ASR_CIRCUIT_COOLDOWN_MS,
+  LIVE_ASR_CIRCUIT_MAX_COOLDOWN_MS,
   classifyLiveAsrBacklog,
   createLiveAsrCircuitState,
+  getLiveAsrCircuitCooldownMs,
   isLiveAsrCircuitOpen,
   recordLiveAsrFailure,
   recordLiveAsrSuccess,
@@ -46,6 +48,14 @@ describe("live ASR segment policy", () => {
     expect(isLiveAsrCircuitOpen(state, now + 3)).toBe(true);
     expect(state.openUntilMs).toBe(now + 2 + LIVE_ASR_CIRCUIT_COOLDOWN_MS);
     expect(recordLiveAsrSuccess()).toEqual(createLiveAsrCircuitState());
+  });
+
+  it("keeps a three-minute segment inside the first cooldown and backs off after repeated outages", () => {
+    expect(LIVE_ASR_CIRCUIT_COOLDOWN_MS).toBeGreaterThan(3 * 60 * 1000);
+    expect(getLiveAsrCircuitCooldownMs(3)).toBe(LIVE_ASR_CIRCUIT_COOLDOWN_MS);
+    expect(getLiveAsrCircuitCooldownMs(4)).toBe(LIVE_ASR_CIRCUIT_COOLDOWN_MS * 2);
+    expect(getLiveAsrCircuitCooldownMs(5)).toBe(LIVE_ASR_CIRCUIT_COOLDOWN_MS * 4);
+    expect(getLiveAsrCircuitCooldownMs(20)).toBe(LIVE_ASR_CIRCUIT_MAX_COOLDOWN_MS);
   });
 
   it("does not open the circuit for deterministic configuration errors", () => {

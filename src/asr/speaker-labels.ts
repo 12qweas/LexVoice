@@ -17,7 +17,7 @@ export function friendlySpeakerLabel(raw, map) {
   const key = String(raw == null ? "" : raw).trim();
   if (!key) return "";
   if (map.has(key)) return map.get(key);
-  const generic = /^(?:speaker|spk|s)[\s_-]*\d+$/i.test(key) || /^\d+$/.test(key);
+  const generic = /^(?:speaker|spk|s)[\s_-]*\d+$/i.test(key) || /^\d+$/.test(key) || /^[A-Z]$/.test(key);
   const friendly = generic ? `说话人${map.size + 1}` : key;
   map.set(key, friendly);
   return friendly;

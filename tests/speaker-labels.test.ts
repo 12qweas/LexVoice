@@ -17,6 +17,8 @@ describe("friendlySpeakerLabel", () => {
   });
   it("命名说话人原样保留", () => {
     const m = new Map();
+    expect(friendlySpeakerLabel("A", m)).toBe("说话人1");
+    expect(friendlySpeakerLabel("B", m)).toBe("说话人2");
     expect(friendlySpeakerLabel("Alice", m)).toBe("Alice");
     expect(friendlySpeakerLabel("面试官", m)).toBe("面试官");
   });
