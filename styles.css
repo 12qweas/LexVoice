@@ -10872,6 +10872,34 @@ select.lexvoice-rcx-in.dropdown {
   flex: 0 0 auto;
 }
 
+.lexvoice-outline-head-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--size-2-1);
+  flex: 0 0 auto;
+}
+
+.lexvoice-outline-ai-head.is-utility .lexvoice-outline-canvas-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-4-6);
+  height: var(--size-4-6);
+  padding: 0;
+  border-radius: var(--radius-s);
+  color: var(--text-muted);
+}
+
+.lexvoice-outline-ai-head.is-utility .lexvoice-outline-canvas-btn:hover {
+  color: var(--text-accent);
+  background: var(--background-modifier-hover);
+}
+
+.lexvoice-outline-canvas-btn.is-canvas-loading svg {
+  animation: lexvoice-spin 1s linear infinite;
+}
+
 .lexvoice-time-link {
   border: 0;
   background: transparent;

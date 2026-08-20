@@ -11,6 +11,7 @@
     "src/shared/defaults.ts",
     "src/report-templates.ts",
     "src/outline-text.ts",
+    "src/canvas/semantic-outline-canvas.ts",
     "src/shared/settings-runtime-deps.ts",
     "src/shared/settings-io.ts",
     "src/shared/version.ts",

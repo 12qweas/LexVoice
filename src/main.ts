@@ -5,6 +5,7 @@ import * as obsidian from "obsidian";
 // 这里 import 回来，保持原有调用点用裸名引用不变。
 import { normalizeRealtimeOutlineList, parseRecruitRealtimeOutlineProtocol, buildRecruitRealtimeOutlineFallback, buildRecruitRealtimeOutlineMemory, advanceRealtimeOutlineCursor, hashRealtimeOutlineText, getRealtimeOutlineAnchorTime, cleanRealtimeOutlineItemText, makeRealtimeOutlineNode, parseRealtimeOutlineStateFromMarkdown, selectIncrementalRealtimeOutlineSegments, repairRealtimeOutlineAnchors, mergeStableRealtimeOutlineNodes, normalizeOutlineMarkdownForDisplay, validateRealtimeOutlineMarkdown, mergeCoverageNoRegress, deriveFollowupCards, findLowEvidenceEntities, sanitizeProjectFolderName, recolorReportHtml, desensitizeResumeText } from "./outline-text";
 import { drainRealtimeOutlineBacklog } from "./outline-finalizer";
+import { buildSemanticOutlinePrompt, parseSemanticOutlineGraph, buildSemanticCanvasDocument, normalizeJsonCanvasDocument, getSemanticCanvasPath, extractSemanticSourceSections } from "./canvas/semantic-outline-canvas";
 import { LexVoiceSettingTab } from "./ui/settings-tab";
 import { getDesktopModule, getDesktopProcess } from "./shared/desktop-runtime";
 import { pickReportAccentColor, AudioTimeModal, PeopleDirectorySuggestionModal, SpeakerNameConfirmModal, QueueModal, VirtualCableSetupModal, RecruitContextModal, ImportTextModal, ImportAudioModal, AudioImportOptionsModal, BubbleWidget } from "./ui/modals";
@@ -7168,6 +7169,7 @@ class OutlineView extends obsidian.ItemView {
     this.sedimentScanToken = 0;
     this.sedimentLastUndo = null;
     this.noteAskByPath = {};
+    this.semanticCanvasRunningPaths = new Set();
   }
   getViewType() { return VIEW_TYPE_OUTLINE; }
   getDisplayText() { return "LexVoice 实时纪要"; }
@@ -10559,6 +10561,108 @@ class OutlineView extends obsidian.ItemView {
     if (file instanceof obsidian.TFile) await this.app.workspace.getLeaf(false).openFile(file);
   }
 
+  renderSemanticCanvasButton(parent, file, outlineMarkdown) {
+    if (!(file instanceof obsidian.TFile)) return null;
+    const nodes = parseRealtimeOutlineStateFromMarkdown(outlineMarkdown);
+    if (!nodes.length) return null;
+    const running = this.semanticCanvasRunningPaths.has(file.path);
+    const button = parent.createEl("button", {
+      cls: `lexvoice-outline-canvas-btn${running ? " is-canvas-loading" : ""}`,
+      attr: {
+        type: "button",
+        title: running ? "正在生成语义 Canvas" : "生成或更新语义 Canvas",
+        "aria-label": running ? "正在生成语义 Canvas" : "生成或更新语义 Canvas",
+      },
+    });
+    try { obsidian.setIcon(button, running ? "loader-2" : "network"); } catch { button.setText("Canvas"); }
+    button.disabled = running;
+    button.onclick = () => void this.generateSemanticCanvas(file, outlineMarkdown);
+    return button;
+  }
+
+  async generateSemanticCanvas(sourceFile, outlineMarkdown) {
+    if (!(sourceFile instanceof obsidian.TFile) || this.semanticCanvasRunningPaths.has(sourceFile.path)) return;
+    const outlineNodes = parseRealtimeOutlineStateFromMarkdown(outlineMarkdown);
+    if (outlineNodes.length < 2) {
+      new obsidian.Notice("当前大纲内容太少，暂时无法生成语义图。", 5000);
+      return;
+    }
+    const llmIssue = getLlmConfigIssue(this.plugin.settings);
+    if (llmIssue) {
+      new obsidian.Notice(`生成语义图前需要先完成大模型配置：${formatLlmConfigIssue(llmIssue)}`, 9000);
+      return;
+    }
+
+    this.semanticCanvasRunningPaths.add(sourceFile.path);
+    this.render();
+    try {
+      const sourceMarkdown = await this.app.vault.cachedRead(sourceFile);
+      const sourceSections = extractSemanticSourceSections(sourceMarkdown);
+      const prompt = buildSemanticOutlinePrompt(sourceFile.basename, outlineNodes, sourceSections);
+      const raw = await callLlm(this.plugin, prompt.system, prompt.user, {
+        timeoutMs: 120000,
+        payload: { max_tokens: 5600 },
+        priority: "user",
+        thinkingMode: "fast",
+      });
+      const graph = parseSemanticOutlineGraph(raw, outlineNodes, sourceSections);
+      if (!graph) throw new Error("模型没有返回可用的语义关系结构");
+
+      const canvasPath = obsidian.normalizePath(getSemanticCanvasPath(sourceFile.path));
+      let canvasFile = this.app.vault.getAbstractFileByPath(canvasPath);
+      let existing = null;
+      if (canvasFile instanceof obsidian.TFile) {
+        try {
+          existing = normalizeJsonCanvasDocument(JSON.parse(await this.app.vault.read(canvasFile)));
+        } catch {
+          throw new Error("已有语义 Canvas 文件无法解析，请先检查文件内容");
+        }
+      }
+      const document = buildSemanticCanvasDocument(graph, {
+        sourcePath: sourceFile.path,
+        sourceTitle: sourceFile.basename,
+        sourceSections,
+        existing,
+      });
+      const content = `${JSON.stringify(document, null, 2)}\n`;
+      if (canvasFile instanceof obsidian.TFile) {
+        await this.app.vault.modify(canvasFile, content);
+      } else {
+        try {
+          canvasFile = await this.app.vault.create(canvasPath, content);
+        } catch (error) {
+          const raced = this.app.vault.getAbstractFileByPath(canvasPath);
+          if (!(raced instanceof obsidian.TFile)) throw error;
+          canvasFile = raced;
+          await this.app.vault.modify(canvasFile, content);
+        }
+      }
+      await this.plugin.logDiagnostic("info", "canvas.semantic_generated", "语义 Canvas 已生成", {
+        sourcePath: sourceFile.path,
+        canvasPath,
+        outlineNodeCount: outlineNodes.length,
+        sourceSectionCount: sourceSections.length,
+        branchCount: graph.branches.length,
+        semanticNodeCount: (() => {
+          const count = (nodes) => nodes.reduce((total, node) => total + 1 + count(node.children || []), 0);
+          return count(graph.branches);
+        })(),
+      });
+      if (canvasFile instanceof obsidian.TFile) await this.app.workspace.getLeaf(true).openFile(canvasFile);
+      new obsidian.Notice("语义 Canvas 已生成。", 4000);
+    } catch (error) {
+      console.error("[LexVoice] generate semantic canvas failed", error);
+      await this.plugin.logDiagnostic("warn", "canvas.semantic_failed", "语义 Canvas 生成失败", {
+        sourcePath: sourceFile.path,
+        error: diagnosticError(error),
+      });
+      new obsidian.Notice(`语义 Canvas 生成失败：${(error && error.message) || error}`, 9000);
+    } finally {
+      this.semanticCanvasRunningPaths.delete(sourceFile.path);
+      this.render();
+    }
+  }
+
   renderCompletedNote(root, file) {
     const data = this.getCompletedNotePanelData(file);
     if (data === undefined) {
@@ -10574,6 +10678,13 @@ class OutlineView extends obsidian.ItemView {
     if (data.speakerIds && data.speakerIds.length) this.renderSedimentSpeakerMap(root, file, data);
 
     const outlineSec = root.createDiv({ cls: "lexvoice-outline-section" });
+    const outlineHead = outlineSec.createDiv({ cls: "lexvoice-outline-ai-head is-utility" });
+    const outlineTitle = outlineHead.createDiv({ cls: "lexvoice-outline-source-title" });
+    const outlineIcon = outlineTitle.createSpan({ cls: "lexvoice-outline-source-icon" });
+    try { obsidian.setIcon(outlineIcon, data && data.mode === "recruit" ? "user-check" : "sparkles"); } catch { /* intentionally empty */ }
+    outlineTitle.createSpan({ text: data && data.mode === "recruit" ? "AI 面试大纲" : "AI 整理大纲" });
+    const outlineActions = outlineHead.createDiv({ cls: "lexvoice-outline-head-actions" });
+    if (data.outline) this.renderSemanticCanvasButton(outlineActions, file, data.outline);
     const outlineBody = outlineSec.createDiv({ cls: "lexvoice-outline-ai-body" });
     if (data.outline) {
       const outlineText = normalizeOutlineMarkdownForDisplay(data.outline);
@@ -11822,7 +11933,8 @@ class OutlineView extends obsidian.ItemView {
       cls: `lexvoice-outline-source-badge${coverageIncomplete || degradedBatchCount ? " is-partial" : ""}`,
       text: `${coverageLabel}${degradedBatchCount ? ` · ${degradedBatchCount} 批待复核` : ""}`,
     });
-    const refreshBtn = aiHead.createEl("button", { text: outlineRunning ? "停止等待" : "刷新" });
+    const headActions = aiHead.createDiv({ cls: "lexvoice-outline-head-actions" });
+    const refreshBtn = headActions.createEl("button", { text: outlineRunning ? "停止等待" : "刷新" });
     refreshBtn.disabled = !session || session.segments.length === 0;
     refreshBtn.onclick = () => {
       if (outlineRunning) this.cancelOutlineGeneration();
