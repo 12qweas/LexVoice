@@ -276,42 +276,48 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     });
   }
 
-  // 快速配置：一个 Key 同时配好转写 + AI 整理。把指定供应商的 Key 填进转写 provider 和 LLM 工作配置，并存成一套 API 方案。
-  async applyOneCardProvider(id, key) {
+  // 快速配置：组合服务会同时更新转写和 AI 整理；整文件 ASR 只用于导入音频。
+  async applyOneCardProvider(id, key, options = {}) {
     const cfg = ONE_CARD_PROVIDERS[id];
     if (!cfg) return false;
     const k = String(key || "").trim();
     if (!k) return false;
     const s = this.plugin.settings;
     const providers = s.transcribeProviders || (s.transcribeProviders = {});
-    const endpoint = resolveOneCardProviderEndpoint(cfg, k);
-    // 转写：填 Key + 恢复该 provider 的推荐地址/模型/协议 + 设为当前转写服务
-    const dft = DEFAULT_SETTINGS.transcribeProviders[cfg.asrProvider] || {};
-    const cur = providers[cfg.asrProvider] || {};
-    providers[cfg.asrProvider] = Object.assign({}, cur, {
-      name: cur.name || dft.name,
-      endpoint: cfg.asrEndpoint || endpoint || dft.endpoint || cur.endpoint || "",
-      model: dft.model || cur.model || "",
-      language: cur.language || dft.language || "auto",
-      protocol: dft.protocol || cur.protocol,
-      apiKey: k,
-    });
-    s.activeTranscribeProvider = cfg.asrProvider;
+    const customLlmEndpoint = String(options.llmEndpoint || options.endpoint || "").trim();
+    const llmEndpoint = customLlmEndpoint || resolveOneCardProviderEndpoint(cfg, k);
+    if (cfg.asrProvider) {
+      const dft = DEFAULT_SETTINGS.transcribeProviders[cfg.asrProvider] || {};
+      const cur = providers[cfg.asrProvider] || {};
+      const asrModel = String(options.asrModel || cfg.asrModel || dft.model || cur.model || "").trim();
+      providers[cfg.asrProvider] = Object.assign({}, cur, {
+        name: cur.name || dft.name,
+        endpoint: cfg.asrEndpoint || dft.endpoint || cur.endpoint || llmEndpoint || "",
+        model: asrModel,
+        language: cur.language || dft.language || "auto",
+        protocol: dft.protocol || cur.protocol,
+        apiKey: k,
+      });
+      if (cfg.asrTarget === "import") s.importTranscribeProvider = cfg.asrProvider;
+      else s.activeTranscribeProvider = cfg.asrProvider;
+    }
     // AI 整理（LLM）：套预设 + 填 Key + 模型
     s.llmServicePreset = cfg.llmPreset;
-    s.llmEndpoint = endpoint || cfg.llmEndpoint;
-    if (cfg.llmModel) s.llmModel = cfg.llmModel;
+    s.llmEndpoint = llmEndpoint || cfg.llmEndpoint;
+    const customModel = String(options.llmModel || options.model || "").trim();
+    if (customModel || cfg.llmModel) s.llmModel = customModel || cfg.llmModel;
     s.llmApiKey = k;
     // 自动存成一套完整 API 方案（带转写快照），出现在 API 页顶部可一键重选；同名方案就地覆盖、不重复堆叠
     const schemeName = cfg.label;
     const profiles = normalizeLlmProfiles(s.llmProfiles);
-    const asrSnap = snapshotActiveAsr(s);
+    const asrSnap = cfg.asrProvider && cfg.asrTarget !== "import" ? snapshotActiveAsr(s) : null;
     const existing = profiles.find(p => p.name === schemeName);
     if (existing) {
       existing.endpoint = s.llmEndpoint || "";
       existing.apiKey = k;
       existing.model = s.llmModel || "";
       if (asrSnap) existing.asr = asrSnap;
+      else delete existing.asr;
       s.activeLlmProfile = existing.id;
     } else {
       const newId = `llm-${genId()}`;
@@ -434,17 +440,26 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     const panelBtn = primary.createEl("button", { text: "打开 LexVoice 侧边栏" });
     panelBtn.onclick = () => this.plugin.openOutlineView();
 
-    // 快速配置：MiMo / 硅基流动等"一个 Key 同时跑转写 + AI 整理"的供应商，填一次即可两边都配好。
+    // 快速配置：百炼分别选择导入音频 ASR 与 AI 整理模型。
     const oneCard = page.createDiv({ cls: "lexvoice-home-block lexvoice-home-onecard" });
     oneCard.createEl("h3", { text: "快速设置" });
-    oneCard.createDiv({ cls: "lexvoice-home-prep-desc", text: "选择服务商并填写 API Key，可同时配置转写和 AI 整理。" });
+    oneCard.createDiv({ cls: "lexvoice-home-prep-desc", text: "选择常用服务并填写 API Key。百炼可分别配置导入音频 ASR 和 AI 整理模型。" });
     let oneCardProviderId = "mimo";
     let oneCardKey = "";
+    let oneCardEndpoint = ONE_CARD_PROVIDERS.bailian.llmEndpoint;
+    let oneCardAsrModel = ONE_CARD_PROVIDERS.bailian.asrModel;
+    let oneCardAiModel = "";
+    let bailianAsrModelInput;
+    let bailianAiModelInput;
+    let bailianFields;
+    const updateOneCardFields = () => {
+      if (bailianFields) bailianFields.hidden = oneCardProviderId !== "bailian";
+    };
     const oneCardRow = new obsidian.Setting(oneCard).setName("服务商与 API Key");
     oneCardRow.addDropdown(d => {
       for (const id of Object.keys(ONE_CARD_PROVIDERS)) d.addOption(id, ONE_CARD_PROVIDERS[id].label);
       d.setValue(oneCardProviderId);
-      d.onChange(v => { oneCardProviderId = v; });
+      d.onChange(v => { oneCardProviderId = v; updateOneCardFields(); });
     });
     oneCardRow.addText(t => {
       t.inputEl.type = "password";
@@ -454,19 +469,146 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     oneCardRow.addButton(b => b.setButtonText("应用").setCta().onClick(async () => {
       if (!oneCardKey) { new obsidian.Notice("请先填写 API Key", 4000); return; }
       const cfg = ONE_CARD_PROVIDERS[oneCardProviderId];
-      const done = await this.applyOneCardProvider(oneCardProviderId, oneCardKey);
+      if (oneCardProviderId === "bailian" && (!oneCardAsrModel || !oneCardAiModel)) {
+        new obsidian.Notice("请先选择 ASR 模型和 AI 整理模型", 5000);
+        return;
+      }
+      const done = await this.applyOneCardProvider(oneCardProviderId, oneCardKey, {
+        llmEndpoint: oneCardProviderId === "bailian" ? oneCardEndpoint : "",
+        asrModel: oneCardProviderId === "bailian" ? oneCardAsrModel : "",
+        llmModel: oneCardProviderId === "bailian" ? oneCardAiModel : "",
+      });
       if (done) {
         new obsidian.Notice(cfg.applyDesc + " 已保存，可在「API」页切换或测试连接。", 8000);
         this.renderSettings();
       }
     }));
-    // 检测：测当前转写 + 大模型连通性
     oneCardRow.addButton(b => b.setButtonText("检测").onClick(async () => {
       b.setDisabled(true); b.setButtonText("检测中…");
-      new obsidian.Notice("正在检测转写 + 大模型连通性…", 4000);
-      try { new obsidian.Notice(await this.runComboConnectivityTest(), 9000); }
+      try {
+        if (oneCardProviderId === "bailian") {
+          if (!oneCardKey || !oneCardEndpoint || !oneCardAsrModel || !oneCardAiModel) {
+            new obsidian.Notice("请先填写百炼 API Key、服务地址并选择两个模型", 5000);
+            return;
+          }
+          const probePlugin = Object.create(this.plugin);
+          const currentProviders = this.plugin.settings.transcribeProviders || {};
+          const asrDefaults = DEFAULT_SETTINGS.transcribeProviders["dashscope-filetrans"] || {};
+          probePlugin.settings = Object.assign({}, this.plugin.settings, {
+            importTranscribeProvider: "dashscope-filetrans",
+            transcribeProviders: Object.assign({}, currentProviders, {
+              "dashscope-filetrans": Object.assign({}, currentProviders["dashscope-filetrans"] || {}, asrDefaults, {
+                apiKey: oneCardKey,
+                model: oneCardAsrModel,
+              }),
+            }),
+            llmServicePreset: "dashscope",
+            llmEndpoint: oneCardEndpoint,
+            llmApiKey: oneCardKey,
+            llmModel: oneCardAiModel,
+          });
+          new obsidian.Notice("正在检测百炼 ASR 和 AI 整理服务…", 4000);
+          const asrResult = await testImportTranscribeProvider(probePlugin, "dashscope-filetrans");
+          const llmResult = await testLlmConnection(probePlugin);
+          new obsidian.Notice(`连接正常：ASR ${asrResult.model} · AI ${llmResult.model || oneCardAiModel}`, 7000);
+        } else {
+          new obsidian.Notice("正在检测转写 + 大模型连通性…", 4000);
+          new obsidian.Notice(await this.runComboConnectivityTest(), 9000);
+        }
+      } catch (error) {
+        new obsidian.Notice(`连接失败：${(error && error.message) || error}`, 8000);
+      }
       finally { b.setDisabled(false); b.setButtonText("检测"); }
     }));
+
+    bailianFields = oneCard.createDiv({ cls: "lexvoice-home-onecard-extra" });
+    new obsidian.Setting(bailianFields)
+      .setName("百炼服务地址")
+      .setDesc("可使用默认地址，也可粘贴业务空间的 OpenAI 兼容地址。")
+      .addText(text => {
+        text.setValue(oneCardEndpoint)
+          .setPlaceholder("https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1")
+          .onChange(value => { oneCardEndpoint = value.trim(); });
+      });
+    new obsidian.Setting(bailianFields)
+      .setName("ASR 模型")
+      .setDesc("用于导入音频转写和说话人分离。")
+      .addText(text => {
+        bailianAsrModelInput = text;
+        text.setValue(oneCardAsrModel)
+          .setPlaceholder("fun-asr")
+          .onChange(value => { oneCardAsrModel = value.trim(); });
+      })
+      .addButton(button => button.setButtonText("获取模型").onClick(async () => {
+        if (!oneCardKey) {
+          new obsidian.Notice("请先填写百炼 API Key", 5000);
+          return;
+        }
+        button.setDisabled(true);
+        button.setButtonText("获取中…");
+        try {
+          const probePlugin = Object.create(this.plugin);
+          const currentProviders = this.plugin.settings.transcribeProviders || {};
+          const asrDefaults = DEFAULT_SETTINGS.transcribeProviders["dashscope-filetrans"] || {};
+          probePlugin.settings = Object.assign({}, this.plugin.settings, {
+            importTranscribeProvider: "dashscope-filetrans",
+            transcribeProviders: Object.assign({}, currentProviders, {
+              "dashscope-filetrans": Object.assign({}, currentProviders["dashscope-filetrans"] || {}, asrDefaults, {
+                apiKey: oneCardKey,
+                model: oneCardAsrModel,
+              }),
+            }),
+          });
+          const models = await fetchImportTranscribeModels(probePlugin, "dashscope-filetrans");
+          if (!models.length) {
+            new obsidian.Notice("百炼未返回 ASR 模型列表，请手动填写模型名称。", 6000);
+            return;
+          }
+          openLexVoicePickListModal(this.app, `选择 ASR 模型（共 ${models.length} 个）`, models, model => {
+            oneCardAsrModel = model;
+            if (bailianAsrModelInput) bailianAsrModelInput.setValue(model);
+          });
+        } catch (error) {
+          new obsidian.Notice(`获取 ASR 模型失败：${(error && error.message) || error}。可手动填写模型名称。`, 8000);
+        } finally {
+          button.setDisabled(false);
+          button.setButtonText("获取模型");
+        }
+      }));
+    new obsidian.Setting(bailianFields)
+      .setName("AI 整理模型")
+      .setDesc("用于根据转写原文生成最终纪要。")
+      .addText(text => {
+        bailianAiModelInput = text;
+        text.setValue(oneCardAiModel)
+          .setPlaceholder("获取模型或填写模型名称")
+          .onChange(value => { oneCardAiModel = value.trim(); });
+      })
+      .addButton(button => button.setButtonText("获取模型").onClick(async () => {
+        if (!oneCardKey || !oneCardEndpoint) {
+          new obsidian.Notice("请先填写百炼 API Key 和服务地址", 5000);
+          return;
+        }
+        button.setDisabled(true);
+        button.setButtonText("获取中…");
+        try {
+          const models = await fetchLlmModelList(oneCardEndpoint, oneCardKey);
+          if (!models.length) {
+            new obsidian.Notice("百炼未返回 AI 模型列表，请手动填写模型名称。", 6000);
+            return;
+          }
+          openLexVoicePickListModal(this.app, `选择 AI 整理模型（共 ${models.length} 个）`, models, model => {
+            oneCardAiModel = model;
+            if (bailianAiModelInput) bailianAiModelInput.setValue(model);
+          });
+        } catch (error) {
+          new obsidian.Notice(`获取 AI 模型失败：${(error && error.message) || error}。可手动填写模型名称。`, 8000);
+        } finally {
+          button.setDisabled(false);
+          button.setButtonText("获取模型");
+        }
+      }));
+    updateOneCardFields();
 
     const prep = page.createDiv({ cls: "lexvoice-home-block" });
     prep.createEl("h3", { text: "使用准备" });

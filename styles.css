@@ -587,14 +587,14 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   color: var(--interactive-accent);
 }
 .lexvoice-progress-state.is-slow,
+.lexvoice-progress-state.is-stalled,
 .lexvoice-progress-state.is-retrying {
   color: var(--text-warning, var(--color-orange));
 }
-.lexvoice-progress-state.is-stalled,
 .lexvoice-progress-state.is-failed {
   color: var(--text-error);
 }
-.lexvoice-progress-state.is-active:is(.is-running, .is-waiting, .is-slow, .is-retrying)::after {
+.lexvoice-progress-state.is-active:is(.is-running, .is-waiting, .is-slow, .is-stalled, .is-retrying)::after {
   content: "";
   display: inline-block;
   width: 1.25em;
@@ -620,10 +620,10 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .lexvoice-progress-bar-fill.is-slow,
+.lexvoice-progress-bar-fill.is-stalled,
 .lexvoice-progress-bar-fill.is-retrying {
   background: var(--text-warning, var(--color-orange));
 }
-.lexvoice-progress-bar-fill.is-stalled,
 .lexvoice-progress-bar-fill.is-failed {
   background: var(--text-error);
 }
@@ -689,11 +689,11 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   background: var(--background-primary);
   overflow: clip;
 }
-.lexvoice-progress-activity.is-failed,
-.lexvoice-progress-activity.is-stalled {
+.lexvoice-progress-activity.is-failed {
   border-color: color-mix(in srgb, var(--text-error) 38%, var(--background-modifier-border));
 }
 .lexvoice-progress-activity.is-slow,
+.lexvoice-progress-activity.is-stalled,
 .lexvoice-progress-activity.is-retrying {
   border-color: color-mix(
     in srgb,
@@ -741,11 +741,11 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   color: var(--text-warning, var(--color-orange));
   animation: lexvoice-progress-spin 1.2s linear infinite;
 }
-.lexvoice-progress-activity-icon.is-slow {
+.lexvoice-progress-activity-icon.is-slow,
+.lexvoice-progress-activity-icon.is-stalled {
   color: var(--text-warning, var(--color-orange));
 }
-.lexvoice-progress-activity-icon.is-failed,
-.lexvoice-progress-activity-icon.is-stalled {
+.lexvoice-progress-activity-icon.is-failed {
   color: var(--text-error);
 }
 .lexvoice-progress-activity-icon.is-done {
@@ -786,11 +786,11 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   color: var(--text-accent);
 }
 .lexvoice-progress-activity-state.is-slow,
+.lexvoice-progress-activity-state.is-stalled,
 .lexvoice-progress-activity-state.is-retrying {
   color: var(--text-warning, var(--color-orange));
 }
-.lexvoice-progress-activity-state.is-failed,
-.lexvoice-progress-activity-state.is-stalled {
+.lexvoice-progress-activity-state.is-failed {
   color: var(--text-error);
 }
 .lexvoice-progress-activity-state.is-done {
@@ -819,11 +819,11 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   transition: width 0.35s ease;
 }
 .lexvoice-progress-activity-progress.is-slow .lexvoice-progress-activity-progress-fill,
+.lexvoice-progress-activity-progress.is-stalled .lexvoice-progress-activity-progress-fill,
 .lexvoice-progress-activity-progress.is-retrying .lexvoice-progress-activity-progress-fill {
   background: var(--text-warning, var(--color-orange));
 }
-.lexvoice-progress-activity-progress.is-failed .lexvoice-progress-activity-progress-fill,
-.lexvoice-progress-activity-progress.is-stalled .lexvoice-progress-activity-progress-fill {
+.lexvoice-progress-activity-progress.is-failed .lexvoice-progress-activity-progress-fill {
   background: var(--text-error);
 }
 .lexvoice-progress-activity-progress-label {
@@ -975,6 +975,7 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   text-overflow: ellipsis;
 }
 .lexvoice-progress-spinner.is-slow,
+.lexvoice-progress-spinner.is-stalled,
 .lexvoice-progress-spinner.is-retrying {
   border-color: color-mix(in srgb, var(--text-warning, var(--color-orange)) 24%, transparent);
   border-top-color: var(--text-warning, var(--color-orange));
@@ -991,7 +992,6 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   width: 18px;
   height: 18px;
 }
-.lexvoice-progress-task-state.is-stalled,
 .lexvoice-progress-task-state.is-failed {
   color: var(--text-error);
 }
@@ -1063,12 +1063,12 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 12%, transparent);
 }
 .lexvoice-progress-stage.is-slow .lexvoice-progress-stage-marker,
+.lexvoice-progress-stage.is-stalled .lexvoice-progress-stage-marker,
 .lexvoice-progress-stage.is-retrying .lexvoice-progress-stage-marker {
   border-color: var(--text-warning, var(--color-orange));
   color: var(--text-warning, var(--color-orange));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-warning, var(--color-orange)) 12%, transparent);
 }
-.lexvoice-progress-stage.is-stalled .lexvoice-progress-stage-marker,
 .lexvoice-progress-stage.is-failed .lexvoice-progress-stage-marker {
   border-color: var(--text-error);
   color: var(--text-error);
@@ -1124,14 +1124,14 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   color: var(--text-accent);
 }
 .lexvoice-progress-stage-state.is-slow,
+.lexvoice-progress-stage-state.is-stalled,
 .lexvoice-progress-stage-state.is-retrying,
 .lexvoice-progress-request-state.is-slow,
+.lexvoice-progress-request-state.is-stalled,
 .lexvoice-progress-request-state.is-retrying {
   color: var(--text-warning, var(--color-orange));
 }
-.lexvoice-progress-stage-state.is-stalled,
 .lexvoice-progress-stage-state.is-failed,
-.lexvoice-progress-request-state.is-stalled,
 .lexvoice-progress-request-state.is-failed {
   color: var(--text-error);
 }
@@ -1181,11 +1181,11 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   border-radius: var(--radius-s);
   background: var(--background-primary);
 }
-.lexvoice-progress-request.is-stalled,
 .lexvoice-progress-request.is-failed {
   box-shadow: inset 2px 0 0 var(--text-error);
 }
 .lexvoice-progress-request.is-slow,
+.lexvoice-progress-request.is-stalled,
 .lexvoice-progress-request.is-retrying {
   box-shadow: inset 2px 0 0 var(--text-warning, var(--color-orange));
 }
@@ -1265,10 +1265,10 @@ body .lexvoice-bubble-wrap .lexvoice-bubble button.lexvoice-bubble-btn.is-stop-i
   height: 15px;
 }
 .lexvoice-progress-live.is-slow .lexvoice-progress-live-icon,
+.lexvoice-progress-live.is-stalled .lexvoice-progress-live-icon,
 .lexvoice-progress-live.is-retrying .lexvoice-progress-live-icon {
   color: var(--text-warning, var(--color-orange));
 }
-.lexvoice-progress-live.is-stalled .lexvoice-progress-live-icon,
 .lexvoice-progress-live.is-failed .lexvoice-progress-live-icon {
   color: var(--text-error);
 }
@@ -10280,6 +10280,7 @@ select.lexvoice-rcx-in.dropdown {
   --lex-bg-base: var(--background-primary);
   --lex-bg-card: var(--background-primary-alt, var(--background-primary));
   --lex-bg-muted: var(--background-secondary);
+  --lex-sidebar-surface: var(--background-secondary);
   --lex-bg-hover: var(--background-modifier-hover);
   --lex-bg-active: color-mix(in srgb, var(--interactive-accent) 11%, var(--background-primary));
   --lex-bg-playing: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-primary));
@@ -13359,6 +13360,7 @@ select.lexvoice-rcx-in.dropdown {
 .lexvoice-kanban-view {
   --lexvoice-kanban-gap: 14px;
   --lexvoice-kanban-column-width: 262px;
+  --lexvoice-kanban-column-min-width: 196px;
   --lex-bg-base: var(--background-primary);
   --lex-bg-card: var(--background-primary-alt, var(--background-primary));
   --lex-bg-muted: var(--background-secondary);
@@ -13372,6 +13374,9 @@ select.lexvoice-rcx-in.dropdown {
   --lex-text-tertiary: var(--text-faint);
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
   height: 100%;
   overflow-x: hidden;
   overflow-y: auto;
@@ -13618,6 +13623,9 @@ select.lexvoice-rcx-in.dropdown {
   flex: 0 0 auto;
   align-items: flex-start;
   gap: var(--lexvoice-kanban-gap);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
   height: auto;
   min-height: 0;
   margin-top: 18px;
@@ -13629,11 +13637,11 @@ select.lexvoice-rcx-in.dropdown {
 
 .lexvoice-kanban-column {
   display: flex;
-  flex: 0 0 var(--lexvoice-kanban-column-width);
+  flex: 1 1 var(--lexvoice-kanban-column-width);
   flex-direction: column;
-  width: var(--lexvoice-kanban-column-width);
-  min-width: var(--lexvoice-kanban-column-width);
-  max-width: var(--lexvoice-kanban-column-width);
+  width: auto;
+  min-width: var(--lexvoice-kanban-column-min-width);
+  max-width: none;
   min-height: 0;
   border: 1px solid var(--lex-border-line);
   border-radius: 14px;
@@ -13823,6 +13831,7 @@ select.lexvoice-rcx-in.dropdown {
 @media (max-width: 600px) {
   .lexvoice-kanban-view {
     --lexvoice-kanban-column-width: min(82vw, 300px);
+    --lexvoice-kanban-column-min-width: min(82vw, 300px);
     padding: 16px 12px 12px;
   }
 
@@ -13857,7 +13866,7 @@ select.lexvoice-rcx-in.dropdown {
   min-height: 100%;
   padding: 0;
   gap: 0;
-  background: var(--background-primary);
+  background: var(--lex-sidebar-surface);
 }
 
 .lexvoice-outline-sticky-chrome {
@@ -13868,7 +13877,7 @@ select.lexvoice-rcx-in.dropdown {
   flex: 0 0 auto;
   flex-direction: column;
   min-width: 0;
-  background: var(--background-primary);
+  background: var(--lex-sidebar-surface);
   isolation: isolate;
 }
 
@@ -13880,7 +13889,7 @@ select.lexvoice-rcx-in.dropdown {
   left: 0;
   z-index: 0;
   height: 100vh;
-  background: var(--background-primary);
+  background: var(--lex-sidebar-surface);
   pointer-events: none;
 }
 

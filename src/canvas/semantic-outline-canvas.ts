@@ -132,7 +132,7 @@ export interface BuildSemanticCanvasOptions {
 
 const MANAGED_NODE_PREFIX = "lexvoice-semantic-node-";
 const MANAGED_EDGE_PREFIX = "lexvoice-semantic-edge-";
-const SEMANTIC_LAYOUT_VERSION = 9;
+const SEMANTIC_LAYOUT_VERSION = 10;
 const SEMANTIC_LAYOUT_MARKER = `<!-- lexvoice-semantic-layout:${SEMANTIC_LAYOUT_VERSION} -->`;
 const DEFAULT_MAX_SEMANTIC_DEPTH = 5;
 const DEFAULT_MAX_SEMANTIC_NODES = 34;
@@ -571,6 +571,19 @@ export function normalizeJsonCanvasDocument(value: unknown): JsonCanvasDocument 
   return normalized;
 }
 
+export function semanticCanvasNeedsRelayout(document: JsonCanvasDocument): boolean {
+  if (!document.lexvoiceSemantic?.graph) return false;
+  const managedNodes = document.nodes.filter((node) => {
+    const id = textValue(recordValue(node).id, 200);
+    return id.startsWith(MANAGED_NODE_PREFIX);
+  });
+  if (managedNodes.length === 0) return true;
+  return managedNodes.some((node) => {
+    const meta = recordValue(recordValue(node).lexvoiceSemantic);
+    return Number(meta.layoutVersion) !== SEMANTIC_LAYOUT_VERSION;
+  });
+}
+
 function hasCurrentLayoutMarker(text: string): boolean {
   return text.includes(SEMANTIC_LAYOUT_MARKER);
 }
@@ -745,6 +758,7 @@ export function buildSemanticCanvasDocument(
   keyToNodeId.set("core", coreId);
   const horizontalGap = 100;
   const verticalGap = 28;
+  const groupLabelClearance = 38;
   const coreText = nodeText(
     "core",
     "#",
@@ -818,7 +832,7 @@ export function buildSemanticCanvasDocument(
         + Math.max(0, groupRowHeights.length - 1) * groupGap
       : 0;
     const childBlockHeight = canGroup
-      ? groupHeight
+      ? groupHeight + groupLabelClearance
       : children.reduce((sum, child) => sum + child.subtreeHeight, 0)
         + Math.max(0, children.length - 1) * verticalGap;
     return {
@@ -843,6 +857,10 @@ export function buildSemanticCanvasDocument(
     };
   };
   const branchLayouts = effectiveGraph.branches.map((branch) => buildTreeLayout(branch, 1));
+  const countLayoutNodes = (layout: TreeLayout): number => 1
+    + layout.children.reduce((sum, child) => sum + countLayoutNodes(child), 0);
+  const semanticNodeCount = branchLayouts.reduce((sum, branch) => sum + countLayoutNodes(branch), 1);
+  const denseGraph = semanticNodeCount > 32;
   const coreWidth = widthForDepth(0);
   const coreHeight = estimateNodeHeight(coreText, coreWidth, 190, 330);
   const combinedBranchHeight = branchLayouts.reduce((sum, branch) => sum + branch.subtreeHeight, 0)
@@ -875,6 +893,7 @@ export function buildSemanticCanvasDocument(
     color?: string,
     relation: SemanticRelation = "hierarchy",
     side: LayoutSide = "right",
+    showRelationLabel = true,
   ) => {
     const fromNode = keyToNodeId.get(parentKey);
     const toNode = keyToNodeId.get(childKey);
@@ -886,9 +905,11 @@ export function buildSemanticCanvasDocument(
       fromSide: side,
       toSide: side === "right" ? "left" : "right",
     };
-    if (relation === "causal") edge.label = "导致";
-    else if (relation === "contrast") edge.label = "对照";
-    else if (relation === "sequence") edge.label = "随后";
+    if (showRelationLabel) {
+      if (relation === "causal") edge.label = "导致";
+      else if (relation === "contrast") edge.label = "对照";
+      else if (relation === "sequence") edge.label = "随后";
+    }
     if (color) edge.color = color;
     managedEdges.push(edge);
   };
@@ -899,7 +920,6 @@ export function buildSemanticCanvasDocument(
     top: number,
     parentKey: string,
     branchColor: string,
-    parentRelation: SemanticRelation = "hierarchy",
     side: LayoutSide = "right",
   ) => {
     const id = managedNodeId(options.sourcePath, `node:${layout.key}`);
@@ -924,14 +944,22 @@ export function buildSemanticCanvasDocument(
       Boolean(options.forceRelayout),
       depth === 1 ? branchColor : undefined,
     ));
-    addEdge(parentKey, layout.key, depth === 1 ? branchColor : undefined, parentRelation, side);
+    addEdge(
+      parentKey,
+      layout.key,
+      depth === 1 ? branchColor : undefined,
+      layout.relation,
+      side,
+      !denseGraph || depth <= 2,
+    );
     if (layout.visualLayout === "group") {
       const groupKey = `group:${layout.key}`;
       const groupId = managedNodeId(options.sourcePath, groupKey);
       const groupX = side === "right"
         ? x + layout.width + horizontalGap
         : x - horizontalGap - layout.groupWidth;
-      const groupTop = top + (layout.subtreeHeight - layout.groupHeight) / 2;
+      const groupBlockTop = top + (layout.subtreeHeight - layout.childBlockHeight) / 2;
+      const groupTop = groupBlockTop + groupLabelClearance;
       keyToNodeId.set(groupKey, groupId);
       managedNodes.push(makeGroupNode(
         groupId,
@@ -953,7 +981,7 @@ export function buildSemanticCanvasDocument(
         ),
         Boolean(options.forceRelayout),
       ));
-      addEdge(layout.key, groupKey, branchColor, layout.relation, side);
+      addEdge(layout.key, groupKey, branchColor, "hierarchy", side, false);
       const groupPaddingX = 22;
       const groupPaddingTop = 60;
       const groupGap = 18;
@@ -996,7 +1024,7 @@ export function buildSemanticCanvasDocument(
       const childX = side === "right"
         ? x + layout.width + horizontalGap
         : x - horizontalGap - child.width;
-      placeTree(child, depth + 1, childX, childTop, layout.key, branchColor, layout.relation, side);
+      placeTree(child, depth + 1, childX, childTop, layout.key, branchColor, side);
       childTop += child.subtreeHeight + verticalGap;
     }
   };
@@ -1024,7 +1052,7 @@ export function buildSemanticCanvasDocument(
       const branchX = side === "right"
         ? coreX + coreWidth + horizontalGap
         : coreX - horizontalGap - branch.layout.width;
-      placeTree(branch.layout, 1, branchX, branchTop, "core", branchColor, "hierarchy", side);
+      placeTree(branch.layout, 1, branchX, branchTop, "core", branchColor, side);
       branchTop += branch.layout.subtreeHeight + verticalGap;
     }
   };

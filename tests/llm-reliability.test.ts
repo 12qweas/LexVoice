@@ -4,7 +4,7 @@ vi.mock("obsidian", () => ({
   requestUrl: vi.fn(),
 }));
 
-import { callLlmWithContinuation, fetchLlmModelList, getLlmConfigIssue, getNextLlmOutputBudget, isLlmContextLimitError, isLlmOutputBudgetError, isLlmOutputParameterError, isTransientLlmError, readLlmSseStream, requestLlmChatCompletion, requestLlmChatCompletionViaObsidian } from "../src/llm/core";
+import { callLlmWithContinuation, fetchLlmModelList, getLlmConfigIssue, getNextLlmOutputBudget, isLlmContextLimitError, isLlmOutputBudgetError, isLlmOutputParameterError, isTransientLlmError, readLlmSseStream, requestLlmChatCompletion, requestLlmChatCompletionViaObsidian, resolveLlmModelListEndpoint } from "../src/llm/core";
 import { applyLearnedLlmCapability, getEffectiveLlmOutputBudget, getLearnedLlmOutputCeiling, getLearnedLlmOutputParameter, rememberLlmOutputCeiling, resetLearnedLlmCapabilities } from "../src/llm/output-budget";
 import { DashScopeStreamingClient, OpenAIRealtimeTranscriptionClient, OpenAIRealtimeTranslationClient } from "../src/asr/clients";
 import { assertSafeServiceEndpoint, canOmitServiceApiKey, getServiceEndpointSecurityIssue, isLocalLlmEndpoint, isSharedAddressSpaceHost } from "../src/shared/util-llm-endpoint";
@@ -132,6 +132,20 @@ describe("service endpoint transport security", () => {
     for (const client of clients) {
       await expect(client.connect()).rejects.toThrow("公网地址必须使用 WSS");
     }
+  });
+});
+
+describe("LLM 模型列表地址", () => {
+  it("使用百炼模型列表接口而不是兼容对话接口下的 models", () => {
+    expect(resolveLlmModelListEndpoint("https://dashscope.aliyuncs.com/compatible-mode/v1"))
+      .toBe("https://dashscope.aliyuncs.com/api/v1/models");
+    expect(resolveLlmModelListEndpoint("https://workspace-123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"))
+      .toBe("https://workspace-123.cn-beijing.maas.aliyuncs.com/api/v1/models");
+  });
+
+  it("其他 OpenAI 兼容服务仍使用标准 models 地址", () => {
+    expect(resolveLlmModelListEndpoint("https://api.example.com/v1"))
+      .toBe("https://api.example.com/v1/models");
   });
 });
 

@@ -605,7 +605,7 @@ export class QueueModal extends obsidian.Modal {
       .filter((task) => !currentActivityIds.has(String(task.id || "")));
     // 当前处理链由顶部流程展示；这里只保留真正需要用户处理的后台异常，避免同一任务重复展开。
     const visibleTaskActivities = taskActivities.filter((task) => ["failed", "stalled"].includes(String(task.status || "")));
-    const taskProblems = taskActivities.filter((task) => ["failed", "stalled"].includes(String(task.status || "")));
+    const taskProblems = taskActivities.filter((task) => String(task.status || "") === "failed");
     const taskActive = taskActivities.filter((task) => ["queued", "running", "waiting", "slow", "stalled", "retrying"].includes(String(task.status || "")));
     const taskDone = taskActivities.filter((task) => task.status === "done");
     const headLiveness = taskProblems.length
@@ -626,7 +626,7 @@ export class QueueModal extends obsidian.Modal {
       running: "进行中",
       waiting: "等待服务响应",
       slow: "处理中",
-      stalled: "可能卡住",
+      stalled: "仍在处理",
       retrying: "等待重试",
       failed: "已失败",
       cancelled: "已取消",
@@ -638,7 +638,7 @@ export class QueueModal extends obsidian.Modal {
       running: "",
       waiting: "请求已经发出，服务尚未返回结果",
       slow: "请求已经发出，服务正在处理",
-      stalled: "已经超过本阶段的预期截止时间，正在等待超时机制收口",
+      stalled: "本阶段耗时超过预计，任务仍在继续，可关闭窗口在后台等待结果",
       retrying: "本次请求未成功，已按退避规则等待下一次请求",
       failed: "本阶段未得到可用结果",
       cancelled: "任务已由用户取消",
@@ -790,7 +790,7 @@ export class QueueModal extends obsidian.Modal {
       const organizeStage = stageById("organize");
       const writeStage = stageById("write");
       pipelineLiveness.set("prepare", String(stageById("prepare").liveness || ""));
-      pipelineLiveness.set("transcribe", [transcribeStage, persistStage].some((stage) => ["failed", "stalled"].includes(String(stage.liveness || "")))
+      pipelineLiveness.set("transcribe", [transcribeStage, persistStage].some((stage) => String(stage.liveness || "") === "failed")
         ? "failed"
         : String((activeId === "persist" ? persistStage : transcribeStage).liveness || ""));
       pipelineLiveness.set("organize", String(organizeStage.liveness || ""));
@@ -810,7 +810,7 @@ export class QueueModal extends obsidian.Modal {
     for (let index = 0; index < pipelineSteps.length; index++) {
       const step = pipelineSteps[index];
       const stepLiveness = pipelineLiveness.get(step.key) || "";
-      const state = ["failed", "stalled"].includes(stepLiveness)
+      const state = stepLiveness === "failed"
         ? "failed"
         : index < phaseIndex ? "done" : index === phaseIndex ? (headLiveness === "failed" ? "failed" : "active") : "pending";
       const stepEl = pipeline.createDiv({ cls: `lexvoice-progress-pipeline-step is-${state}` });
@@ -825,7 +825,7 @@ export class QueueModal extends obsidian.Modal {
     }
 
     const canAnimateProgress = headActive
-      && !["stalled", "failed", "done"].includes(headLiveness);
+      && !["failed", "done"].includes(headLiveness);
     const bar = head.createDiv({ cls: `lexvoice-progress-bar is-${headLiveness}` });
     bar.createDiv({
       cls: `lexvoice-progress-bar-fill is-${headLiveness}${canAnimateProgress ? " is-active" : ""}`,
@@ -892,12 +892,12 @@ export class QueueModal extends obsidian.Modal {
 
         const icon = summaryEl.createSpan({ cls: `lexvoice-progress-activity-icon is-${state}`, attr: { "aria-hidden": "true" } });
         const iconName = state === "done" ? "circle-check"
-          : ["failed", "stalled"].includes(state) ? "triangle-alert"
+          : state === "failed" ? "triangle-alert"
             : state === "retrying" ? "refresh-cw"
-              : state === "slow" ? "clock-3"
+              : ["slow", "stalled"].includes(state) ? "clock-3"
                 : state === "queued" ? "clock"
                   : state === "waiting" ? "hourglass" : "activity";
-        try { obsidian.setIcon(icon, iconName); } catch { icon.setText(["failed", "stalled"].includes(state) ? "!" : ""); }
+        try { obsidian.setIcon(icon, iconName); } catch { icon.setText(state === "failed" ? "!" : ""); }
 
         const summaryCopy = summaryEl.createSpan({ cls: "lexvoice-progress-activity-copy" });
         summaryCopy.createSpan({ cls: "lexvoice-progress-activity-title", text: activity.title || "后台任务" });
@@ -1011,7 +1011,7 @@ export class QueueModal extends obsidian.Modal {
     if (active) {
       list.createDiv({ cls: "lexvoice-progress-section-title lexvoice-progress-legacy-current", text: "当前任务" });
       const { ico, body } = makeRow("running", "lexvoice-progress-legacy-current");
-      if (["failed", "stalled"].includes(activeLiveness)) {
+      if (activeLiveness === "failed") {
         const stateIcon = ico.createSpan({ cls: `lexvoice-progress-task-state is-${activeLiveness}` });
         try { obsidian.setIcon(stateIcon, "triangle-alert"); } catch { stateIcon.setText("!"); }
       } else if (activeLiveness === "done") {
@@ -1039,11 +1039,18 @@ export class QueueModal extends obsidian.Modal {
       }
 
       if (detail) {
+        const sourceModeLabel = String(detail.sourceModeLabel || "").trim();
+        const targetModeLabel = String(detail.targetModeLabel || detail.modeLabel || "").trim();
+        const modeChange = sourceModeLabel
+          && sourceModeLabel !== "未标注"
+          && targetModeLabel
+          && sourceModeLabel !== targetModeLabel
+          ? `${sourceModeLabel} → ${targetModeLabel}`
+          : "";
         const taskFacts = [
           ["来源文件夹", detail.sourceFolder],
           ["音频时长", Number(detail.durationMs) > 0 ? fmtDur(Number(detail.durationMs)) : ""],
-          ["原模式", detail.sourceModeLabel],
-          ["目标模式", detail.targetModeLabel || detail.modeLabel],
+          ["模式", modeChange],
         ].filter(([, value]) => String(value || "").trim());
         if (taskFacts.length) {
           const factGrid = body.createDiv({ cls: "lexvoice-progress-current-facts" });
@@ -1095,9 +1102,9 @@ export class QueueModal extends obsidian.Modal {
           };
           const marker = summaryEl.createSpan({ cls: "lexvoice-progress-stage-marker", attr: { "aria-hidden": "true" } });
           const iconName = stageLiveness === "done" ? "check"
-            : stageLiveness === "failed" || stageLiveness === "stalled" ? "triangle-alert"
+            : stageLiveness === "failed" ? "triangle-alert"
               : stageLiveness === "retrying" ? "refresh-cw"
-                : stageLiveness === "slow" ? "clock-3"
+                : ["slow", "stalled"].includes(stageLiveness) ? "clock-3"
                   : "";
           if (iconName) {
             try { obsidian.setIcon(marker, iconName); } catch { marker.setText(stageLiveness === "done" ? "✓" : "!"); }
@@ -1158,8 +1165,8 @@ export class QueueModal extends obsidian.Modal {
               if (Number(request.deadlineAt) > 0 && !["done", "failed", "retrying"].includes(requestState)) {
                 const deadlineDelta = Number(request.deadlineAt) - Date.now();
                 requestMeta.push(deadlineDelta >= 0
-                  ? `最迟约 ${fmtDur(deadlineDelta)} 后返回或超时`
-                  : `已超过截止 ${fmtDur(Math.abs(deadlineDelta))}`);
+                  ? `预计 ${fmtDur(deadlineDelta)} 内返回`
+                  : `处理时间比预计多 ${fmtDur(Math.abs(deadlineDelta))}`);
               }
               if (requestMeta.length) requestRow.createDiv({ cls: "lexvoice-progress-request-meta", text: requestMeta.join(" · ") });
               if (request.error) requestRow.createDiv({ cls: "lexvoice-progress-request-error", text: String(request.error) });
@@ -1167,21 +1174,29 @@ export class QueueModal extends obsidian.Modal {
           }
 
           if (Array.isArray(stage.events) && stage.events.length) {
-            const eventSection = panel.createDiv({ cls: "lexvoice-progress-events" });
-            eventSection.createDiv({ cls: "lexvoice-progress-section-label", text: "最近事件" });
+            const hiddenEventLabels = new Set([
+              "开始语音转写",
+              "正在上传音频",
+              "正在提交转写任务",
+            ]);
             const visibleEvents = stage.events.filter((event, index, events) => {
+              if (hiddenEventLabels.has(String(event.label || "").trim())) return false;
               const next = events[index + 1];
               if (!next) return true;
               return String(event.type || "") !== String(next.type || "")
                 || String(event.label || "") !== String(next.label || "")
                 || String(event.detail || "") !== String(next.detail || "");
             });
-            for (const event of visibleEvents.slice(-10).reverse()) {
-              const eventRow = eventSection.createDiv({ cls: "lexvoice-progress-event" });
-              eventRow.createSpan({ cls: "lexvoice-progress-event-time", text: fmtTime(Number(event.at) || Date.now()) });
-              const eventCopy = eventRow.createSpan({ cls: "lexvoice-progress-event-copy" });
-              eventCopy.createSpan({ cls: "lexvoice-progress-event-label", text: String(event.label || "状态已更新") });
-              if (event.detail) eventCopy.createSpan({ cls: "lexvoice-progress-event-detail", text: String(event.detail) });
+            if (visibleEvents.length) {
+              const eventSection = panel.createDiv({ cls: "lexvoice-progress-events" });
+              eventSection.createDiv({ cls: "lexvoice-progress-section-label", text: "最近事件" });
+              for (const event of visibleEvents.slice(-10).reverse()) {
+                const eventRow = eventSection.createDiv({ cls: "lexvoice-progress-event" });
+                eventRow.createSpan({ cls: "lexvoice-progress-event-time", text: fmtTime(Number(event.at) || Date.now()) });
+                const eventCopy = eventRow.createSpan({ cls: "lexvoice-progress-event-copy" });
+                eventCopy.createSpan({ cls: "lexvoice-progress-event-label", text: String(event.label || "状态已更新") });
+                if (event.detail) eventCopy.createSpan({ cls: "lexvoice-progress-event-detail", text: String(event.detail) });
+              }
             }
           }
         }
@@ -1195,9 +1210,9 @@ export class QueueModal extends obsidian.Modal {
         const live = body.createDiv({ cls: `lexvoice-progress-live is-${liveState}` });
         const liveIcon = live.createSpan({ cls: "lexvoice-progress-live-icon", attr: { "aria-hidden": "true" } });
         const liveIconName = liveState === "done" ? "circle-check"
-          : liveState === "failed" || liveState === "stalled" ? "triangle-alert"
+          : liveState === "failed" ? "triangle-alert"
             : liveState === "retrying" ? "refresh-cw"
-              : liveState === "slow" ? "clock-3" : "activity";
+              : ["slow", "stalled"].includes(liveState) ? "clock-3" : "activity";
         try { obsidian.setIcon(liveIcon, liveIconName); } catch { /* intentionally empty */ }
         const liveParts = [];
         if (stageStartedAt) liveParts.push(`本步骤已进行 ${fmtDur(now - stageStartedAt)}`);

@@ -37,16 +37,36 @@ describe("纪要整理流水线", () => {
   });
 
   it("详细模式正文下限随原始转写增长，明显摘要化时要求补充", () => {
-    const policy = getBriefingFidelityPolicy({ detailLevel: "detailed" });
+    const policy = getBriefingFidelityPolicy({ mode: "meeting", detailLevel: "detailed" });
     expect(policy.minimumOutputRatio).toBe(0.48);
 
-    const shortDraft = assessBriefingPartFidelity(12_000, "纪要".repeat(1_500), { detailLevel: "detailed" });
+    const shortDraft = assessBriefingPartFidelity(12_000, "纪要".repeat(1_500), { mode: "meeting", detailLevel: "detailed" });
     expect(shortDraft.minimumOutputChars).toBe(5_760);
     expect(shortDraft.targetOutputChars).toBe(7_440);
     expect(shortDraft.needsExpansion).toBe(true);
 
-    const completeDraft = assessBriefingPartFidelity(12_000, "纪要".repeat(3_000), { detailLevel: "detailed" });
+    const completeDraft = assessBriefingPartFidelity(12_000, "纪要".repeat(3_000), { mode: "meeting", detailLevel: "detailed" });
     expect(completeDraft.needsExpansion).toBe(false);
+  });
+
+  it("综合纪要按议题和证据覆盖判断完整性，不再按原文字数强制扩写", () => {
+    const policy = getBriefingFidelityPolicy({ mode: "synthesis", detailLevel: "balanced" });
+    expect(policy).toMatchObject({
+      profile: "balanced",
+      sourceTargetChars: 22_000,
+      minimumOutputRatio: 0,
+      targetOutputRatio: 0.30,
+      enforceLengthFloor: false,
+    });
+
+    const structuredDraft = assessBriefingPartFidelity(
+      12_000,
+      "议题证据".repeat(500),
+      { mode: "synthesis", detailLevel: "balanced" },
+    );
+    expect(structuredDraft.minimumOutputChars).toBe(0);
+    expect(structuredDraft.targetOutputChars).toBe(3_600);
+    expect(structuredDraft.needsExpansion).toBe(false);
   });
 
   it("分部计划按总体量均衡，避免最后只剩很小一段", () => {
@@ -139,6 +159,24 @@ describe("纪要整理流水线", () => {
     const restored = reconcileBriefingCheckpoint(checkpoint, input);
     expect(restored.parts[0]).toMatchObject({ status: "complete", text: "第一部分正文" });
     expect(restored.parts[1]).toMatchObject({ status: "pending", error: "上次运行中断，等待恢复" });
+  });
+
+  it("全局议题归并中断后只恢复最终成文步骤，不重跑已完成分部", () => {
+    const segments = [segment(0, 2600), segment(1, 2600)];
+    const parts = planBriefingParts(segments, 4000);
+    const identity = createBriefingJobId({ segments, mode: "synthesis", model: "model-a", optionsKey: "balanced" });
+    const input = { ...identity, mode: "synthesis", model: "model-a", parts };
+    const checkpoint = createBriefingCheckpoint(input);
+    checkpoint.parts.forEach((part, index) => {
+      part.status = "complete";
+      part.text = `第 ${index + 1} 份议题材料`;
+    });
+    checkpoint.consolidationStatus = "running";
+
+    const restored = reconcileBriefingCheckpoint(checkpoint, input);
+    expect(restored.parts.every((part) => part.status === "complete")).toBe(true);
+    expect(restored.consolidationStatus).toBe("pending");
+    expect(restored.consolidationError).toBe("上次全局成文中断，等待恢复");
   });
 
   it("未完成分部不能被拼装成成功纪要", () => {

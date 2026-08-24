@@ -49,12 +49,33 @@ describe("release runtime contracts", () => {
     expect(mainSource).toContain('stageLabel: "正在完成文件处理"');
   });
 
-  it("enforces source-scaled briefing detail and repairs under-detailed parts", () => {
+  it("separates synthesis coverage from source-scaled detail repair", () => {
     expect(mainSource).toContain("buildBriefingFidelityContract");
-    expect(mainSource).toContain('return mode === "synthesis" ? "detailed" : "balanced"');
+    expect(mainSource).toContain('return "balanced"');
     expect(mainSource).toContain("assessBriefingPartFidelity(plan.chars, parsed.body, fidelityInput)");
     expect(mainSource).toContain('"llm.briefing_part_under_detailed"');
     expect(mainSource).toContain('purpose: "briefing-part-detail-repair"');
+    expect(mainSource).toContain("buildSynthesisConsolidationPrompt");
+    expect(mainSource).toContain('purpose: "briefing-synthesis-consolidation"');
+    expect(mainSource).toContain("checkpoint.consolidationStatus");
+  });
+
+  it("persists a usable briefing draft before optional detail repair", () => {
+    const initialDraft = mainSource.indexOf("const initialBody = normalizeBriefingPartBody");
+    const initialCheckpoint = mainSource.indexOf("await store.save(checkpoint);", initialDraft);
+    const optionalRepair = mainSource.indexOf('purpose: "briefing-part-detail-repair"', initialDraft);
+    const preservedFallback = mainSource.indexOf('"llm.briefing_part_repair_failed_preserved"', optionalRepair);
+
+    expect(initialDraft).toBeGreaterThan(-1);
+    expect(initialCheckpoint).toBeGreaterThan(initialDraft);
+    expect(optionalRepair).toBeGreaterThan(initialCheckpoint);
+    expect(preservedFallback).toBeGreaterThan(optionalRepair);
+  });
+
+  it("actively schedules bounded retries after merge and note-write failures", () => {
+    expect(mainSource).toContain('this.scheduleTaskQueueRetry(1500, mergeError instanceof BriefingPipelineIncompleteError');
+    expect(mainSource).toContain('? "briefing-partial"');
+    expect(mainSource).toContain('this.scheduleTaskQueueRetry(1500, "briefing-write-failure")');
   });
 
   it("keeps long-meeting chunks internal and presents one continuous meeting", () => {

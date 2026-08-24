@@ -8,11 +8,14 @@ import {
   getSemanticCanvasPath,
   getSemanticGenerationPolicy,
   normalizeJsonCanvasDocument,
+  semanticCanvasNeedsRelayout,
   parseSemanticBranchExpansion,
   parseSemanticOutlineGraph,
   replaceSemanticBranch,
   stabilizeSemanticGraphKeys,
   type JsonCanvasDocument,
+  type SemanticMapNode,
+  type SemanticOutlineGraph,
 } from "../src/canvas/semantic-outline-canvas";
 
 const outline: RealtimeOutlineNode[] = [
@@ -279,6 +282,20 @@ describe("semantic canvas generation", () => {
     expect(canvas.nodes.length).toBe(9);
     expect(canvas.edges.length).toBe(5);
     expect(canvas.edges.filter((edge) => edge.label).map((edge) => edge.label)).toEqual(["导致"]);
+    const semanticNodes = new Map(canvas.nodes.map((node) => [
+      (node as { lexvoiceSemantic?: { semanticKey?: string } }).lexvoiceSemantic?.semanticKey,
+      String((node as { id?: string }).id || ""),
+    ]));
+    const causalEdge = canvas.edges.find((edge) => (
+      edge.fromNode === semanticNodes.get("governance")
+      && edge.toNode === semanticNodes.get("fragmentation-risk")
+    ));
+    const followingEdge = canvas.edges.find((edge) => (
+      edge.fromNode === semanticNodes.get("fragmentation-risk")
+      && edge.toNode === semanticNodes.get("overseas-pm-case")
+    ));
+    expect(causalEdge?.label).toBe("导致");
+    expect(followingEdge?.label).toBeUndefined();
     expect(serialized).toContain("打开原纪要");
     expect(serialized).toContain("海外 PM 招聘项目曾因上下文割裂返工");
     expect(serialized).toContain("两周后按准确率和使用反馈复盘");
@@ -375,7 +392,7 @@ describe("semantic canvas generation", () => {
     const core = semanticNodes.find((node) => node.lexvoiceSemantic?.semanticKey === "core")!;
     const branches = graph.branches.map((branch) => semanticNodes.find((node) => node.lexvoiceSemantic?.semanticKey === branch.key)!);
     expect(core.x + core.width / 2).toBe(0);
-    expect(core.lexvoiceSemantic?.layoutVersion).toBe(9);
+    expect(core.lexvoiceSemantic?.layoutVersion).toBe(10);
     expect(branches.some((branch) => branch.x + branch.width < core.x)).toBe(true);
     expect(branches.some((branch) => branch.x > core.x + core.width)).toBe(true);
     for (const branch of branches) {
@@ -466,6 +483,80 @@ describe("semantic canvas generation", () => {
     }).lexvoiceSemantic?.semanticKey === "group:platform") as { width: number; height: number };
     expect(group).toBeTruthy();
     expect(group.width).toBeGreaterThan(group.height);
+  });
+
+  it("reserves visible clearance above adjacent group labels without widening every row", () => {
+    const groupedBranch = (key: string): SemanticMapNode => ({
+      key,
+      title: `${key} 主线`,
+      summary: "主线概括。",
+      evidence: [],
+      sourceSections: [],
+      relation: "parallel",
+      kind: "topic",
+      importance: 2,
+      groupLabel: `${key} 分组标题`,
+      children: Array.from({ length: 3 }, (_, index) => ({
+        key: `${key}-leaf-${index + 1}`,
+        title: `${key} 细节 ${index + 1}`,
+        summary: "交代背景、判断和具体结论。",
+        evidence: [],
+        sourceSections: [],
+        relation: "hierarchy" as const,
+        kind: "evidence" as const,
+        importance: 2 as const,
+        groupLabel: "",
+        children: [],
+      })),
+    });
+    const graph: SemanticOutlineGraph = {
+      core: { title: "分组布局检查", summary: "检查相邻分组标题不会压住上一组卡片。" },
+      branches: [groupedBranch("group-a"), groupedBranch("group-b")],
+    };
+    const canvas = buildSemanticCanvasDocument(graph, {
+      sourcePath: "LexVoice/转写纪要/分组布局检查.md",
+      sourceTitle: "分组布局检查",
+      sourceSections,
+      layoutMode: "right",
+      forceRelayout: true,
+    });
+    const groups = canvas.nodes
+      .filter((node) => String((node as {
+        lexvoiceSemantic?: { semanticKey?: string };
+      }).lexvoiceSemantic?.semanticKey || "").startsWith("group:"))
+      .map((node) => node as { y: number; height: number })
+      .sort((left, right) => left.y - right.y);
+    expect(groups).toHaveLength(2);
+    expect(groups[1].y - (groups[0].y + groups[0].height)).toBeGreaterThanOrEqual(60);
+  });
+
+  it("keeps relationship labels near the center and suppresses repeated deep labels in dense maps", () => {
+    const buildChain = (index: number): SemanticMapNode => ({
+      key: `chain-${index}`,
+      title: `判断 ${index}`,
+      summary: "说明这一判断与下一层内容之间的因果关系。",
+      evidence: [],
+      sourceSections: [],
+      relation: "causal",
+      kind: "evidence",
+      importance: 2,
+      groupLabel: "",
+      children: index < 33 ? [buildChain(index + 1)] : [],
+    });
+    const graph: SemanticOutlineGraph = {
+      core: { title: "复杂关系图", summary: "关系词只在靠近中心的位置提供方向。" },
+      branches: [buildChain(1)],
+    };
+    const canvas = buildSemanticCanvasDocument(graph, {
+      sourcePath: "LexVoice/转写纪要/复杂关系图.md",
+      sourceTitle: "复杂关系图",
+      sourceSections,
+      layoutMode: "right",
+      forceRelayout: true,
+    });
+    const labeledEdges = canvas.edges.filter((edge) => edge.label);
+    expect(labeledEdges.map((edge) => edge.label)).toEqual(["导致", "导致"]);
+    expect(canvas.edges.filter((edge) => !edge.label).length).toBeGreaterThan(30);
   });
 
   it("keeps a meeting-sized semantic map within a readable compact footprint", () => {
@@ -574,7 +665,12 @@ describe("semantic canvas generation", () => {
     });
     const legacyNode = first.nodes[0] as { x: number; text?: string };
     legacyNode.x = 4321;
-    legacyNode.text = String(legacyNode.text || "").replace("lexvoice-semantic-layout:9", "lexvoice-semantic-layout:8");
+    legacyNode.text = String(legacyNode.text || "").replace("lexvoice-semantic-layout:10", "lexvoice-semantic-layout:9");
+    for (const node of first.nodes) {
+      const semantic = (node as { lexvoiceSemantic?: { layoutVersion?: number } }).lexvoiceSemantic;
+      if (semantic) semantic.layoutVersion = 9;
+    }
+    expect(semanticCanvasNeedsRelayout(first)).toBe(true);
     const updated = buildSemanticCanvasDocument(graph, {
       sourcePath: "LexVoice/转写纪要/测试会议.md",
       sourceTitle: "测试会议",
@@ -582,6 +678,7 @@ describe("semantic canvas generation", () => {
       existing: first,
     });
     expect((updated.nodes[0] as { x: number }).x).not.toBe(4321);
+    expect(semanticCanvasNeedsRelayout(updated)).toBe(false);
   });
 
   it("normalizes existing canvas documents and uses a sibling canvas path", () => {

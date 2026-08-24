@@ -29,6 +29,10 @@ build/
 _tmp_*
 *.bak
 
+# Local imported references and visual inspection artifacts
+_imports/
+.tmp-*
+
 # Logs and OS files
 *.log
 .DS_Store

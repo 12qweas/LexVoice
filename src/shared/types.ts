@@ -318,6 +318,7 @@ export interface MergeQueueTaskPayload {
   segments: Segment[];
   source?: string;
   sourceMeta?: unknown;
+  externalAudioSource?: unknown;
   textImportSources?: unknown[];
   recruitContext?: RecruitContext | null;
   sessionMeta?: unknown;
@@ -346,6 +347,7 @@ export interface RecordingSession {
   finalized: boolean;
   source?: string;
   sourceMeta?: unknown;
+  externalAudioSource?: unknown;
   captureMode?: string;
   audioChannelCount?: number;
   audioChannelMaxCount?: number;

@@ -18,6 +18,19 @@ describe("import finalization contract", () => {
     expect(finalizeIndex).toBeGreaterThan(organizeIndex);
   });
 
+  it("rebuilds imported notes after both first-pass and queued AI organization", () => {
+    const source = fs.readFileSync(path.join(root, "src/main.ts"), "utf8");
+    const firstPassPolicy = source.indexOf("shouldRewriteConsolidatedNote(this.settings, writeSession)");
+    const retryStart = source.indexOf("async retryMergeTask(task)");
+    const retryPolicy = source.indexOf("shouldRewriteConsolidatedNote(this.settings, retrySession)", retryStart);
+    const retryRewrite = source.indexOf("await this.rewriteConsolidated(retrySession, polished)", retryPolicy);
+
+    expect(firstPassPolicy).toBeGreaterThan(-1);
+    expect(retryStart).toBeGreaterThan(-1);
+    expect(retryPolicy).toBeGreaterThan(retryStart);
+    expect(retryRewrite).toBeGreaterThan(retryPolicy);
+  });
+
   it("keeps AI configuration failures as blocked, manually recoverable merge tasks", () => {
     const source = fs.readFileSync(path.join(root, "src/main.ts"), "utf8");
 

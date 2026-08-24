@@ -524,13 +524,31 @@ export function getLlmRetryDelayMs(error, attemptIndex) {
   return Math.max(250, Math.min(60 * 1000, Math.round(raw)));
 }
 
+export function resolveLlmModelListEndpoint(endpoint) {
+  const base = normalizeLlmEndpoint(endpoint);
+  if (!base) throw new Error("服务地址未配置");
+  try {
+    const url = new URL(base);
+    const host = url.hostname.toLowerCase();
+    const isBailianWorkspace = host === "dashscope.aliyuncs.com"
+      || (host.endsWith(".maas.aliyuncs.com") && !host.startsWith("token-plan."));
+    if (isBailianWorkspace && /\/compatible-mode\/v1(?:\/chat\/completions)?$/i.test(url.pathname)) {
+      url.pathname = "/api/v1/models";
+      url.search = "";
+      url.hash = "";
+      return url.toString().replace(/\/+$/, "");
+    }
+  } catch { /* fall through to the OpenAI-compatible endpoint */ }
+  return /\/chat\/completions$/i.test(base)
+    ? base.replace(/\/chat\/completions$/i, "/models")
+    : base.replace(/\/+$/, "") + "/models";
+}
+
 export async function fetchLlmModelList(endpoint, apiKey) {
   const base = normalizeLlmEndpoint(endpoint);
   if (!base) throw new Error("服务地址未配置");
   assertSafeServiceEndpoint(base, "http", "大模型服务地址");
-  const modelsUrl = /\/chat\/completions$/i.test(base)
-    ? base.replace(/\/chat\/completions$/i, "/models")
-    : base.replace(/\/+$/, "") + "/models";
+  const modelsUrl = resolveLlmModelListEndpoint(endpoint);
   const headers = buildLlmHeaders(apiKey, base);
   delete headers["Content-Type"]; // GET 无 body
   const res = await obsidian.requestUrl({ url: modelsUrl, method: "GET", headers, throw: false });

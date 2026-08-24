@@ -1,4 +1,4 @@
-export const BRIEFING_PIPELINE_VERSION = 5;
+export const BRIEFING_PIPELINE_VERSION = 6;
 
 export type BriefingSegment = {
   index?: number;
@@ -57,6 +57,12 @@ export type BriefingCheckpoint = {
   topicMapSource: "llm" | "timeline" | "";
   topicMapFinishReason: string;
   topicMapUsage: BriefingUsage;
+  consolidationStatus: "pending" | "running" | "complete" | "failed";
+  consolidationBody: string;
+  consolidationFinishReason: string;
+  consolidationUsage: BriefingUsage;
+  consolidationAttempts: number;
+  consolidationError: string;
   auditStatus: "pending" | "complete" | "failed";
   auditText: string;
   auditFinishReason: string;
@@ -84,6 +90,7 @@ export type BriefingFidelityPolicy = {
   minimumOutputRatio: number;
   targetOutputRatio: number;
   absoluteMinimumChars: number;
+  enforceLengthFloor: boolean;
 };
 
 export type BriefingFidelityAssessment = {
@@ -276,6 +283,7 @@ export function planBriefingParts(
 }
 
 export function getBriefingPartTargetChars(input: {
+  mode?: string;
   detailLevel?: string;
   structureLevel?: string;
 } = {}): number {
@@ -283,10 +291,43 @@ export function getBriefingPartTargetChars(input: {
 }
 
 export function getBriefingFidelityPolicy(input: {
+  mode?: string;
   detailLevel?: string;
   structureLevel?: string;
 } = {}): BriefingFidelityPolicy {
   const detailLevel = cleanText(input.detailLevel).toLowerCase();
+  const isSynthesis = cleanText(input.mode).toLowerCase() === "synthesis";
+  if (isSynthesis) {
+    if (detailLevel === "detailed") {
+      return {
+        profile: "detailed",
+        sourceTargetChars: 16_000,
+        minimumOutputRatio: 0,
+        targetOutputRatio: 0.42,
+        absoluteMinimumChars: 0,
+        enforceLengthFloor: false,
+      };
+    }
+    if (detailLevel === "concise") {
+      return {
+        profile: "concise",
+        sourceTargetChars: 28_000,
+        minimumOutputRatio: 0,
+        targetOutputRatio: 0.18,
+        absoluteMinimumChars: 0,
+        enforceLengthFloor: false,
+      };
+    }
+    const structureLevel = cleanText(input.structureLevel).toLowerCase();
+    return {
+      profile: "balanced",
+      sourceTargetChars: structureLevel === "strict" ? 18_000 : 22_000,
+      minimumOutputRatio: 0,
+      targetOutputRatio: 0.30,
+      absoluteMinimumChars: 0,
+      enforceLengthFloor: false,
+    };
+  }
   if (detailLevel === "detailed") {
     return {
       profile: "detailed",
@@ -294,6 +335,7 @@ export function getBriefingFidelityPolicy(input: {
       minimumOutputRatio: 0.48,
       targetOutputRatio: 0.62,
       absoluteMinimumChars: 1_600,
+      enforceLengthFloor: true,
     };
   }
   if (detailLevel === "concise") {
@@ -303,6 +345,7 @@ export function getBriefingFidelityPolicy(input: {
       minimumOutputRatio: 0.15,
       targetOutputRatio: 0.22,
       absoluteMinimumChars: 700,
+      enforceLengthFloor: true,
     };
   }
   const structureLevel = cleanText(input.structureLevel).toLowerCase();
@@ -312,13 +355,14 @@ export function getBriefingFidelityPolicy(input: {
     minimumOutputRatio: 0.30,
     targetOutputRatio: 0.42,
     absoluteMinimumChars: 1_000,
+    enforceLengthFloor: true,
   };
 }
 
 export function assessBriefingPartFidelity(
   sourceChars: unknown,
   output: unknown,
-  input: { detailLevel?: string; structureLevel?: string } = {},
+  input: { mode?: string; detailLevel?: string; structureLevel?: string } = {},
 ): BriefingFidelityAssessment {
   const source = Math.max(0, Math.floor(Number(sourceChars) || 0));
   const outputChars = cleanText(output).length;
@@ -334,10 +378,12 @@ export function assessBriefingPartFidelity(
     };
   }
   const sourceSafeCeiling = Math.max(1, Math.ceil(source * 0.92));
-  const minimumOutputChars = Math.min(
-    sourceSafeCeiling,
-    Math.max(policy.absoluteMinimumChars, Math.ceil(source * policy.minimumOutputRatio)),
-  );
+  const minimumOutputChars = policy.enforceLengthFloor
+    ? Math.min(
+      sourceSafeCeiling,
+      Math.max(policy.absoluteMinimumChars, Math.ceil(source * policy.minimumOutputRatio)),
+    )
+    : 0;
   const targetOutputChars = Math.min(
     Math.max(minimumOutputChars, Math.ceil(source * policy.targetOutputRatio)),
     Math.max(minimumOutputChars, Math.ceil(source * 0.96)),
@@ -348,7 +394,7 @@ export function assessBriefingPartFidelity(
     outputRatio: outputChars / source,
     minimumOutputChars,
     targetOutputChars,
-    needsExpansion: outputChars < minimumOutputChars,
+    needsExpansion: policy.enforceLengthFloor && outputChars < minimumOutputChars,
   };
 }
 
@@ -442,6 +488,12 @@ export function createBriefingCheckpoint(input: {
     topicMapSource: "",
     topicMapFinishReason: "",
     topicMapUsage: { ...EMPTY_BRIEFING_USAGE },
+    consolidationStatus: "pending",
+    consolidationBody: "",
+    consolidationFinishReason: "",
+    consolidationUsage: { ...EMPTY_BRIEFING_USAGE },
+    consolidationAttempts: 0,
+    consolidationError: "",
     auditStatus: "pending",
     auditText: "",
     auditFinishReason: "",
@@ -473,6 +525,10 @@ export function reconcileBriefingCheckpoint(
     }
     return previous;
   });
+  if (checkpoint.consolidationStatus === "running") {
+    checkpoint.consolidationStatus = "pending";
+    checkpoint.consolidationError = "上次全局成文中断，等待恢复";
+  }
   checkpoint.updatedAt = new Date().toISOString();
   return checkpoint;
 }

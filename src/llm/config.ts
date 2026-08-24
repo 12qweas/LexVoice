@@ -53,10 +53,10 @@ export const LLM_SERVICE_PRESETS = [
     id: "dashscope",
     label: "阿里云百炼 / DashScope",
     endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    endpointHelp: "阿里云百炼 OpenAI 兼容模式地址。国内站点通常使用 dashscope.aliyuncs.com/compatible-mode/v1。",
+    endpointHelp: "阿里云百炼 OpenAI 兼容地址。可以使用默认地址，也可以粘贴业务空间提供的 compatible-mode/v1 地址。",
     keyHelp: "填写百炼控制台创建的访问密钥（API Key）。",
-    modelPlaceholder: "按百炼控制台的模型名称填写",
-    modelHelp: "填写百炼 OpenAI 兼容模式支持的模型名称。",
+    modelPlaceholder: "获取模型或按百炼控制台填写模型名称",
+    modelHelp: "填写百炼 OpenAI 兼容接口支持的模型名称；业务空间可直接获取已部署模型。",
   },
   {
     id: "deepseek",
@@ -205,6 +205,19 @@ export const ONE_CARD_PROVIDERS = {
     llmModel: "", // 硅基流动大模型型号多，留给用户在「大模型服务」里选
     applyDesc: "已用同一把硅基流动 Key 配好语音转写（SenseVoiceSmall）和大模型服务；硅基流动大模型型号较多，请到「大模型服务」填一个模型标识后测试连通。",
   },
+  bailian: {
+    label: "阿里云百炼",
+    scope: "asr-llm",
+    asrProvider: "dashscope-filetrans",
+    asrTarget: "import",
+    asrEndpoint: "https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription",
+    asrModel: "fun-asr",
+    llmPreset: "dashscope",
+    llmEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    llmModel: "",
+    endpointEditable: true,
+    applyDesc: "已配置阿里云百炼导入音频 ASR 和 AI 整理服务。",
+  },
 };
 
 export function getLlmServicePreset(id) {
@@ -295,8 +308,20 @@ export function getActiveLlmServicePresetId(settings) {
 function llmPresetEndpointMatches(preset, endpoint) {
   const current = comparableLlmEndpoint(endpoint);
   if (!preset || !current) return false;
+  if (preset.id === "dashscope" && isDashscopeCompatibleLlmEndpoint(current)) return true;
   if (preset.endpoint && comparableLlmEndpoint(preset.endpoint) === current) return true;
   return Array.isArray(preset.altEndpoints) && preset.altEndpoints.some(ep => comparableLlmEndpoint(ep) === current);
+}
+
+export function isDashscopeCompatibleLlmEndpoint(endpoint) {
+  try {
+    const host = new URL(comparableLlmEndpoint(endpoint)).hostname.toLowerCase();
+    return host === "dashscope.aliyuncs.com"
+      || host === "coding.dashscope.aliyuncs.com"
+      || host.endsWith(".maas.aliyuncs.com");
+  } catch {
+    return false;
+  }
 }
 
 export function getLlmOutputCeiling(settings) {
