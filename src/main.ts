@@ -86,9 +86,9 @@ import { applySpeakerNamesForLlm, buildConfirmedSpeakerMappings, collectSpeakerC
 import { isSpeakerDiarizationProvider, normalizeRequestedSpeakerCount } from "./asr/diarization";
 import { isDashScopeFileTransProvider, resolveImportTranscribeProvider, transcribeImportedAudio } from "./asr/long-audio-transcription";
 import { BriefingCheckpointStore } from "./briefing/checkpoint-store";
-import { BriefingPipelineIncompleteError, assembleBriefingParts, assessBriefingPartFidelity, assessBriefingPartGrounding, buildProgrammaticTopicMap, createBriefingJobId, extractBriefingPartEnvelope, getBriefingFidelityPolicy, getBriefingPartTargetChars, normalizeBriefingPartBody, planBriefingParts, reconcileBriefingCheckpoint } from "./briefing/pipeline";
+import { BriefingPipelineIncompleteError, assembleBriefingParts, assessBriefingPartFidelity, assessBriefingPartGrounding, buildBriefingPartSummaryMap, buildProgrammaticTopicMap, createBriefingJobId, extractBriefingPartEnvelope, getBriefingFidelityPolicy, getBriefingPartTargetChars, normalizeBriefingPartBody, planBriefingParts, reconcileBriefingCheckpoint, shouldAutoRepairBriefingPart } from "./briefing/pipeline";
 import { shouldRewriteConsolidatedNote } from "./briefing/note-layout-policy";
-import { buildSynthesisConsolidationPrompt, buildSynthesisCoverageRepairPrompt, buildSynthesisPartInstruction } from "./briefing/synthesis-policy";
+import { buildSynthesisConsolidationPrompt, buildSynthesisPartInstruction } from "./briefing/synthesis-policy";
 import {
   ExternalInboxScanner,
   createExternalInboxLedger,
@@ -6212,51 +6212,6 @@ function buildBriefingPipelineOptionsKey(plugin, mode, repolishOptions) {
   });
 }
 
-function buildBriefingTopicMapPrompt(joined, partPlans, mode) {
-  const ranges = partPlans.map((part) => `- 第 ${part.index + 1} 部分：${formatElapsed(part.startOffsetMs)}–${formatElapsed(part.endOffsetMs)}`).join("\n");
-  return `请先为整场材料建立一份**紧凑的全局议题图**，供后续各时段分别整理时保持上下文一致。这里不是最终纪要，不要展开成长文。
-
-要求：
-- 覆盖全程主要议题、人物、决策、分歧、待办、关键数字和跨时段呼应；每项标注大致时间或对应部分。
-- 单列“术语与实体统一”小节：归并上下文中明显指向同一对象的不同写法，指出仍无法确认的疑似 ASR 错词。不要猜测真实名称。
-- 识别跨时段延续的同一事项，避免后续分部把它误写成多个互不相关的话题。
-- 只写原始转写明确出现的内容，不猜测，不生成最终评价，不代替正文。
-- 输出 Markdown 列表，控制在 2500 字以内；不要 YAML、callout、代码围栏。
-- 当前整理模式：${mode}。
-
-【分部范围】
-${ranges}
-
-【全程原始转写】
-${joined}`;
-}
-
-function buildBriefingAuditPrompt(topicMap, parts, finalBody) {
-  const summaries = parts.map((part) => {
-    const ratio = Number(part.outputRatio);
-    const ratioText = Number.isFinite(ratio) && ratio > 0 ? `${Math.round(ratio * 100)}%` : "未知";
-    return `- 第 ${part.index + 1} 部分：原文 ${Number(part.sourceChars) || 0} 字 → 正文 ${Number(part.outputChars) || 0} 字（${ratioText}，${part.qualityStatus || "未检查"}）；${part.summary || "（无小结）"}`;
-  }).join("\n");
-  return `请检查下面这篇最终纪要的覆盖情况。你只做审计，不重写纪要。
-
-对照全局议题图、各部分小结和最终正文，检查：
-1. 是否有全局议题没有被最终正文覆盖；
-2. 是否有明显重复、互相矛盾或时序错位；
-3. 是否遗漏关键事实、数字、正反案例、分歧、决定或行动；
-4. 是否把内部处理窗口误写成多场会议，或按说话人轮次机械复述。
-
-如果没有问题，只输出 OK。发现问题时，用简短 Markdown 列表写出“缺失 / 重复 / 矛盾 / 截断”及对应部分编号，不要补写正文。
-
-【全局议题图】
-${topicMap}
-
-【各部分完整度与小结】
-${summaries}
-
-【最终正文】
-${String(finalBody || "").trim()}`;
-}
-
 function mergeBriefingSedimentObjects(parts) {
   const merged = { people: [], hotwords: {}, learningCards: [], todos: [] };
   let found = false;
@@ -6418,40 +6373,10 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
   const fidelityPolicy = getBriefingFidelityPolicy(fidelityInput);
 
   if (!String(checkpoint.topicMap || "").trim()) {
-    const timelineFallback = buildProgrammaticTopicMap(partPlans, formatElapsed);
-    if (partPlans.length === 1) {
-      checkpoint.topicMap = timelineFallback;
-      checkpoint.topicMapSource = "timeline";
-      checkpoint.topicMapFinishReason = "not-needed";
-    } else try {
-      const mapResult = await callBriefingMergeLlm(
-        plugin,
-        "你是会议信息架构助手。只建立紧凑、可核对的全局议题图，不撰写最终纪要。",
-        buildBriefingTopicMapPrompt(fullJoined, partPlans, mode),
-        Object.assign(
-          { stream: true, thinkingMode: "fast", payload: { max_tokens: 4096 } },
-          createBriefingLlmActivityOptions(plugin, computedMeta, {
-            stage: "topic-map",
-            stageLabel: "分析全局议题",
-            detail: "正在建立跨时段议题索引",
-            progress: 8,
-          }),
-        ),
-        { purpose: "briefing-topic-map", mode, partTotal: partPlans.length, transcriptChars: fullJoined.length },
-      );
-      const mapText = String(mapResult.text || "").trim();
-      checkpoint.topicMap = mapText && !mapResult.truncated ? mapText : timelineFallback;
-      checkpoint.topicMapSource = mapText && !mapResult.truncated ? "llm" : "timeline";
-      checkpoint.topicMapFinishReason = String(mapResult.finishReason || "");
-      checkpoint.topicMapUsage = mapResult.usage;
-    } catch (error) {
-      checkpoint.topicMap = timelineFallback;
-      checkpoint.topicMapSource = "timeline";
-      checkpoint.topicMapFinishReason = "error";
-      await logLlmRequestDiagnostic(plugin, "warn", "llm.briefing_topic_map_fallback", "全局议题图生成失败，已改用时间索引继续整理", {
-        mode, jobId: identity.id, error: diagnosticError(error),
-      });
-    }
+    checkpoint.topicMap = buildProgrammaticTopicMap(partPlans, formatElapsed);
+    checkpoint.topicMapSource = "timeline";
+    checkpoint.topicMapFinishReason = partPlans.length === 1 ? "not-needed" : "programmatic";
+    checkpoint.topicMapUsage = undefined;
     await store.save(checkpoint);
   }
 
@@ -6530,7 +6455,7 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
         });
         await store.save(checkpoint);
       }
-      if (initialBody && !response.truncated && (fidelity.needsExpansion || grounding.needsRepair)) {
+      if (initialBody && !response.truncated && shouldAutoRepairBriefingPart(fidelity)) {
         repairAttempts = 1;
         await logLlmRequestDiagnostic(plugin, "warn", "llm.briefing_part_under_detailed", fidelity.needsExpansion ? "纪要分部明显短于原始材料，正在对照原文补回细节" : "纪要分部缺少多项可核验信息，正在对照原文重新整理", {
           mode,
@@ -6669,6 +6594,11 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
   }
 
   const assembledParts = assembleBriefingParts(checkpoint.parts);
+  checkpoint.topicMap = buildBriefingPartSummaryMap(checkpoint.parts, formatElapsed);
+  checkpoint.topicMapSource = "part-summaries";
+  checkpoint.topicMapFinishReason = "programmatic";
+  checkpoint.topicMapUsage = undefined;
+  await store.save(checkpoint);
   const synthesisParts = checkpoint.parts.map((part) => ({
     index: part.index,
     timeRange: `${formatElapsed(part.startOffsetMs)}–${formatElapsed(part.endOffsetMs)}`,
@@ -6771,91 +6701,13 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
   await store.save(checkpoint);
 
   if (checkpoint.auditStatus !== "complete") {
-    if (partPlans.length === 1) {
-      checkpoint.auditStatus = "complete";
-      checkpoint.auditText = "OK";
-      checkpoint.auditFinishReason = "not-needed";
-    } else try {
-      const audit = await callBriefingMergeLlm(
-        plugin,
-        "你是纪要完整性审计助手。只报告覆盖问题，不重写正文。",
-        buildBriefingAuditPrompt(checkpoint.topicMap, checkpoint.parts, finalVisibleBody),
-        Object.assign(
-          { stream: false, thinkingMode: "fast", priority: "interactive", payload: { max_tokens: 2048 } },
-          createBriefingLlmActivityOptions(plugin, computedMeta, {
-            stage: "audit",
-            stageLabel: "检查纪要完整性",
-            detail: "正文已经生成，正在检查遗漏和重复",
-            progress: 92,
-          }),
-        ),
-        { purpose: "briefing-audit", mode, jobId: identity.id, partTotal: partPlans.length },
-      );
-      checkpoint.auditStatus = "complete";
-      checkpoint.auditText = String(audit.text || "").trim();
-      checkpoint.auditFinishReason = String(audit.finishReason || "");
-      checkpoint.auditUsage = audit.usage;
-      if (checkpoint.auditText && !/^OK[。.!！]?$/i.test(checkpoint.auditText)) {
-        await logLlmRequestDiagnostic(plugin, "warn", "llm.briefing_audit_findings", "纪要完整性审计发现需要复核的项目", {
-          mode, jobId: identity.id, findingsChars: checkpoint.auditText.length,
-        });
-        if (mode === "synthesis") {
-          await store.save(checkpoint);
-          try {
-            const durationMs = getSegmentsDurationMs(list) || getSessionMetaDurationMs(computedMeta);
-            const repairMaxTokens = getBriefingMergeMaxTokens({
-              durationMs,
-              transcriptChars: fullJoined.length,
-              segmentCount: list.length,
-            }, plugin.settings, Number(ceiling) || 0);
-            const repair = await callBriefingMergeLlm(
-              plugin,
-              "你是综合纪要的完整性编辑。只根据审计结果和内部材料修补当前成文，保持一篇连续、结构化的会议纪要。",
-              buildSynthesisCoverageRepairPrompt({
-                currentBody: finalVisibleBody,
-                findings: checkpoint.auditText,
-                topicMap: checkpoint.topicMap,
-                parts: synthesisParts,
-                detailLevel: fidelityInput.detailLevel,
-              }),
-              Object.assign(
-                { stream: true, thinkingMode: "fast", payload: { max_tokens: repairMaxTokens } },
-                createBriefingLlmActivityOptions(plugin, computedMeta, {
-                  stage: "consolidation-repair",
-                  stageLabel: "补全综合纪要",
-                  detail: "正在补入审计发现的遗漏并合并重复内容",
-                  progress: 95,
-                }),
-              ),
-              { purpose: "briefing-synthesis-coverage-repair", mode, jobId: identity.id, partTotal: partPlans.length, transcriptChars: fullJoined.length },
-            );
-            const repaired = parseBriefingPartResponse(repair.text);
-            const repairedBody = normalizeBriefingPartBody(repaired.body, { fragmentMode: false });
-            if (repairedBody && !repair.truncated) {
-              finalVisibleBody = repairedBody;
-              people = mergeUniqueStrings(people, repaired.people || []);
-              tags = mergeUniqueStrings(tags, repaired.tags || []).filter(tag => tag && !/^lexvoice\//.test(tag)).slice(0, 9);
-              checkpoint.consolidationBody = repairedBody;
-              checkpoint.consolidationFinishReason = String(repair.finishReason || "");
-              checkpoint.consolidationUsage = mergeBriefingUsage(checkpoint.consolidationUsage, repair.usage);
-              checkpoint.auditText = "OK（已按审计结果补全）";
-              writeAssembledBody();
-              await store.save(checkpoint);
-            }
-          } catch (repairError) {
-            await logLlmRequestDiagnostic(plugin, "warn", "llm.briefing_consolidation_repair_failed_preserved", "综合纪要补全未完成，已保留首版可用成文", {
-              mode, jobId: identity.id, error: diagnosticError(repairError),
-            });
-          }
-        }
-      }
-    } catch (error) {
-      checkpoint.auditStatus = "failed";
-      checkpoint.auditText = getErrorMessage(error);
-      await logLlmRequestDiagnostic(plugin, "warn", "llm.briefing_audit_failed", "纪要正文已完成，但完整性审计未完成", {
-        mode, jobId: identity.id, error: diagnosticError(error),
-      });
-    }
+    // Parts and consolidation already have durable completion checkpoints. A second
+    // full-document LLM audit rereads the same material and can spuriously trigger
+    // another full rewrite, so completeness is closed deterministically here.
+    checkpoint.auditStatus = "complete";
+    checkpoint.auditText = "pipeline-complete";
+    checkpoint.auditFinishReason = "deterministic-checkpoint";
+    checkpoint.auditUsage = undefined;
     await store.save(checkpoint);
   }
 

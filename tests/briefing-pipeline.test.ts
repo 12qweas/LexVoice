@@ -6,6 +6,7 @@ import {
   createBriefingJobId,
   assessBriefingPartFidelity,
   assessBriefingPartGrounding,
+  buildBriefingPartSummaryMap,
   expandOversizedBriefingSegments,
   extractBriefingPartEnvelope,
   getBriefingFidelityPolicy,
@@ -13,6 +14,7 @@ import {
   normalizeBriefingPartBody,
   planBriefingParts,
   reconcileBriefingCheckpoint,
+  shouldAutoRepairBriefingPart,
 } from "../src/briefing/pipeline";
 import { BriefingCheckpointStore } from "../src/briefing/checkpoint-store";
 
@@ -113,6 +115,42 @@ describe("纪要整理流水线", () => {
 
     const grounded = assessBriefingPartGrounding(source, "Quick BI 预算为 120 万，覆盖 8 个部门，采用先启动后校验，预计 3 周完成。");
     expect(grounded.needsRepair).toBe(false);
+  });
+
+  it("词面锚点只做诊断，不单独触发付费重写", () => {
+    const drifted = assessBriefingPartGrounding(
+      "项目使用 Quick BI，预算 120 万，覆盖 8 个部门，计划 3 周完成。",
+      "会议围绕平台建设与后续安排展开。",
+    );
+    expect(drifted.needsRepair).toBe(true);
+    expect(shouldAutoRepairBriefingPart({ needsExpansion: false })).toBe(false);
+    expect(shouldAutoRepairBriefingPart({ needsExpansion: true })).toBe(true);
+  });
+
+  it("复用已完成分部的摘要和标题构建全局议题索引", () => {
+    const map = buildBriefingPartSummaryMap([
+      {
+        index: 0,
+        startOffsetMs: 0,
+        endOffsetMs: 60_000,
+        summary: "明确产品定位",
+        text: "## 产品定位\n正文\n\n### 用户问题\n证据",
+      },
+      {
+        index: 1,
+        startOffsetMs: 60_000,
+        endOffsetMs: 120_000,
+        summary: "形成落地路径",
+        text: "## 落地路径\n正文",
+      },
+    ] as never, (ms) => {
+      if (ms === 0) return "00:00";
+      if (ms === 60_000) return "01:00";
+      return "02:00";
+    });
+
+    expect(map).toContain("00:00–01:00：明确产品定位；产品定位；用户问题");
+    expect(map).toContain("01:00–02:00：形成落地路径；落地路径");
   });
 
   it("整段长音频转写会在语义边界拆成内部窗口，不把数小时文本一次塞给模型", () => {

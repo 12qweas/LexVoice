@@ -4,7 +4,8 @@ vi.mock("obsidian", () => ({
   requestUrl: vi.fn(),
 }));
 
-import { callLlmWithContinuation, fetchLlmModelList, getLlmConfigIssue, getNextLlmOutputBudget, isLlmContextLimitError, isLlmOutputBudgetError, isLlmOutputParameterError, isTransientLlmError, readLlmSseStream, requestLlmChatCompletion, requestLlmChatCompletionViaObsidian, resolveLlmModelListEndpoint } from "../src/llm/core";
+import * as obsidian from "obsidian";
+import { callLlmWithContinuation, fetchLlmModelList, getLlmConfigIssue, getNextLlmOutputBudget, isLlmContextLimitError, isLlmOutputBudgetError, isLlmOutputParameterError, isTransientLlmError, readLlmSseStream, requestLlmChatCompletion, requestLlmChatCompletionViaObsidian, resetLearnedLlmTransportPreferences, resolveLlmModelListEndpoint } from "../src/llm/core";
 import { applyLearnedLlmCapability, getEffectiveLlmOutputBudget, getLearnedLlmOutputCeiling, getLearnedLlmOutputParameter, rememberLlmOutputCeiling, resetLearnedLlmCapabilities } from "../src/llm/output-budget";
 import { DashScopeStreamingClient, OpenAIRealtimeTranscriptionClient, OpenAIRealtimeTranslationClient } from "../src/asr/clients";
 import { assertSafeServiceEndpoint, canOmitServiceApiKey, getServiceEndpointSecurityIssue, isLocalLlmEndpoint, isSharedAddressSpaceHost } from "../src/shared/util-llm-endpoint";
@@ -161,6 +162,51 @@ describe("LLM transient error classification", () => {
     error.name = "AbortError";
     expect(isTransientLlmError(error)).toBe(false);
   });
+
+  it("不可中止的 requestUrl 超时不会自动重复提交付费请求", () => {
+    const error = Object.assign(new Error("LLM 兜底调用超时：180 秒内没有响应"), { nonRetryable: true });
+    expect(isTransientLlmError(error)).toBe(false);
+  });
+});
+
+describe("LLM 请求传输学习", () => {
+  it("requestUrl 兜底成功后，同一端点不再重复发送必失败的 fetch", async () => {
+    resetLearnedLlmTransportPreferences();
+    const fetchMock = vi.fn(async () => { throw new TypeError("Failed to fetch"); });
+    vi.stubGlobal("window", {
+      fetch: fetchMock,
+      setTimeout: globalThis.setTimeout.bind(globalThis),
+      clearTimeout: globalThis.clearTimeout.bind(globalThis),
+    });
+    const requestUrlMock = vi.mocked(obsidian.requestUrl);
+    requestUrlMock.mockResolvedValue({
+      status: 200,
+      text: JSON.stringify({ choices: [{ message: { content: "OK" }, finish_reason: "stop" }] }),
+      json: { choices: [{ message: { content: "OK" }, finish_reason: "stop" }] },
+      arrayBuffer: new ArrayBuffer(0),
+      headers: {},
+    } as never);
+    const plugin = {
+      settings: {
+        llmEndpoint: "https://api.example.com/v1",
+        llmApiKey: "test-key",
+        llmModel: "test-model",
+      },
+      logDiagnostic: vi.fn(async () => undefined),
+    };
+    try {
+      await requestLlmChatCompletion(plugin, [{ role: "user", content: "first" }], { stream: true });
+      await requestLlmChatCompletion(plugin, [{ role: "user", content: "second" }], { stream: true });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(requestUrlMock).toHaveBeenCalledTimes(2);
+      expect(plugin.logDiagnostic.mock.calls.map((call) => call[1])).toContain("llm.requesturl_preferred");
+    } finally {
+      resetLearnedLlmTransportPreferences();
+      requestUrlMock.mockReset();
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describe("LLM 输出预算兼容", () => {
@@ -211,6 +257,32 @@ describe("LLM 输出预算兼容", () => {
 });
 
 describe("最终纪要截断恢复", () => {
+  it("显式设置零次续写时不被默认值覆盖", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: "半截正文" }, finish_reason: "length" }] }),
+    }));
+    vi.stubGlobal("window", {
+      fetch: fetchMock,
+      setTimeout: globalThis.setTimeout.bind(globalThis),
+      clearTimeout: globalThis.clearTimeout.bind(globalThis),
+    });
+    try {
+      const result = await callLlmWithContinuation({
+        settings: {
+          llmEndpoint: "https://api.example.com/v1",
+          llmApiKey: "test-key",
+          llmModel: "test-model",
+        },
+      }, "system", "user", { stream: false, thinkingMode: "fast" }, { maxContinuations: 0 });
+
+      expect(result).toMatchObject({ text: "半截正文", truncated: true, continuations: 0, continuationAttempts: 0 });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("首次 length 且正文为空时关闭深度思考并继续恢复正文", async () => {
     const responses = [
       { choices: [{ message: { content: "" }, finish_reason: "length" }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, completion_tokens_details: { reasoning_tokens: 5 } } },

@@ -438,6 +438,14 @@ export function assessBriefingPartGrounding(source: unknown, output: unknown): B
   };
 }
 
+export function shouldAutoRepairBriefingPart(
+  fidelity: Pick<BriefingFidelityAssessment, "needsExpansion"> | null | undefined,
+): boolean {
+  // Exact anchor matching is useful diagnostics, but it is too brittle to justify
+  // another paid rewrite. Automatic repair is reserved for a deterministic length gap.
+  return fidelity?.needsExpansion === true;
+}
+
 function createPartCheckpoint(plan: BriefingPartPlan): BriefingPartCheckpoint {
   return {
     index: plan.index,
@@ -539,6 +547,22 @@ export function buildProgrammaticTopicMap(parts: BriefingPartPlan[], formatElaps
     const firstText = cleanText(part.segments[0]?.text).replace(/\s+/g, " ");
     const preview = firstText.length > 90 ? `${firstText.slice(0, 90)}…` : firstText;
     lines.push(`- ${formatElapsed(part.startOffsetMs)}–${formatElapsed(part.endOffsetMs)}：${preview || "本时段转写内容"}`);
+  }
+  return lines.join("\n");
+}
+
+export function buildBriefingPartSummaryMap(
+  parts: BriefingPartCheckpoint[],
+  formatElapsed: (ms: number) => string,
+): string {
+  const lines = ["## 全程议题索引"];
+  for (const part of [...parts].sort((left, right) => left.index - right.index)) {
+    const headings = Array.from(cleanText(part.text).matchAll(/^#{2,4}\s+(.+)$/gm))
+      .map((match) => cleanText(match[1]))
+      .filter(Boolean)
+      .slice(0, 5);
+    const details = Array.from(new Set([cleanText(part.summary), ...headings].filter(Boolean)));
+    lines.push(`- ${formatElapsed(part.startOffsetMs)}–${formatElapsed(part.endOffsetMs)}：${details.join("；") || "本时段已整理"}`);
   }
   return lines.join("\n");
 }

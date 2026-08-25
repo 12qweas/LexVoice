@@ -106,33 +106,3 @@ ${topicMap}
 ${modeGuidance ? `【综合纪要模式要求】\n${modeGuidance}\n\n` : ""}【全部内部议题材料】
 ${renderPartDrafts(input.parts)}`;
 }
-
-export function buildSynthesisCoverageRepairPrompt(input: {
-  currentBody: string;
-  findings: string;
-  topicMap?: string;
-  parts: SynthesisPartDraft[];
-  detailLevel?: string;
-}): string {
-  return `下面的综合纪要已经成文，但完整性检查发现了缺失、重复、矛盾或结构问题。请返回一份完整替换稿。
-
-修订原则：
-- 保留当前稿中已经正确的结构与内容，只补入检查指出的缺失信息，合并重复章节，校正有证据的矛盾和时序。
-- 新增内容必须能在全局议题图或内部材料中找到依据；不得靠扩写形容词凑篇幅。
-- 继续以事情为主轴，人物署名保持克制。
-- ${detailInstruction(input.detailLevel)}
-- 保持“会议梗概 → 编号主要议题 → 关键结论与分歧（按需）→ 待办与未决问题（按需）”的结构。
-- 可见正文必须放在 \`<!-- lexvoice-part-body-start -->\` 与 \`<!-- lexvoice-part-body-end -->\` 之间；随后保留 \`lexvoice-people\`、\`lexvoice-tags\`、\`lexvoice-part-summary\` 三条 HTML 注释。
-
-【检查结果】
-${cleanText(input.findings)}
-
-【全局议题图】
-${cleanText(input.topicMap) || "（无）"}
-
-【当前综合纪要】
-${cleanText(input.currentBody)}
-
-【内部议题材料】
-${renderPartDrafts(input.parts)}`;
-}

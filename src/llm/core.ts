@@ -25,6 +25,20 @@ type LlmHttpError = Error & {
 };
 
 export const LLM_REQUEST_QUEUE = new LlmRequestQueue();
+const LLM_REQUESTURL_PREFERRED_ENDPOINTS = new Set<string>();
+
+export function resetLearnedLlmTransportPreferences() {
+  LLM_REQUESTURL_PREFERRED_ENDPOINTS.clear();
+}
+
+export function prefersObsidianRequestUrl(endpoint) {
+  return LLM_REQUESTURL_PREFERRED_ENDPOINTS.has(normalizeLlmEndpoint(endpoint));
+}
+
+function rememberObsidianRequestUrlPreference(endpoint) {
+  const normalized = normalizeLlmEndpoint(endpoint);
+  if (normalized) LLM_REQUESTURL_PREFERRED_ENDPOINTS.add(normalized);
+}
 
 export const DEFAULT_LLM_REQUEST_TIMEOUT_MS = 180 * 1000;
 
@@ -149,7 +163,13 @@ export async function requestLlmChatCompletionViaObsidian(endpoint, headers, pay
     body: payloadText,
     throw: false,
   });
-  const response = await withPromiseTimeout(request, timeoutMs, () => new Error(`LLM 兜底调用超时：${Math.round(timeoutMs / 1000)} 秒内没有响应`));
+  const response = await withPromiseTimeout(request, timeoutMs, () => {
+    const error = new Error(`LLM 兜底调用超时：${Math.round(timeoutMs / 1000)} 秒内没有响应`) as LlmHttpError;
+    // requestUrl cannot abort the underlying request. Retrying automatically could
+    // submit the same paid generation twice while the first request is still running.
+    error.nonRetryable = true;
+    return error;
+  });
   const status = Number(response && response.status) || 0;
   if (status && (status < 200 || status >= 300)) {
     const text = getRequestUrlText(response);
@@ -310,6 +330,24 @@ export async function requestLlmChatCompletion(plugin, messages, options) {
   const timeoutMs = resolveLlmRequestTimeoutMs(options || {});
   return await runQueuedLlmRequest(options || {}, async () => {
     const externalSignal = options && options.signal;
+    if (prefersObsidianRequestUrl(endpoint)) {
+      if (externalSignal && externalSignal.aborted) {
+        const err = new Error("LLM 调用已取消");
+        err.name = "AbortError";
+        throw err;
+      }
+      await logLlmRequestDiagnostic(plugin, "info", "llm.requesturl_preferred", "此端点已直接使用 Obsidian requestUrl", {
+        endpoint,
+        model: llmModel ? "<set>" : "",
+        messageChars,
+        payloadChars,
+      });
+      const directData = await requestLlmChatCompletionViaObsidian(endpoint, headers, fallbackPayloadText, timeoutMs);
+      try {
+        if (options && typeof options.onActivity === "function") options.onActivity();
+      } catch { /* task telemetry must never block the request */ }
+      return directData;
+    }
     const controller = (timeoutMs > 0 || externalSignal) && typeof AbortController !== "undefined"
       ? new AbortController()
       : null;
@@ -390,6 +428,7 @@ export async function requestLlmChatCompletion(plugin, messages, options) {
       });
       try {
         const fallbackData = await requestLlmChatCompletionViaObsidian(endpoint, headers, fallbackPayloadText, timeoutMs);
+        rememberObsidianRequestUrlPreference(endpoint);
         await logLlmRequestDiagnostic(plugin, "info", "llm.requesturl_fallback_succeeded", "Obsidian requestUrl 兜底成功", {
           endpoint,
           model: llmModel ? "<set>" : "",
@@ -791,7 +830,12 @@ function addLlmUsage(left, right) {
 // 的方式再发请求，把多段拼成完整产物——不让偶发的模型输出上限决定内容完整性。
 // 工程兜底，与 mergeAndPolishLongSession 的「事前按时间分段」互补：那条防"明显超长"，这条防"偶发被切"。
 export async function callLlmWithContinuation(plugin, system, user, options, opts) {
-  const maxContinuations = Math.max(0, (opts && Number(opts.maxContinuations)) || 3);
+  const rawMaxContinuations = opts && Object.prototype.hasOwnProperty.call(opts, "maxContinuations")
+    ? Number(opts.maxContinuations)
+    : NaN;
+  const maxContinuations = Number.isFinite(rawMaxContinuations)
+    ? Math.max(0, Math.floor(rawMaxContinuations))
+    : 3;
   let effectiveOptions = options || {};
   let first = await callLlmWithMeta(plugin, system, user, effectiveOptions);
   let text = String(first.text || "");
@@ -870,7 +914,13 @@ export async function callLlmWithContinuation(plugin, system, user, options, opt
 }
 
 export async function callBriefingMergeLlm(plugin, system, user, options, diagCtx) {
-  const { text, finishReason, continuations, continuationAttempts, usage } = await callLlmWithContinuation(plugin, system, user, options, { maxContinuations: 3 });
+  const rawMaxContinuations = options && Object.prototype.hasOwnProperty.call(options, "maxContinuations")
+    ? Number(options.maxContinuations)
+    : NaN;
+  const maxContinuations = Number.isFinite(rawMaxContinuations)
+    ? Math.max(0, Math.floor(rawMaxContinuations))
+    : 3;
+  const { text, finishReason, continuations, continuationAttempts, usage } = await callLlmWithContinuation(plugin, system, user, options, { maxContinuations });
   const truncated = isTruncatedFinishReason(finishReason);
   if (!String(text || "").trim()) {
     try {
