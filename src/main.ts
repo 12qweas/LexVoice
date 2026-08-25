@@ -7,6 +7,7 @@ import { normalizeRealtimeOutlineList, parseRecruitRealtimeOutlineProtocol, buil
 import { drainRealtimeOutlineBacklog } from "./outline-finalizer";
 import { buildSemanticOutlinePrompt, buildSemanticBranchExpansionPrompt, parseSemanticOutlineGraph, parseSemanticBranchExpansion, replaceSemanticBranch, buildSemanticCanvasDocument, normalizeJsonCanvasDocument, semanticCanvasNeedsRelayout, getSemanticCanvasPath, extractSemanticSourceSections, getSemanticGenerationPolicy } from "./canvas/semantic-outline-canvas";
 import { inferSemanticCanvasSourcePath, parseSemanticCanvasSourcePath } from "./canvas/source-note";
+import { buildLexVoiceNoteIndex, resolveLexVoiceNoteIndex, upsertLexVoiceNoteIndex } from "./indexing/note-index";
 import { LexVoiceSettingTab } from "./ui/settings-tab";
 import { MinutesKanbanView, VIEW_TYPE_MINUTES_KANBAN } from "./ui/minutes-kanban-view";
 import { getDesktopModule, getDesktopProcess } from "./shared/desktop-runtime";
@@ -11005,6 +11006,7 @@ class OutlineView extends obsidian.ItemView {
           return count(graph.branches);
         })(),
       });
+      await this.plugin.refreshLexVoiceNoteIndexSafely(sourceFile, { reason: "semantic-canvas" });
       if (canvasFile instanceof obsidian.TFile) await this.app.workspace.getLeaf(true).openFile(canvasFile);
       progressNotice.hide();
       new obsidian.Notice(options.mode === "layout" ? "语义 Canvas 已重新排版。" : "语义 Canvas 已更新。", 4000);
@@ -19444,6 +19446,10 @@ class LexVoicePlugin extends obsidian.Plugin {
     }
 
     if (!mergeError && polished) {
+      await this.refreshLexVoiceNoteIndexSafely(writeSession.mdPath, {
+        meetingDate: session.startedAt,
+        reason: "finalize",
+      });
       try { await this.appendDailyMeetingOverview(writeSession, polished); }
       catch (e) { console.error("[LexVoice] daily overview failed", e); }
     }
@@ -19481,6 +19487,45 @@ class LexVoicePlugin extends obsidian.Plugin {
     this.scheduleDeferredAsrRetry(session);
     if (this.session === session) this.session = null;
     this.refreshOutlineView();
+  }
+
+  async refreshLexVoiceNoteIndex(fileOrPath, options = {}) {
+    const file = typeof fileOrPath === "string"
+      ? this.app.vault.getAbstractFileByPath(obsidian.normalizePath(fileOrPath))
+      : fileOrPath;
+    if (!(file instanceof obsidian.TFile) || file.extension !== "md") return null;
+    const current = await this.app.vault.read(file);
+    const index = buildLexVoiceNoteIndex(current, {
+      noteTitle: file.basename,
+      meetingDate: options.meetingDate || "",
+    });
+    if (!index) return null;
+    const next = upsertLexVoiceNoteIndex(current, index);
+    if (next !== current) await this.app.vault.modify(file, next);
+    const expectedCanvasPath = obsidian.normalizePath(getSemanticCanvasPath(file.path));
+    const canvasFile = this.app.vault.getAbstractFileByPath(expectedCanvasPath);
+    return resolveLexVoiceNoteIndex(
+      index,
+      file.path,
+      canvasFile instanceof obsidian.TFile ? canvasFile.path : null,
+    );
+  }
+
+  async refreshLexVoiceNoteIndexSafely(fileOrPath, options = {}) {
+    try {
+      return await this.refreshLexVoiceNoteIndex(fileOrPath, options);
+    } catch (error) {
+      const filePath = typeof fileOrPath === "string" ? fileOrPath : (fileOrPath && fileOrPath.path) || "";
+      console.warn("[LexVoice] note index refresh failed", error);
+      try {
+        await this.logDiagnostic("warn", "note.index_refresh_failed", "纪要索引更新失败，正文不受影响", {
+          filePath,
+          reason: options.reason || "",
+          error: diagnosticError(error),
+        });
+      } catch { /* index diagnostics must never affect note delivery */ }
+      return null;
+    }
   }
 
   async appendDailyMeetingOverview(session, polished) {
@@ -21812,6 +21857,10 @@ ${source}`;
     }
     if (finalFile instanceof obsidian.TFile) {
       await this.appendMergeMetadataBlock(finalFile, session.mergedSources);
+      await this.refreshLexVoiceNoteIndexSafely(finalFile, {
+        meetingDate: session.startedAt,
+        reason: "merge-notes",
+      });
       try { await this.app.workspace.getLeaf(false).openFile(finalFile); } catch { /* intentionally empty */ }
     }
     try { await this.appendDailyMeetingOverview(session, polished); }
@@ -22004,6 +22053,12 @@ ${source}`;
         existing = raced;
       }
     }
+    if (existing instanceof obsidian.TFile) {
+      await this.refreshLexVoiceNoteIndexSafely(existing, {
+        meetingDate: derivedFm.time || derivedFm["日期"] || derivedFm.date || "",
+        reason: "derived-note",
+      });
+    }
     return existing instanceof obsidian.TFile ? existing : null;
   }
 
@@ -22012,6 +22067,7 @@ ${source}`;
     const withFrontmatter = replaceLeadingFrontmatter(cur, frontmatter);
     const next = replaceLexVoiceActiveVersionBlock(withFrontmatter, versionMeta, body);
     if (next !== cur) await this.app.vault.modify(sourceFile, next);
+    await this.refreshLexVoiceNoteIndexSafely(sourceFile, { reason: "version-switch" });
   }
 
   async switchLexVoiceVersion(versionFile, fallbackSourcePath) {
@@ -24167,6 +24223,10 @@ ${source}`;
       ? await this.relocateRecruitNote({ mdPath: file.path, recruitContext }, recruitContext)
       : await this.renameMarkdownWithGeneratedTitle(file, polished, task.mode);
     if (renamed instanceof obsidian.TFile) targetFile = renamed;
+    await this.refreshLexVoiceNoteIndexSafely(targetFile, {
+      meetingDate: (task.sessionMeta && task.sessionMeta.startedAt) || task.createdAt || "",
+      reason: "merge-retry",
+    });
     try {
       const latestContent = await this.app.vault.read(targetFile);
       const session = {

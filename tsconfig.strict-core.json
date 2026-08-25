@@ -13,6 +13,7 @@
     "src/outline-text.ts",
     "src/canvas/semantic-outline-canvas.ts",
     "src/canvas/source-note.ts",
+    "src/indexing/note-index.ts",
     "src/ui/minutes-kanban-view.ts",
     "src/shared/settings-runtime-deps.ts",
     "src/shared/settings-io.ts",

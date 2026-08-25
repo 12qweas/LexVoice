@@ -31,6 +31,23 @@ describe("import finalization contract", () => {
     expect(retryRewrite).toBeGreaterThan(retryPolicy);
   });
 
+  it("refreshes the portable note index only after the final file name is known", () => {
+    const source = fs.readFileSync(path.join(root, "src/main.ts"), "utf8");
+    const finalizeRename = source.indexOf("const beforeRenamePath = session.mdPath;");
+    const finalizeIndex = source.indexOf('reason: "finalize"', finalizeRename);
+    const retryStart = source.indexOf("async retryMergeTask(task)");
+    const retryRename = source.indexOf("const renamed = (task.mode", retryStart);
+    const retryIndex = source.indexOf('reason: "merge-retry"', retryRename);
+    const derivedStart = source.indexOf("async createLexVoiceDerivedNote");
+    const derivedIndex = source.indexOf('reason: "derived-note"', derivedStart);
+
+    expect(finalizeIndex).toBeGreaterThan(finalizeRename);
+    expect(retryIndex).toBeGreaterThan(retryRename);
+    expect(derivedIndex).toBeGreaterThan(derivedStart);
+    expect(source).toContain('"note.index_refresh_failed"');
+    expect(source).toContain("纪要索引更新失败，正文不受影响");
+  });
+
   it("keeps AI configuration failures as blocked, manually recoverable merge tasks", () => {
     const source = fs.readFileSync(path.join(root, "src/main.ts"), "utf8");
 
