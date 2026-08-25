@@ -98,7 +98,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     this._advancedTapCount = 0;
     this._advancedTapAt = 0;
   }
-  // 招聘 Tab 仅在解锁后注入到 Tab 列表（未解锁则整个分区不进 DOM，设置搜索也搜不到）。
+  // 同一个隐藏入口控制招聘与晋升评审；招聘 Tab 仅在解锁后进入 DOM。
   getVisibleSettingsTabs() {
     const tabs = LV_SETTINGS_TABS.slice();
     if (isRecruitFeatureUnlocked(this.plugin.settings)) {
@@ -235,7 +235,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     this.plugin.refreshOutlineView();
     this.renderSettings();
     this.showHrUnlockFireworks();
-    new obsidian.Notice("招聘功能已启用", 6000);
+    new obsidian.Notice("招聘与晋升评审已启用", 6000);
   }
 
   showHrUnlockFireworks() {
@@ -259,9 +259,9 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     });
 
     const card = burst.createDiv({ cls: "lexvoice-hr-unlock-card" });
-    card.createDiv({ cls: "lexvoice-hr-unlock-kicker", text: "招聘功能" });
-    card.createDiv({ cls: "lexvoice-hr-unlock-title", text: "招聘评估已启用" });
-    card.createDiv({ cls: "lexvoice-hr-unlock-copy", text: "现在可以在模板中选择招聘评估。" });
+    card.createDiv({ cls: "lexvoice-hr-unlock-kicker", text: "进阶评审" });
+    card.createDiv({ cls: "lexvoice-hr-unlock-title", text: "招聘与晋升评审已启用" });
+    card.createDiv({ cls: "lexvoice-hr-unlock-copy", text: "现在可以在模板中选择招聘评估或晋升评审。" });
 
     window.setTimeout(() => burst.remove(), 2000);
   }

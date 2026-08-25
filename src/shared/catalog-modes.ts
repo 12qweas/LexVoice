@@ -9,6 +9,7 @@ export const MODE_META = {
   learning:  { prefix: "学习笔记", emoji: "📚", icon: "book-open", label: "学习笔记", goal: "适合 B 站、YouTube、课程、讲座、播客等高信息密度内容。" },
   seminar:   { prefix: "研讨会", emoji: "🧠", icon: "landmark", label: "研讨会", goal: "适合学术研讨、主题沙龙、圆桌论坛，把观点、争议、证据和后续问题整理清楚。" },
   recruit:   { prefix: "招聘评估", emoji: "👔", icon: "user-check", label: "招聘评估" },
+  "promotion-review": { prefix: "晋升评审", emoji: "", icon: "badge-check", label: "晋升评审", goal: "基于当前与目标职级任职要求，完成会前初审、晋升述职记录、评委问答和双画像差异报告。" },
   "recruit-needs": { prefix: "招聘需求挖掘", emoji: "", icon: "user-search", label: "招聘需求挖掘", goal: "HRBP 与业务方的招聘需求沟通会：会中按画像字段树辅助挖深，会后自动产出结构化岗位画像。" },
   huddle:    { prefix: "圆桌讨论", emoji: "🤝", icon: "users", label: "圆桌讨论", goal: "保留以兼容旧笔记，新建录音请改用「工作纪要」。", legacy: true },
   off:       { prefix: "录音", emoji: "🎙", icon: "mic", label: "关闭（仅转写）" },
@@ -48,6 +49,14 @@ export const FRONTMATTER_SCHEMA = {
 一句话评价: <40 字内定调句，含 录用倾向 + 最大亮点 + 最大顾虑 三要素；即 §0.6 第五步「X，Y，尤其是 Z」定调句的压缩版>
 待澄清:
   - <本场未问到 / 未覆盖、offer 前需问清的点，一条一项；没有就写空数组 []>`,
+  "promotion-review": `主题: <一句话主题>
+被评审人: <姓名；未提及写 "未提及">
+岗位: <岗位名称或岗位序列；未提及写 "未提及">
+当前职级: <当前职级；未提及写 "未提及">
+目标职级: <目标职级；未提及写 "未提及">
+综合评价: <60 字内概括当前能力画像、目标画像匹配点和关键差异>
+待评委确认:
+  - <现有证据仍无法判断的关键事项；没有就写空数组 []>`,
 };
 
 export const MODE_PREFIX_TO_KEY = {
@@ -72,6 +81,9 @@ export const MODE_PREFIX_TO_KEY = {
   "个人笔记": "monologue",
   "学习记录": "learning",
   "招聘评估": "recruit",
+  "晋升评审": "promotion-review",
+  "晋升述职评审": "promotion-review",
+  "述职评审": "promotion-review",
   "圆桌讨论": "huddle",
 };
 /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return -- end of LexVoice dynamic-typing region */

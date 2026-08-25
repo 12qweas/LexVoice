@@ -3509,7 +3509,7 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
 }
 .lexvoice-recruit-turn.is-candidate .lexvoice-recruit-who {
   flex-direction: row-reverse;
-  color: #2563eb;
+  color: var(--interactive-accent);
 }
 .lexvoice-recruit-avatar { display: inline-flex; align-items: center; }
 .lexvoice-recruit-avatar svg { width: 13px; height: 13px; }
@@ -3531,7 +3531,7 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
   border-top-left-radius: 3px;
 }
 .lexvoice-recruit-turn.is-candidate .lexvoice-recruit-bubble {
-  background: color-mix(in srgb, #2563eb 12%, var(--background-primary));
+  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary));
   border-top-right-radius: 3px;
 }
 .lexvoice-recruit-bubble.is-pending { color: var(--text-muted); opacity: 0.85; }
@@ -3566,8 +3566,8 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
   justify-content: center;
 }
 .lexvoice-recruit-ai-icon svg { width: 14px; height: 14px; }
-.lexvoice-recruit-ai-item.is-eval .lexvoice-recruit-ai-icon { background: color-mix(in srgb, #4f46e5 13%, var(--background-primary)); color: #4f46e5; }
-.lexvoice-recruit-ai-item.is-followup .lexvoice-recruit-ai-icon { background: color-mix(in srgb, #c2410c 14%, var(--background-primary)); color: #c2410c; }
+.lexvoice-recruit-ai-item.is-eval .lexvoice-recruit-ai-icon { background: color-mix(in srgb, var(--interactive-accent) 13%, var(--background-primary)); color: var(--interactive-accent); }
+.lexvoice-recruit-ai-item.is-followup .lexvoice-recruit-ai-icon { background: color-mix(in srgb, var(--text-accent) 14%, var(--background-primary)); color: var(--text-accent); }
 .lexvoice-recruit-ai-text {
   display: flex;
   flex-direction: column;
@@ -3576,8 +3576,8 @@ body .lexvoice-menu .menu-item.selected .menu-item-icon {
   padding-top: 1px;
 }
 .lexvoice-recruit-ai-label { font-size: 11px; font-weight: 700; }
-.lexvoice-recruit-ai-item.is-eval .lexvoice-recruit-ai-label { color: #4f46e5; }
-.lexvoice-recruit-ai-item.is-followup .lexvoice-recruit-ai-label { color: #c2410c; }
+.lexvoice-recruit-ai-item.is-eval .lexvoice-recruit-ai-label { color: var(--interactive-accent); }
+.lexvoice-recruit-ai-item.is-followup .lexvoice-recruit-ai-label { color: var(--text-accent); }
 .lexvoice-recruit-ai-body {
   font-size: 13px;
   font-weight: var(--font-normal);

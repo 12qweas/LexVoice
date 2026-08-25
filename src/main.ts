@@ -21,6 +21,7 @@ import { listJDProjects } from "./recruit/jd-projects";
 import { sanitizeReportFileStem, generateHtmlReportFromMarkdown, generateStyledReportFromMarkdown } from "./report/render";
 import { parseElapsedMsToken, parseLexVoiceDurationLabel, TEXT_IMPORT_PRE_SUMMARY_CHUNK_CHARS, buildBriefingLanguageInstruction, applyBriefingLanguageInstruction, getSessionMetaDurationMs, getSegmentsDurationMs, truncateForLlmPrompt, splitLongTextForLlm } from "./shared/util-text";
 import { JOBPORTRAIT_DIMENSIONS, DEFAULT_RECRUIT_QUALITIES, isRecruitFeatureUnlocked, buildRecruitContextPrefix, getRecruitInterviewOutline, getRecruitJdLibrary, upsertRecruitJdLibrary, applyRecruitJdLibraryItem, getRecruitJdPreview, extractPdfTextBestEffort, extractCandidateNameFromResumeText, parseRecruitQualitiesFromOutput, buildCompactRecruitContextPrefix, buildRecruitTextImportMergePrompt, generateJobPortrait, normalizeRecruitContext, hasRecruitContextContent, parseJdProject, renderRecruitCandidateBase, renderRecruitAggregateBase, ensureRecruitAggregateBase, createRecruitProject, renderRecruitHomepageTemplate, listRecruitCandidateNotes } from "./recruit";
+import { buildPromotionReviewConsolidationPrompt, buildPromotionReviewContextPrefix, buildPromotionReviewPartContextPrefix, buildPromotionReviewPartInstruction, detectPromotionReviewPhase, generatePromotionPreReview, normalizePromotionReviewContext } from "./promotion";
 import { registerRecruitBoardView, recommendationTone } from "./recruit/bases-view";
 import { normalizeAsrConcurrency, decodeAudioBlob, renderAudioBufferSliceToWav, resolveTranscribeProvider, makeRecordingIssue, isApimimoAsrProvider, transcribeAudio } from "./asr/transcribe";
 import { getFrontmatterTags, readFileFrontmatter, upsertFrontmatterInMarkdown, LEARNING_CARD_TAG, CONCEPT_CARD_TAG, TODO_CARD_TAG, ensureTodayDailyNoteFile } from "./shared/util-note";
@@ -938,6 +939,7 @@ const POLISH_PROMPTS = {
   huddle: buildPrompt(MODE_BODIES.huddle, false, "huddle"),
   monologue: buildPrompt(MODE_BODIES.monologue, false, "monologue"),
   recruit: buildPrompt(MODE_BODIES.recruit, false, "recruit"),
+  "promotion-review": buildPrompt(MODE_BODIES["promotion-review"], false, "promotion-review"),
 };
 
 
@@ -952,6 +954,7 @@ const MERGE_PROMPTS = {
   huddle: buildPrompt(MODE_BODIES.huddle, true, "huddle"),
   monologue: buildPrompt(MODE_BODIES.monologue, true, "monologue"),
   recruit: buildPrompt(MODE_BODIES.recruit, true, "recruit"),
+  "promotion-review": buildPrompt(MODE_BODIES["promotion-review"], true, "promotion-review"),
 };
 
 // 实时大纲：归并到共同上层概念，层级由内容涌现，不强加结构
@@ -1418,6 +1421,19 @@ function buildRecruitRealtimeOutlineProtocolInstruction(opts = {}) {
 时间、层级、图标、长期记忆和最终 Markdown 均由 LexVoice 生成。不要输出“记忆：”或改写历史大纲。`;
 }
 
+function buildPromotionReviewQaProtocolInstruction(opts = {}) {
+  const maxTopics = opts && opts.incremental ? 6 : 8;
+  return `【逐行输出协议】
+不要输出 XML、JSON、Markdown、图标、编号、AI评价、建议追问、前言或结语。
+只使用下面三种行前缀；每行表达一件事，内容里不要换行：
+
+主题：本轮问答的主题，4-10 字
+问题：评委提出的核心问题或追问
+回答：候选人的一个回答要点（可以重复多行）
+
+每个新主题必须从“主题：”开始，其后的问题和回答归属于该主题。本批最多输出 ${maxTopics} 个主题。转写不清时用“主题：问答片段待复核”，并尽量保留听清的原话。`;
+}
+
 function buildOutlinePrompt(modeLabel, modeKey, transcript, captureMode, languageInstruction, opts = {}) {
   const langBlock = languageInstruction ? `\n\n${String(languageInstruction).trim()}` : "";
   // 招聘面试模式：大纲严格按"问题 → 回答 → AI 评价"组织
@@ -1462,6 +1478,23 @@ ${buildRecruitRealtimeOutlineProtocolInstruction(opts)}
 
 【输出】
 - 严格使用逐行协议；不要前言、不要总评（综合评价留给最终整合，不在大纲里出现）${langBlock}
+
+实时整理上下文：
+${transcript}`;
+  }
+
+  if (modeKey === "promotion-review" && opts.promotionQa) {
+    return `下面是一段晋升答辩评委问答的实时转写。请只整理本批新增内容，把评委问题和候选人回答按主题归组。
+
+${buildProgramOwnedOutlineAnchorInstruction()}
+
+${buildPromotionReviewQaProtocolInstruction(opts)}
+
+【要求】
+- 只记录实际发生的问答，不生成评价、评分、证据状态或追问建议。
+- 问题包括评委首次提问和后续追问；候选人的长回答可拆成多个“回答：”要点。
+- 不要把评委陈述的观点改写为候选人的回答。
+- 不输出总评；完整职级分析在答辩结束后的总报告中生成。${langBlock}
 
 实时整理上下文：
 ${transcript}`;
@@ -2470,7 +2503,7 @@ function getRecentModePrefixEntries(settings) {
 function detectRecentModeFromFilename(settings, basename) {
   const stem = stripRecentDatePrefix(basename);
   if (!stem) return "off";
-  const inlineTag = stem.match(/(?:^|·\s*)(访谈|会议|研讨会|研讨|沙龙|小会|手记|学习记录|学习|个人笔记|招聘评估|工作纪要|学术研讨|主题沙龙|访谈调研|圆桌讨论)(?=$|[-·\s])/);
+  const inlineTag = stem.match(/(?:^|·\s*)(访谈|会议|研讨会|研讨|沙龙|小会|手记|学习记录|学习|个人笔记|招聘评估|晋升评审|晋升述职评审|述职评审|工作纪要|学术研讨|主题沙龙|访谈调研|圆桌讨论)(?=$|[-·\s])/);
   if (inlineTag) return normalizeModeFromLabel(settings, inlineTag[1]) || "off";
   for (const [prefix, mode] of getRecentModePrefixEntries(settings)) {
     const re = new RegExp("^" + escapeRegExp(prefix) + "(?:[-·\\s]|$)");
@@ -5104,6 +5137,13 @@ function buildInterviewBriefDetails(session) {
   return ["<details>", "<summary>面试提纲（录音前据 JD / 简历生成）</summary>", "", brief, "", "</details>"].join("\n");
 }
 
+function buildPromotionPreReviewDetails(session) {
+  const context = session && session.promotionReviewContext;
+  const preReview = context && context.preReview ? String(context.preReview).trim() : "";
+  if (!preReview) return "";
+  return ["<details>", "<summary>晋升初审（答辩前生成）</summary>", "", preReview, "", "</details>"].join("\n");
+}
+
 function renderRecordingInterviewBriefBlock(sessionId, brief) {
   const body = String(brief || "").trim();
   if (!body) return "";
@@ -5113,6 +5153,19 @@ function renderRecordingInterviewBriefBlock(sessionId, brief) {
     `<!-- lexvoice-interview-brief-start:${sessionId} -->`,
     body,
     `<!-- lexvoice-interview-brief-end:${sessionId} -->`,
+    "",
+  ].join("\n");
+}
+
+function renderRecordingPromotionReviewBlock(sessionId, preReview) {
+  const body = String(preReview || "").trim();
+  if (!body) return "";
+  return [
+    "",
+    "## 晋升初审（答辩前生成 · 仅供评委参考）",
+    `<!-- lexvoice-promotion-pre-review-start:${sessionId} -->`,
+    body,
+    `<!-- lexvoice-promotion-pre-review-end:${sessionId} -->`,
     "",
   ].join("\n");
 }
@@ -5127,6 +5180,7 @@ const FRONTMATTER_CONTENT_KEYS = {
   huddle: ["主题", "当事人", "参谋"],
   monologue: ["主题"],
   recruit: ["主题", "候选人", "联系方式", "应聘岗位", "轮次", "录用建议", "一句话评价", "待澄清"],
+  "promotion-review": ["主题", "被评审人", "岗位", "当前职级", "目标职级", "综合评价", "待评委确认"],
 };
 
 // 把任意 mode（含 custom-xxx / recruit-needs）映射到用于查 frontmatter schema 表的 baseKey。
@@ -5364,6 +5418,14 @@ function postProcessBriefingOutput(rawOutput, mode, sessionMeta, originalFrontma
   people = mergeUniqueStrings(people, existingPeopleFromTags);
   if (people.length) base["人物"] = people; else delete base["人物"];
 
+  if (mode === "promotion-review" && sessionMeta && sessionMeta.promotionReviewContext) {
+    const pc = sessionMeta.promotionReviewContext;
+    if (pc.revieweeName) base["被评审人"] = String(pc.revieweeName).trim();
+    if (pc.position || pc.jobSequence) base["岗位"] = [pc.position, pc.jobSequence].filter(Boolean).join(" / ");
+    if (pc.currentLevel) base["当前职级"] = String(pc.currentLevel).trim();
+    if (pc.targetLevel) base["目标职级"] = String(pc.targetLevel).trim();
+  }
+
   // F4.2 招聘：代码注入权威字段（jd 链接 / 候选人 / 轮次）+ 素质三态机器注释 → 素质_<名>。
   // 放在白名单 normalize 之后直接挂 base：jd / 素质_* 不在白名单（否则被裁），候选人/轮次 覆盖模型推断值。
   if (mode === "recruit" && sessionMeta && sessionMeta.recruitContext) {
@@ -5428,10 +5490,12 @@ function inferModeFromLegacyNote(filename, content) {
       if (m === "小会" || m === "讨论" || m === "圆桌讨论") return "huddle";
       if (m === "独白" || m === "手记" || m === "个人笔记") return "monologue";
       if (m === "面试" || m === "招聘" || m === "招聘评估") return "recruit";
+      if (m === "晋升评审" || m === "晋升述职评审" || m === "述职评审") return "promotion-review";
     }
   }
 
   // 2. 文件名前缀（"访谈-xxx"、"面试-xxx"等）
+  if (/(?:^|·\s*)晋升评审|晋升述职评审|述职评审/i.test(filename)) return "promotion-review";
   if (/(?:^|·\s*)面试|招聘/i.test(filename)) return "recruit";
   if (/(?:^|·\s*)学习|视频|课程|讲座/i.test(filename)) return "learning";
   if (/(?:^|·\s*)研讨|沙龙|论坛/i.test(filename)) return "seminar";
@@ -5483,27 +5547,36 @@ function inferTopicFromFilename(filename) {
   // 去掉 "YYYY-MM-DD HHmm · " 或 "YYYY-MM-DD · " 或 "YYYY-MM-DD HHmm "
   stem = stem.replace(/^\d{4}-\d{2}-\d{2}(?:\s+\d{4})?\s*·?\s*/, "");
   // 去掉模式标签前缀（"访谈-"、"面试-"、"会议-"等）
-  stem = stem.replace(/^(访谈|面试|招聘|会议|研讨|研讨会|沙龙|论坛|小会|独白|手记|纪要)\s*[-—－]?\s*/, "");
+  stem = stem.replace(/^(访谈|面试|招聘|晋升评审|晋升述职评审|述职评审|会议|研讨|研讨会|沙龙|论坛|小会|独白|手记|纪要)\s*[-—－]?\s*/, "");
   return stem.trim();
 }
 
-function buildSessionMetaPrefix(meta, mode) {
-  if (!meta || !meta.startedAt) return "";
-  const m = window.moment(meta.startedAt);
-  const date = m.format("YYYY-MM-DD");
-  const time = m.format("HH:mm");
-  const duration = meta.duration || "";
-  const lines = [
-    "## 会话元信息（**直接填入 frontmatter 对应字段，不要推断、不要修改**）",
-    "",
-    "- 日期: " + date,
-    "- 时间: " + time,
-  ];
-  if (duration) lines.push("- 时长: " + duration);
-  if (mode) lines.push("- mode: " + mode);
-  lines.push("");
-  lines.push("frontmatter 的「日期」「时间」「时长」「mode」字段必须照搬上面给定的值；其他字段（主题、参会人等）根据转写内容推断。");
-  return lines.join("\n");
+function buildSessionMetaPrefix(meta, mode, options = {}) {
+  const sections = [];
+  if (meta && meta.startedAt) {
+    const m = window.moment(meta.startedAt);
+    const date = m.format("YYYY-MM-DD");
+    const time = m.format("HH:mm");
+    const duration = meta.duration || "";
+    const lines = [
+      "## 会话元信息（**直接填入 frontmatter 对应字段，不要推断、不要修改**）",
+      "",
+      "- 日期: " + date,
+      "- 时间: " + time,
+    ];
+    if (duration) lines.push("- 时长: " + duration);
+    if (mode) lines.push("- mode: " + mode);
+    lines.push("");
+    lines.push("frontmatter 的「日期」「时间」「时长」「mode」字段必须照搬上面给定的值；其他字段（主题、参会人等）根据转写内容推断。");
+    sections.push(lines.join("\n"));
+  }
+  if (mode === "promotion-review" && meta && meta.promotionReviewContext) {
+    const promotionContext = options.promotionPart
+      ? buildPromotionReviewPartContextPrefix(meta.promotionReviewContext)
+      : buildPromotionReviewContextPrefix(meta.promotionReviewContext);
+    if (promotionContext) sections.push(promotionContext);
+  }
+  return sections.join("\n\n---\n\n");
 }
 
 
@@ -5819,7 +5892,9 @@ async function polishTranscript(plugin, transcript, mode, recruitContext, sessio
   const tpl = resolveTemplatePromptForMode(plugin, mode, false);
   const sys = mode === "recruit"
     ? "你是严格的招聘评估官，立场是替面试官筛掉不达标候选人，而不是替候选人辩护。默认假设候选人不达标，需要看到正向证据才能加分。诚实/不夸大/承认边界是基础职业素养，不计入亮点。结果未闭环、独立主导不清、行业不匹配、关键能力仅'接触过'级别——这些必须列入红旗。"
-    : "你是一位专业的文字编辑助手，擅长整理访谈、会议与口述的录音转写。";
+    : mode === "promotion-review"
+      ? "你是审慎、中立的晋升评审证据编辑。依据公司提供的具体岗位与两级任职要求分析候选人表现，严格区分已有证据、部分证据、证据不足和反证，不默认通过，也不默认不达标。最终决定由评委作出。"
+      : "你是一位专业的文字编辑助手，擅长整理访谈、会议与口述的录音转写。";
   let userPrompt = applyStructureLevelInstruction(tpl, plugin.settings, repolishOptions && repolishOptions.structureLevel).replace("{{TRANSCRIPT}}", transcript);
   userPrompt = applyRepolishPreferenceInstruction(userPrompt, repolishOptions, plugin.settings);
   userPrompt = applyBriefingLanguageInstruction(userPrompt, plugin.settings);
@@ -6204,6 +6279,7 @@ function getBriefingPipelineTargetChars(plugin, mode, repolishOptions) {
 function buildBriefingPipelineOptionsKey(plugin, mode, repolishOptions) {
   return JSON.stringify({
     pipeline: 2,
+    promotionPipeline: mode === "promotion-review" ? 2 : 0,
     mode,
     promptTemplate: String(plugin.settings.activeTemplateByMode && plugin.settings.activeTemplateByMode[mode] || ""),
     structureLevel: String(repolishOptions && repolishOptions.structureLevel || plugin.settings.briefingStructureLevel || "balanced"),
@@ -6333,6 +6409,8 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
     : preferredTargetChars;
   const partPlans = planBriefingParts(list, targetChars);
   if (!partPlans.length) return null;
+  const promotionMultiPart = mode === "promotion-review" && partPlans.length > 1;
+  const requiresGlobalConsolidation = (mode === "synthesis" || mode === "promotion-review") && partPlans.length > 1;
 
   const identity = createBriefingJobId({
     segments: list,
@@ -6372,6 +6450,9 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
     structureLevel: repolishOptions && repolishOptions.structureLevel || plugin.settings.briefingStructureLevel,
   };
   const fidelityPolicy = getBriefingFidelityPolicy(fidelityInput);
+  const partModeGuidance = promotionMultiPart
+    ? buildPromotionReviewPartInstruction({ partIndex: 1, partTotal: partPlans.length })
+    : modeGuidance;
 
   if (!String(checkpoint.topicMap || "").trim()) {
     checkpoint.topicMap = buildProgrammaticTopicMap(partPlans, formatElapsed);
@@ -6382,11 +6463,13 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
   }
 
   const peopleContext = await buildPeopleContextForLlm(plugin);
-  const metaPrefix = buildSessionMetaPrefix(computedMeta, mode);
+  const metaPrefix = buildSessionMetaPrefix(computedMeta, mode, { promotionPart: promotionMultiPart });
   const meetingWorkbenchPrompt = buildMeetingWorkbenchPrompt(computedMeta && computedMeta.meetingWorkbench);
   const system = mode === "synthesis" && partPlans.length > 1
     ? "你是综合纪要的议题证据编辑。请从当前内部窗口提取并归并可核验的议题材料，供下一阶段统一成文；不要把窗口写成独立会议。"
-    : "你是一位专业的文字编辑助手。请把当前时段原始转写忠实整理为完整、可读的 Markdown 正文。第一职责是还原信息，不得为了精炼而遗漏事实。";
+    : promotionMultiPart
+      ? "你是晋升评审的现场证据编辑。只整理当前内部窗口的述职与问答证据，严格区分候选人事实和评委观点，供全局评审报告统一成文。"
+      : "你是一位专业的文字编辑助手。请把当前时段原始转写忠实整理为完整、可读的 Markdown 正文。第一职责是还原信息，不得为了精炼而遗漏事实。";
   for (const plan of partPlans) {
     const part = checkpoint.parts[plan.index];
     if (part && part.status === "complete" && String(part.text || "").trim()) continue;
@@ -6401,7 +6484,10 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
     const end = formatElapsed(plan.endOffsetMs);
     let fidelity = assessBriefingPartFidelity(plan.chars, "", fidelityInput);
     const fidelityContract = buildBriefingFidelityContract(fidelity, fidelityPolicy.profile, plan.segments.length, mode);
-    let prompt = buildChunkMergePrompt(joinedChunk, plan.index + 1, partPlans.length, `${start}–${end}`, checkpoint.topicMap, modeGuidance, fidelityContract, mode, fidelityInput.detailLevel);
+    const currentPartGuidance = promotionMultiPart
+      ? buildPromotionReviewPartInstruction({ partIndex: plan.index + 1, partTotal: partPlans.length })
+      : partModeGuidance;
+    let prompt = buildChunkMergePrompt(joinedChunk, plan.index + 1, partPlans.length, `${start}–${end}`, checkpoint.topicMap, currentPartGuidance, fidelityContract, mode, fidelityInput.detailLevel);
     const speakerClause = buildKnownSpeakerClause(resolveKnownSpeakerLabels(joinedChunk, originalFrontmatter));
     const sharedContext = [peopleContext, metaPrefix, meetingWorkbenchPrompt, speakerClause].filter(Boolean).join("\n\n---\n\n");
     if (sharedContext) prompt = sharedContext + "\n\n---\n\n" + prompt;
@@ -6609,7 +6695,7 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
   let finalVisibleBody = assembledParts;
   let consolidatedPeople = [];
   let consolidatedTags = [];
-  if (mode === "synthesis" && partPlans.length > 1) {
+  if (requiresGlobalConsolidation) {
     if (checkpoint.consolidationStatus === "complete" && String(checkpoint.consolidationBody || "").trim()) {
       finalVisibleBody = checkpoint.consolidationBody;
     } else {
@@ -6625,27 +6711,37 @@ async function mergeAndPolishLongSession(plugin, segments, mode, computedMeta, o
         segmentCount: list.length,
       }, plugin.settings, Number(ceiling) || 0);
       try {
+        const consolidationPrompt = mode === "promotion-review"
+          ? buildPromotionReviewConsolidationPrompt({
+              context: computedMeta && computedMeta.promotionReviewContext,
+              parts: synthesisParts,
+              modeGuidance,
+              duration: computedMeta && computedMeta.duration || formatElapsed(durationMs),
+            })
+          : buildSynthesisConsolidationPrompt({
+              topicMap: checkpoint.topicMap,
+              parts: synthesisParts,
+              modeGuidance,
+              detailLevel: fidelityInput.detailLevel,
+              duration: computedMeta && computedMeta.duration || formatElapsed(durationMs),
+              transcriptChars: fullJoined.length,
+            });
         const consolidation = await callBriefingMergeLlm(
           plugin,
-          "你是综合纪要的总编辑。请把同一场会议的内部议题材料归并为一篇结构清晰、证据充分、以事情为中心的最终纪要。",
-          buildSynthesisConsolidationPrompt({
-            topicMap: checkpoint.topicMap,
-            parts: synthesisParts,
-            modeGuidance,
-            detailLevel: fidelityInput.detailLevel,
-            duration: computedMeta && computedMeta.duration || formatElapsed(durationMs),
-            transcriptChars: fullJoined.length,
-          }),
+          mode === "promotion-review"
+            ? "你是审慎、中立的晋升评审总编辑。请把同一场答辩的全部现场证据与书面材料归并成一份完整报告，不替评委作最终决定。"
+            : "你是综合纪要的总编辑。请把同一场会议的内部议题材料归并为一篇结构清晰、证据充分、以事情为中心的最终纪要。",
+          consolidationPrompt,
           Object.assign(
             { stream: true, thinkingMode: "fast", payload: { max_tokens: consolidationMaxTokens } },
             createBriefingLlmActivityOptions(plugin, computedMeta, {
               stage: "consolidate",
-              stageLabel: "归并全场议题",
-              detail: "正在把各时段材料整理成一篇综合纪要",
+              stageLabel: mode === "promotion-review" ? "生成晋升评审报告" : "归并全场议题",
+              detail: mode === "promotion-review" ? "正在归并书面材料、述职和评委问答" : "正在把各时段材料整理成一篇综合纪要",
               progress: 88,
             }),
           ),
-          { purpose: "briefing-synthesis-consolidation", mode, jobId: identity.id, partTotal: partPlans.length, transcriptChars: fullJoined.length },
+          { purpose: mode === "promotion-review" ? "promotion-review-consolidation" : "briefing-synthesis-consolidation", mode, jobId: identity.id, partTotal: partPlans.length, transcriptChars: fullJoined.length },
         );
         const parsed = parseBriefingPartResponse(consolidation.text);
         const body = normalizeBriefingPartBody(parsed.body, { fragmentMode: false });
@@ -6811,7 +6907,9 @@ async function mergeAndPolish(plugin, segments, mode, recruitContext, sessionMet
   const tpl = resolveTemplatePromptForMode(plugin, mode, true);
   const sys = mode === "recruit"
     ? "你是严格的招聘评估官，正在合并分段转写并产出最终面试评价。立场是替面试官筛掉不达标候选人，不替候选人辩护。默认假设候选人不达标，需要正向证据才加分。诚实/不夸大/承认边界是基础职业素养，不计入亮点。结果未闭环、独立主导不清、行业不匹配、关键能力仅'接触过'——必须列入红旗。"
-    : "你是一位专业的文字编辑助手，擅长把分段录音转写合并为连续、干净、忠实原意、结构清晰的 Markdown 文档。";
+    : mode === "promotion-review"
+      ? "你是审慎、中立的晋升评审证据编辑。请把提名材料、候选人述职和评委问答映射回具体岗位的当前与目标职级任职要求，形成双画像差异报告。无证据不等于不具备，最终决定由评委作出。"
+      : "你是一位专业的文字编辑助手，擅长把分段录音转写合并为连续、干净、忠实原意、结构清晰的 Markdown 文档。";
   let userPrompt;
   if (isRecruitTextImport) {
     userPrompt = buildRecruitTextImportMergePrompt(joined, recruitContext);
@@ -7481,7 +7579,13 @@ class OutlineView extends obsidian.ItemView {
     root.toggleClass("is-idle-view", !activelyRecording);
     const activeTab = this.idlePanelTab || "outline";
 
-    // 招聘上下文内联编辑：接管整个面板（顶部返回 + 分组表单 + 底部操作）。非录音中才允许进。
+    // 对象上下文内联编辑：非录音中接管整个面板。
+    if (this._promotionReviewEditing && !activelyRecording) {
+      this.renderPromotionReviewContextInline(root);
+      this._lastSig = this.computeSignature();
+      restoreScroll();
+      return;
+    }
     if (this._recruitEditing && !activelyRecording && isRecruitFeatureUnlocked(this.plugin.settings)) {
       this.renderRecruitContextInline(root);
       this._lastSig = this.computeSignature();
@@ -11732,6 +11836,9 @@ class OutlineView extends obsidian.ItemView {
         if (!capSelect.contains(event.target)) capSelect.click();
       };
     }
+    if (currentMode === "promotion-review") {
+      this.renderPromotionReviewContextCard(controls);
+    }
     // 招聘评估：「对象」卡片位于两项主设置之后，避免打断模板 / 音频的固定双列关系。
     if (isRecruitFeatureUnlocked(this.plugin.settings) && currentMode === "recruit") {
       this.renderRecruitContextCard(controls);
@@ -12309,7 +12416,9 @@ class OutlineView extends obsidian.ItemView {
     const outlineText = normalizeOutlineMarkdownForDisplay((session && session.realtimeOutline) || this.aiOutline || "");
     if (outlineText) {
       const isRecruit = session && session.mode === "recruit";
-      if (isRecruit) body.addClass("is-recruit-mode");
+      const isPromotionReview = session && session.mode === "promotion-review";
+      if (isRecruit || isPromotionReview) body.addClass("is-recruit-mode");
+      if (isPromotionReview) body.addClass("is-promotion-review-mode");
       const sourcePath = session && session.mdPath ? session.mdPath : "";
       // 招聘面试模式：给含语义标记的列表项打 class（由 CSS 上色区分），并把行首 emoji 剥掉——不显示 emoji。
       // 确定性渲染路径（applyOutlineMarkerIcon）会换成 lucide 图标；这条 MarkdownRenderer 回退路径至少做到「无 emoji + 颜色区分」。
@@ -12517,11 +12626,13 @@ class OutlineView extends obsidian.ItemView {
       }
       return;
     }
+    const isPromotionReview = !!li.closest(".is-promotion-review-mode");
     if (topic) li.createSpan({ cls: "lexvoice-recruit-topic", text: topic });
     // —— 对话区 ——
     const dlg = li.createDiv({ cls: "lexvoice-recruit-dialog" });
-    if (q.length) this.renderRecruitTurn(dlg, "interviewer", "面试官", q.join("　"));
+    if (q.length) this.renderRecruitTurn(dlg, "interviewer", isPromotionReview ? "评委" : "面试官", q.join("　"));
     this.renderRecruitTurn(dlg, "candidate", "候选人", ans.length ? ans : null);
+    if (isPromotionReview) return;
     // —— AI 分析区 ——
     const ai = li.createDiv({ cls: "lexvoice-recruit-ai" });
     ai.createDiv({ cls: "lexvoice-recruit-ai-head", text: "AI 分析" });
@@ -13790,6 +13901,171 @@ class OutlineView extends obsidian.ItemView {
           }
         };
       }
+    }
+  }
+
+  renderPromotionReviewContextCard(parent) {
+    const ctx = normalizePromotionReviewContext(this.plugin.settings.promotionReviewContext || {});
+    const hasRequirements = !!ctx.requirements;
+    const hasMaterial = !!ctx.nominationMaterial;
+    const row = parent.createDiv({ cls: "lexvoice-outline-control-row lexvoice-recruit-row lexvoice-promotion-review-row" });
+    row.createSpan({ cls: "lexvoice-outline-control-label", text: "对象" });
+    const card = row.createDiv({ cls: "lexvoice-recruit-card" });
+    const head = card.createDiv({ cls: "lexvoice-recruit-card-head" });
+    const title = head.createSpan({ cls: "lexvoice-recruit-card-title" });
+    if (hasRequirements || hasMaterial) {
+      const person = ctx.revieweeName || "晋升候选人";
+      const role = ctx.position || ctx.jobSequence || "岗位待识别";
+      title.setText(`${person} · ${role}`);
+    } else {
+      title.setText("尚未准备晋升材料");
+    }
+    const editBtn = head.createEl("button", { cls: "lexvoice-recruit-card-edit", attr: { type: "button", title: "编辑晋升评审", "aria-label": "编辑晋升评审" } });
+    try { obsidian.setIcon(editBtn, (hasRequirements || hasMaterial) ? "pencil" : "plus"); } catch { editBtn.setText("设置"); }
+    editBtn.onclick = () => { this._promotionReviewEditing = true; this.render(); };
+    const chips = head.createDiv({ cls: "lexvoice-recruit-card-chips" });
+    if (ctx.currentLevel || ctx.targetLevel) {
+      chips.createSpan({ cls: "lexvoice-recruit-chip", text: `${ctx.currentLevel || "当前职级待识别"} → ${ctx.targetLevel || "目标职级待识别"}` });
+    }
+    chips.createSpan({ cls: `lexvoice-recruit-chip ${hasRequirements ? "is-ok" : "is-warn"}`, text: hasRequirements ? "任职要求已填" : "任职要求未填" });
+    chips.createSpan({ cls: `lexvoice-recruit-chip ${hasMaterial ? "is-ok" : "is-warn"}`, text: hasMaterial ? "提名材料已填" : "提名材料未填" });
+    if (ctx.preReview) chips.createSpan({ cls: "lexvoice-recruit-chip is-ok", text: "初审已生成" });
+  }
+
+  renderPromotionReviewContextInline(root) {
+    const settings = this.plugin.settings;
+    if (!this._promotionReviewDraft) this._promotionReviewDraft = normalizePromotionReviewContext({ ...(settings.promotionReviewContext || {}) });
+    const ctx = this._promotionReviewDraft;
+    const page = root.createDiv({ cls: "lexvoice-rcx-page lexvoice-promotion-review-page" });
+    const card = page.createDiv({ cls: "lexvoice-rcx-card" });
+    const top = card.createDiv({ cls: "lexvoice-rcx-top" });
+    const back = top.createEl("button", { cls: "lexvoice-rcx-back", attr: { type: "button", "aria-label": "返回", title: "返回" } });
+    try { obsidian.setIcon(back, "chevron-left"); } catch { back.setText("‹"); }
+    back.onclick = () => { this._promotionReviewEditing = false; this._promotionReviewDraft = null; this.render(); };
+    const titles = top.createDiv({ cls: "lexvoice-rcx-titles" });
+    titles.createDiv({ cls: "lexvoice-rcx-title", text: "晋升评审" });
+    top.createSpan({ cls: "lexvoice-rcx-badge", text: settings.promotionReviewContext && settings.promotionReviewContext.savedAt ? "已存" : "草稿" });
+
+    const form = card.createDiv({ cls: "lexvoice-rcx-form" });
+    const makeGroup = (title, optional = false) => {
+      const group = form.createDiv({ cls: "lexvoice-rcx-group" });
+      const titleRow = group.createDiv({ cls: "lexvoice-rcx-group-title" });
+      titleRow.createSpan({ cls: "lexvoice-rcx-group-name", text: optional ? `${title} · 可选` : title });
+      titleRow.createSpan({ cls: "lexvoice-rcx-group-line" });
+      return { group, titleRow };
+    };
+    const makeTextarea = (group, key, placeholder, rows) => {
+      const field = group.createDiv({ cls: "lexvoice-rcx-field" });
+      const textarea = field.createEl("textarea", { cls: "lexvoice-rcx-ta", attr: { placeholder, rows: String(rows) } });
+      textarea.value = ctx[key] || "";
+      textarea.addEventListener("input", () => {
+        ctx[key] = textarea.value;
+        ctx.preReview = "";
+        ctx.revieweeName = "";
+        ctx.position = "";
+        ctx.jobSequence = "";
+        ctx.currentLevel = "";
+        ctx.targetLevel = "";
+      });
+      return textarea;
+    };
+
+    const requirementsGroup = makeGroup("任职要求").group;
+    makeTextarea(requirementsGroup, "requirements", "粘贴当前职级和目标职级的任职要求，可直接复制表格、网页或文档文本…", 7);
+    const materialGroup = makeGroup("晋升提名材料").group;
+    makeTextarea(materialGroup, "nominationMaterial", "粘贴晋升提名表、主要工作业绩、员工自评、上级评价和 BP 评价等…", 9);
+    const focusGroup = makeGroup("重点考核能力", true).group;
+    makeTextarea(focusGroup, "focusCapabilities", "例如：复杂项目中的独立决策、专业能力高度、人才培养、与制作人的责任边界…", 4);
+
+    const saveContext = async () => {
+      const normalized = normalizePromotionReviewContext(ctx);
+      normalized.savedAt = new Date().toISOString();
+      settings.promotionReviewContext = normalized;
+      this._promotionReviewDraft = normalized;
+      await this.plugin.saveSettings();
+      return normalized;
+    };
+    const generate = async (button) => {
+      if (!String(ctx.requirements || "").trim() || !String(ctx.nominationMaterial || "").trim()) {
+        new obsidian.Notice("请先填写任职要求和晋升提名材料");
+        return;
+      }
+      const saved = await saveContext();
+      const old = button.textContent || "生成晋升初审";
+      button.disabled = true;
+      button.addClass("is-busy");
+      button.setText("生成中…");
+      try {
+        await this.plugin.runTaskActivity({
+          id: `promotion-pre-review:${Date.now()}`,
+          kind: "promotion-pre-review",
+          title: "生成晋升初审",
+          status: "running",
+          stage: "llm",
+          stageLabel: "正在分析任职要求与提名材料",
+          detail: [saved.revieweeName, saved.position, saved.currentLevel && saved.targetLevel ? `${saved.currentLevel} → ${saved.targetLevel}` : ""].filter(Boolean).join(" · "),
+          progress: null,
+          deadlineAt: Date.now() + 150_000,
+          actions: [],
+        }, async ({ patch }) => {
+          const preReview = await generatePromotionPreReview(this.plugin, saved);
+          if (!preReview) throw new Error("没有生成可用的晋升初审");
+          patch({ stage: "saving", stageLabel: "保存晋升初审", progress: 90, deadlineAt: 0 });
+          const normalized = normalizePromotionReviewContext({ ...saved, preReview, savedAt: new Date().toISOString() });
+          settings.promotionReviewContext = normalized;
+          this._promotionReviewDraft = normalized;
+          await this.plugin.saveSettings();
+          return preReview;
+        }, {
+          stage: "done",
+          stageLabel: "晋升初审已生成",
+          progress: 100,
+          actions: [{ id: "dismiss-task", label: "关闭记录" }],
+          failureLabel: "晋升初审未生成",
+          failureActions: [{ id: "dismiss-task", label: "关闭记录" }],
+        });
+        new obsidian.Notice("晋升初审已生成");
+        this.render();
+      } catch (error) {
+        button.disabled = false;
+        button.removeClass("is-busy");
+        button.setText(old);
+        new obsidian.Notice(`生成失败：${(error && error.message) || error}`);
+      }
+    };
+
+    const hasPreReview = !!String(ctx.preReview || "").trim();
+    const resultGroup = makeGroup("晋升初审");
+    const generateBtn = resultGroup.titleRow.createEl("button", { cls: "lexvoice-rcx-txtbtn", attr: { type: "button" }, text: hasPreReview ? "重新生成" : "生成初审" });
+    generateBtn.onclick = () => { void generate(generateBtn); };
+    if (hasPreReview) {
+      const result = resultGroup.group.createDiv({ cls: "lexvoice-rcx-result markdown-rendered" });
+      try { void obsidian.MarkdownRenderer.render(this.app, ctx.preReview.trim(), result, "", this); }
+      catch { result.createEl("pre", { text: ctx.preReview.trim() }); }
+    } else {
+      resultGroup.group.createDiv({ cls: "lexvoice-rcx-empty", text: "尚未生成。初审会输出职级差异、双画像、书面证据与评委重点提问大纲。" });
+    }
+
+    const bottom = card.createDiv({ cls: "lexvoice-rcx-bottom" });
+    const row = bottom.createDiv({ cls: "lexvoice-rcx-btn-row" });
+    const saveBtn = row.createEl("button", { cls: "lexvoice-rcx-btn-secondary", attr: { type: "button" }, text: "保存" });
+    saveBtn.onclick = async () => { await saveContext(); new obsidian.Notice("已保存晋升评审材料"); };
+    const primary = row.createEl("button", { cls: "mod-cta lexvoice-rcx-btn-primary", attr: { type: "button" } });
+    if (hasPreReview) {
+      primary.addClass("is-record");
+      try { obsidian.setIcon(primary.createSpan({ cls: "lexvoice-rcx-btn-icon" }), "mic"); } catch { /* intentionally empty */ }
+      primary.createSpan({ text: "开始答辩录音" });
+      primary.onclick = async () => {
+        await saveContext();
+        this._promotionReviewEditing = false;
+        this._promotionReviewDraft = null;
+        this.render();
+        await this.plugin.startRecording();
+      };
+    } else {
+      try { obsidian.setIcon(primary.createSpan({ cls: "lexvoice-rcx-btn-icon" }), "sparkles"); } catch { /* intentionally empty */ }
+      primary.createSpan({ text: "生成晋升初审" });
+      primary.onclick = () => { void generate(primary); };
     }
   }
 
@@ -16816,6 +17092,11 @@ class LexVoicePlugin extends obsidian.Plugin {
       });
       return session.realtimeOutline || "";
     }
+    const promotionQa = session.mode === "promotion-review"
+      && detectPromotionReviewPhase(session.promotionReviewPhase, windowed.newSegments) === "qa";
+    if (session.mode === "promotion-review") {
+      session.promotionReviewPhase = promotionQa ? "qa" : "presentation";
+    }
     const meta = getModeMeta(this.settings, session.mode);
     const sys = "你是结构化思考助手。任务不是复述，而是把零散的发言归并到共同的上一级概念之下。层级深度由材料决定，不预设。克制——不堆砌符号、不强加分析维度、不过度抽象。";
     const local = !!opts.local || isLocalLlmEndpoint(this.settings && this.settings.llmEndpoint);
@@ -16835,15 +17116,17 @@ class LexVoicePlugin extends obsidian.Plugin {
       rollingContext + transcript,
       session.captureMode,
       langInstruction,
-      { incremental: windowed.isIncremental }
+      { incremental: windowed.isIncremental, promotionQa }
     );
     if (opts.formatRetry) {
-      user += session.mode === "recruit"
+      user += (session.mode === "recruit" || promotionQa)
         ? [
             "",
             "【格式修复重试】",
             "上一次同一批内容因输出结构不合格被程序拒绝。请重新整理本批内容；不要解释原因。",
-            "只输出“主题 / 问题 / 回答 / 评价 / 追问”逐行协议，不要输出记忆、XML、Markdown 或编号。",
+            promotionQa
+              ? "只输出“主题 / 问题 / 回答”逐行协议，不要输出评价、追问、记忆、XML、Markdown 或编号。"
+              : "只输出“主题 / 问题 / 回答 / 评价 / 追问”逐行协议，不要输出记忆、XML、Markdown 或编号。",
           ].join("\n")
         : [
             "",
@@ -16920,7 +17203,7 @@ class LexVoicePlugin extends obsidian.Plugin {
     }
     const parsed = parseRealtimeOutlineResponse(raw, session.realtimeOutline, session.realtimeOutlineMemory);
     let recruitFormatRecovered = false;
-    if (session.mode === "recruit") {
+    if (session.mode === "recruit" || promotionQa) {
       const recruitProtocol = parseRecruitRealtimeOutlineProtocol(raw);
       const recoveredOutline = recruitProtocol.outline;
       const parsedNodeCount = parseRealtimeOutlineStateFromMarkdown(parsed.outline).length;
@@ -17555,6 +17838,17 @@ class LexVoicePlugin extends obsidian.Plugin {
     await this.app.workspace.revealLeaf(leaf);
   }
 
+  async openPromotionReviewContextInline() {
+    if (!isRecruitFeatureUnlocked(this.settings)) {
+      new obsidian.Notice("晋升评审功能未解锁");
+      return;
+    }
+    await this.openOutlineView();
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_OUTLINE);
+    const view = leaves.length ? leaves[0].view : null;
+    if (view && typeof view.render === "function") { view._promotionReviewEditing = true; view.render(); }
+  }
+
   // 打开大纲面板并进招聘上下文「内联编辑」视图（替掉原来的 flow:"settings" 弹窗）。
   async openRecruitContextInline() {
     if (!isRecruitFeatureUnlocked(this.settings)) { new obsidian.Notice("招聘评估功能未解锁"); return; }
@@ -17649,6 +17943,15 @@ class LexVoicePlugin extends obsidian.Plugin {
     const mode = continuationInfo && continuationInfo.mode
       ? continuationInfo.mode
       : getEffectivePolishMode(this.settings, this._oneShotPolishMode || this.settings.polishMode);
+    if (mode === "promotion-review") {
+      const savedContext = normalizePromotionReviewContext(this.settings.promotionReviewContext || {});
+      if (!savedContext.requirements || !savedContext.nominationMaterial || !savedContext.preReview) {
+        new obsidian.Notice("请先填写任职要求和晋升提名材料，并生成晋升初审。", 6000);
+        await this.openPromotionReviewContextInline();
+        return;
+      }
+      this._currentPromotionReviewContext = savedContext;
+    }
     if (mode === "recruit") {
       // 录音前不再弹窗：直接用已存的招聘上下文开录。要改上下文（尤其每场现导当场候选人简历），
       // 事先点对象卡片的铅笔进内联编辑即可——录音入口不再打断。
@@ -17700,6 +18003,8 @@ class LexVoicePlugin extends obsidian.Plugin {
         realtimeOutlineNoChangeCommittedCount: -1,
         realtimeOutlineNoChangeRetryCount: 0,
         interviewBrief: recordingInterviewBrief,
+        promotionReviewContext: this._currentPromotionReviewContext || null,
+        promotionReviewPhase: "presentation",
         writeQueue: Promise.resolve(),
         segmentPersistQueue: Promise.resolve(),
         liveAsrJobs: new Map(),
@@ -17728,6 +18033,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         detail: "正在采集音频，分段后会自动转写",
       });
       this._currentRecruitContext = null;
+      this._currentPromotionReviewContext = null;
 
       const activeProviderId = this.settings.activeTranscribeProvider || "siliconflow";
       const activeProvider = (this.settings.transcribeProviders || {})[activeProviderId] || {};
@@ -17739,11 +18045,15 @@ class LexVoicePlugin extends obsidian.Plugin {
       const interviewBriefBlock = (!continuationInfo && recordingInterviewBrief)
         ? renderRecordingInterviewBriefBlock(this.session.id, recordingInterviewBrief).trimEnd()
         : null;
+      const promotionPreReviewBlock = (!continuationInfo && mode === "promotion-review" && this.session.promotionReviewContext && this.session.promotionReviewContext.preReview)
+        ? renderRecordingPromotionReviewBlock(this.session.id, this.session.promotionReviewContext.preReview).trimEnd()
+        : null;
       const header = [
         continuationInfo ? "" : null,
         titleLine,
         "",
         `<!-- lexvoice-session:${this.session.id} -->`,
+        promotionPreReviewBlock,
         interviewBriefBlock,
         `<!-- lexvoice-segments-start:${this.session.id} -->`,
         `<!-- lexvoice-segments-end:${this.session.id} -->`,
@@ -19251,6 +19561,7 @@ class LexVoicePlugin extends obsidian.Plugin {
         duration: textImport ? "" : (lastSeg ? formatElapsed(lastSeg.endOffsetMs || 0) : ""),
         source: session.source || "",
         sourceMeta: session.sourceMeta || null,
+        promotionReviewContext: session.promotionReviewContext || null,
         meetingWorkbench: normalizeMeetingWorkbench(session.meetingWorkbench),
       };
       finalSessionMeta = sessionMeta;
@@ -19331,6 +19642,7 @@ class LexVoicePlugin extends obsidian.Plugin {
           duration: isTextImportSession(session) ? "" : (lastSeg ? formatElapsed(lastSeg.endOffsetMs || 0) : ""),
           source: session.source || "",
           sourceMeta: session.sourceMeta || null,
+          promotionReviewContext: session.promotionReviewContext || null,
           meetingWorkbench: normalizeMeetingWorkbench(session.meetingWorkbench),
         },
         lastError: mergeError.message || String(mergeError),
@@ -20387,6 +20699,7 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
     const audioRow = masterAudioBlock || session.segments.map((s, i) => getAudioSegmentListItem(s, i)).filter(Boolean).join("\n");
     const realtimeOutlineBlock = buildRealtimeOutlineDetails(session);
     const interviewBriefBlock = buildInterviewBriefDetails(session);
+    const promotionPreReviewBlock = buildPromotionPreReviewDetails(session);
     const playbackTimelineBlock = retainAudio ? buildPlaybackTimelineDetails(session) : "";
     const meetingWorkbenchBlock = buildMeetingWorkbenchDetails(session);
     const recordingInfoBlock = textImport ? buildTextImportInfoDetails(session, meta.prefix, this.settings.llmModel) : buildRecordingInfoDetails({
@@ -20431,6 +20744,8 @@ td, th { border: 1px solid #ddd; padding: 6px 8px; }
       recordingInfoBlock ? "" : null,
       externalAudioSourceBlock || null,
       externalAudioSourceBlock ? "" : null,
+      promotionPreReviewBlock || null,
+      promotionPreReviewBlock ? "" : null,
       interviewBriefBlock || null,
       interviewBriefBlock ? "" : null,
       meetingWorkbenchBlock || null,
@@ -21708,11 +22023,13 @@ ${source}`;
       "招聘面试": "recruit",
       "招聘评估": "recruit",
       "面试": "recruit",
+      "晋升评审": "promotion-review",
+      "晋升述职评审": "promotion-review",
+      "述职评审": "promotion-review",
     };
     if (typeToMode[typeStr]) {
       const mode = typeToMode[typeStr];
-      if (mode === "recruit" && !isRecruitFeatureUnlocked(this.settings)) return null;
-      return mode;
+      return isKnownPolishMode(this.settings, mode) ? mode : null;
     }
     const fallbackMode = detectRecentModeFromFilename(this.settings, file.basename);
     return fallbackMode && fallbackMode !== "off" ? fallbackMode : null;
@@ -21795,8 +22112,8 @@ ${source}`;
       return;
     }
     const mode = sources[sources.length - 1].mode || sources[0].mode || getEffectivePolishMode(this.settings, this.settings.polishMode);
-    if (mode === "recruit" && !isRecruitFeatureUnlocked(this.settings)) {
-      new obsidian.Notice("招聘评估模式尚未启用，无法合并为招聘评估纪要。", 8000);
+    if (["promotion-review", "recruit", "recruit-needs"].includes(mode) && !isRecruitFeatureUnlocked(this.settings)) {
+      new obsidian.Notice("该进阶评审模式尚未启用，无法合并纪要。", 8000);
       return;
     }
     await this.ensureFolder(this.settings.mdFolder);
@@ -22106,7 +22423,7 @@ ${source}`;
 
   async repolishMarkdownFile(file, mode, repolishOptions = null) {
     if (!(file instanceof obsidian.TFile) || file.extension !== "md") return;
-    if (mode === "recruit" && !isRecruitFeatureUnlocked(this.settings)) {
+    if (["promotion-review", "recruit", "recruit-needs"].includes(mode) && !isRecruitFeatureUnlocked(this.settings)) {
       new obsidian.Notice("该扩展模式尚未启用");
       return;
     }

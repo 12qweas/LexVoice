@@ -358,6 +358,37 @@ describe("settings-io round-trip（白名单防丢键兜底）", () => {
     expect(restored.lastUpdateCheckAt).toBe(settings.lastUpdateCheckAt);
   });
 
+  it("晋升评审上下文和内置模板可完整 round-trip", () => {
+    const settings = normalizeLexVoiceSettings({});
+    settings.promotionReviewContext = {
+      requirements: "P8/P9 任职要求",
+        nominationMaterial: "姓名：候选人丙\n岗位：主策",
+      focusCapabilities: "独立决策",
+      preReview: "# 晋升初审",
+        revieweeName: "候选人丙",
+      position: "主策",
+      jobSequence: "策划",
+      currentLevel: "P8",
+      targetLevel: "P9",
+      savedAt: "2026-08-25T00:00:00.000Z",
+    };
+
+    const restored = roundTrip(settings);
+    expect(restored.promotionReviewContext).toEqual(settings.promotionReviewContext);
+    expect(restored.promptTemplates["builtin-promotion-review"]?.mode).toBe("promotion-review");
+    expect(restored.activeTemplateByMode["promotion-review"]).toBe("builtin-promotion-review");
+  });
+
+  it("未解锁 HR 进阶能力时不会恢复晋升评审为当前模式", () => {
+    const restored = normalizeLexVoiceSettings({
+      polishMode: "promotion-review",
+      recruiting: { unlocked: false },
+    });
+
+    expect(restored.recruitFeatureUnlocked).toBe(false);
+    expect(restored.polishMode).toBe(DEFAULT_SETTINGS.polishMode);
+  });
+
   it("二次 round-trip 稳定（不会每次保存都漂移一点）", () => {
     const a = normalizeLexVoiceSettings({});
     a.sedimentAutoExtract = true;

@@ -254,6 +254,19 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   lastUpdateError: "",
   installedUpdateVersion: "",
 
+  promotionReviewContext: {
+    requirements: "",
+    nominationMaterial: "",
+    focusCapabilities: "",
+    preReview: "",
+    revieweeName: "",
+    position: "",
+    jobSequence: "",
+    currentLevel: "",
+    targetLevel: "",
+    savedAt: null,
+  },
+
   // 招聘面试模式上下文 —— 录音前注入 JD/简历，让 AI 评价有锚点
   recruitContext: {
     jd: "",

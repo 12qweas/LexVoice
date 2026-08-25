@@ -56,7 +56,10 @@ describe("release runtime contracts", () => {
     expect(mainSource).toContain('"llm.briefing_part_under_detailed"');
     expect(mainSource).toContain('purpose: "briefing-part-detail-repair"');
     expect(mainSource).toContain("buildSynthesisConsolidationPrompt");
-    expect(mainSource).toContain('purpose: "briefing-synthesis-consolidation"');
+    expect(mainSource).toContain("buildPromotionReviewConsolidationPrompt");
+    expect(mainSource).toContain(
+      'mode === "promotion-review" ? "promotion-review-consolidation" : "briefing-synthesis-consolidation"',
+    );
     expect(mainSource).toContain("checkpoint.consolidationStatus");
   });
 

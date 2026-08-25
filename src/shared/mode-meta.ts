@@ -6,7 +6,9 @@ import { isRecruitFeatureUnlocked } from '../recruit';
 
 export const STANDARD_POLISH_MODES = ["synthesis", "meeting", "seminar", "interview", "monologue", "learning"];
 
-export const ALL_POLISH_MODES = ["synthesis", "meeting", "seminar", "interview", "monologue", "learning", "recruit", "recruit-needs"];
+export const ALL_POLISH_MODES = ["synthesis", "meeting", "seminar", "interview", "monologue", "learning", "promotion-review", "recruit", "recruit-needs"];
+
+const HR_GATED_POLISH_MODES = new Set(["promotion-review", "recruit", "recruit-needs"]);
 
 type CustomPromptModeTemplate = {
   id: string;
@@ -19,7 +21,7 @@ type CustomPromptModeTemplate = {
 
 export function isKnownPolishMode(settings, mode) {
   if (mode === "off") return true;
-  if (mode === "recruit" && !isRecruitFeatureUnlocked(settings)) return false;
+  if (HR_GATED_POLISH_MODES.has(mode) && !isRecruitFeatureUnlocked(settings)) return false;
   return !!(MODE_META[mode] || getCustomPromptModeTemplate(settings, mode));
 }
 
