@@ -1,7 +1,48 @@
 import { describe, expect, it, vi } from "vitest";
 
+const wsMock = vi.hoisted(() => ({ instances: [] as Array<{
+  endpoint: string;
+  options: { headers?: Record<string, string> };
+}> }));
+
+vi.mock("ws", () => {
+  class FakeWebSocket {
+    endpoint: string;
+    options: { headers?: Record<string, string> };
+    handlers: Record<string, (...args: unknown[]) => void> = {};
+    readyState = 1;
+
+    constructor(endpoint: string, options: { headers?: Record<string, string> }) {
+      this.endpoint = endpoint;
+      this.options = options;
+      wsMock.instances.push(this);
+      queueMicrotask(() => this.handlers.open?.());
+    }
+
+    on(event: string, handler: (...args: unknown[]) => void) {
+      this.handlers[event] = handler;
+    }
+
+    send(payload: string | ArrayBuffer) {
+      if (typeof payload !== "string") return;
+      const message = JSON.parse(payload) as { header?: { action?: string } };
+      if (message.header?.action === "run-task") {
+        queueMicrotask(() => this.handlers.message?.(JSON.stringify({ header: { event: "task-started" } })));
+      }
+    }
+
+    close() {
+      this.readyState = 3;
+      this.handlers.close?.();
+    }
+  }
+
+  return { WebSocket: FakeWebSocket, default: FakeWebSocket };
+});
+
 vi.mock("obsidian", () => ({
   requestUrl: vi.fn(),
+  Platform: { isMobile: false, isMobileApp: false },
 }));
 
 import * as obsidian from "obsidian";
@@ -134,6 +175,37 @@ describe("service endpoint transport security", () => {
       await expect(client.connect()).rejects.toThrow("公网地址必须使用 WSS");
     }
   });
+
+  it("移动端不会加载 Node WebSocket，并提示改用非流式转写", async () => {
+    const platform = (obsidian as unknown as { Platform: { isMobile: boolean } }).Platform;
+    platform.isMobile = true;
+    try {
+      const client = new DashScopeStreamingClient({
+        endpoint: "wss://api.example.com/realtime",
+        apiKey: "secret",
+        model: "model",
+      });
+      await expect(client.connect()).rejects.toThrow("移动端请改用分段转写或整段音频转写");
+    } finally {
+      platform.isMobile = false;
+    }
+  });
+
+  it("桌面端懒加载 WebSocket，并保留流式 ASR 鉴权头", async () => {
+    wsMock.instances.length = 0;
+    const client = new DashScopeStreamingClient({
+      endpoint: "wss://api.example.com/realtime",
+      apiKey: "secret",
+      model: "model",
+    });
+
+    await client.connect();
+
+    expect(wsMock.instances).toHaveLength(1);
+    expect(wsMock.instances[0].endpoint).toBe("wss://api.example.com/realtime");
+    expect(wsMock.instances[0].options.headers?.Authorization).toBe("Bearer secret");
+    client._safeClose();
+  });
 });
 
 describe("LLM 模型列表地址", () => {
@@ -207,6 +279,7 @@ describe("LLM 请求传输学习", () => {
       vi.unstubAllGlobals();
     }
   });
+
 });
 
 describe("LLM 输出预算兼容", () => {

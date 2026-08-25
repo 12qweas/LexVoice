@@ -2,7 +2,25 @@
 // @ts-nocheck — JS 风格协议类（构造器赋值、无 TS 字段声明）；已用 tsc 确认无漏引用(TS2304=0)，余者皆类字段类型噪音，故与 main.ts 同档跳过。
 // 由 main.ts 抽出（模块化拆解，提升工程稳定性；纯搬迁、零行为改动）。
 import { assertSafeServiceEndpoint } from '../shared/util-llm-endpoint';
-import * as NodeWebSocketModule from 'ws';
+import { isLexVoiceMobileRuntime } from '../shared/util-platform';
+
+let nodeWebSocketCtorPromise = null;
+
+async function getNodeWebSocketCtor() {
+  if (isLexVoiceMobileRuntime()) return null;
+  if (!nodeWebSocketCtorPromise) {
+    nodeWebSocketCtorPromise = import('ws')
+      .then((wsModule) => wsModule && (wsModule.WebSocket || wsModule.default || wsModule))
+      .catch(() => null);
+  }
+  return nodeWebSocketCtorPromise;
+}
+
+async function requireHeaderCapableWebSocket(serviceLabel) {
+  const WSCtor = await getNodeWebSocketCtor();
+  if (WSCtor) return WSCtor;
+  throw new Error(`${serviceLabel}的实时流式转写需要桌面端 WebSocket；移动端请改用分段转写或整段音频转写。`);
+}
 
 export class DashScopeStreamingClient {
   constructor(opts) {
@@ -25,12 +43,7 @@ export class DashScopeStreamingClient {
   async connect() {
     assertSafeServiceEndpoint(this.endpoint, "websocket", "实时转写服务地址");
     if (!this.apiKey) throw new Error("DashScope API Key 未配置");
-    let WSCtor = null;
-    try {
-      const wsModule = NodeWebSocketModule;
-      WSCtor = wsModule && (wsModule.WebSocket || wsModule.default || wsModule);
-    } catch { /* intentionally empty */ }
-    if (!WSCtor) WSCtor = window.WebSocket;
+    const WSCtor = await requireHeaderCapableWebSocket("DashScope");
     return new Promise((resolve, reject) => {
       let resolved = false;
       try {
@@ -174,12 +187,7 @@ export class OpenAIRealtimeTranscriptionClient {
   async connect() {
     assertSafeServiceEndpoint(this.endpoint, "websocket", "实时转写服务地址");
     if (!this.apiKey) throw new Error("OpenAI API Key 未配置");
-    let WSCtor = null;
-    try {
-      const wsModule = NodeWebSocketModule;
-      WSCtor = wsModule && (wsModule.WebSocket || wsModule.default || wsModule);
-    } catch { /* intentionally empty */ }
-    if (!WSCtor) WSCtor = window.WebSocket;
+    const WSCtor = await requireHeaderCapableWebSocket("OpenAI Realtime");
     return new Promise((resolve, reject) => {
       let resolved = false;
       try {
@@ -320,12 +328,7 @@ export class OpenAIRealtimeTranslationClient {
   async connect() {
     assertSafeServiceEndpoint(this.endpointBase, "websocket", "实时翻译服务地址");
     if (!this.apiKey) throw new Error("OpenAI API Key 未配置");
-    let WSCtor = null;
-    try {
-      const wsModule = NodeWebSocketModule;
-      WSCtor = wsModule && (wsModule.WebSocket || wsModule.default || wsModule);
-    } catch { /* intentionally empty */ }
-    if (!WSCtor) WSCtor = window.WebSocket;
+    const WSCtor = await requireHeaderCapableWebSocket("OpenAI Realtime 翻译");
     const sep = this.endpointBase.indexOf("?") >= 0 ? "&" : "?";
     const url = this.endpointBase + sep + "model=" + encodeURIComponent(this.model);
     return new Promise((resolve, reject) => {

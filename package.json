@@ -1,7 +1,7 @@
 {
   "name": "lexvoice",
-  "version": "2.1.1",
-  "description": "Obsidian desktop plugin for recording, transcription, and AI-organized Markdown notes.",
+  "version": "2.1.2",
+  "description": "Obsidian plugin for recording, transcription, and AI-organized Markdown notes.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
@@ -9,7 +9,7 @@
     "lint": "eslint src",
     "check:versions": "node scripts/check-version-alignment.mjs",
     "check:undefined-symbols": "node scripts/check-undefined-symbols.mjs",
-    "build": "npm run check:versions && npm run check:undefined-symbols && npm run typecheck:core && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "build": "npm run check:versions && npm run check:undefined-symbols && npm run typecheck:core && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production && node scripts/check-mobile-bundle-load.mjs",
     "test": "vitest run",
     "verify": "npm run lint && npm run build && npm test",
     "test:watch": "vitest",

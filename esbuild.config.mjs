@@ -7,10 +7,9 @@ const production = process.argv[2] === "production";
 // 若它与磁盘 manifest.json 的版本不一致，说明上次更新只换了 manifest、没换 main.js。
 const buildVersion = JSON.parse(readFileSync("./manifest.json", "utf8")).version || "0.0.0";
 
-// 强制 require("ws") 解析到它的 Node 实现（node_modules/ws/index.js），绕开 ws 的 "browser" 字段
-// ——那个 browser 入口是个只会抛 "ws does not work in the browser" 的 stub。
-// Obsidian 跑在 Electron 渲染进程（有 Node），能用 ws 设置 Authorization 请求头；浏览器原生 WebSocket 设不了头，
-// dashscope 等流式 ASR 握手阶段校验鉴权头，缺了必 401/403。
+// 桌面端真正启用流式 ASR 时，懒加载 ws 的 Node 实现以设置 Authorization 请求头。
+// 不能在模块顶层初始化 ws：Obsidian 移动端没有 Node/Buffer/process，顶层加载会让整个插件启动失败。
+// 浏览器原生 WebSocket 不能设置握手请求头，因此移动端保留分段/整段转写，流式 ASR 仍限定桌面端。
 const wsForceNodePlugin = {
   name: "ws-force-node",
   setup(build) {
@@ -21,7 +20,7 @@ const wsForceNodePlugin = {
 const context = await esbuild.context({
   entryPoints: ["./src/main.ts"],
   bundle: true,
-  // ws 打包进来（见上）；ws 依赖的 Node 内置模块 + 可选原生模块列 external，由 Electron 运行时提供 / 忽略。
+  // ws 打包进来但只在动态 import 执行时初始化；其 Node 内置模块由桌面 Electron 运行时提供。
   external: ["obsidian", "electron", "http", "https", "net", "tls", "crypto", "stream", "zlib", "events", "url", "util", "buffer", "bufferutil", "utf-8-validate"],
   plugins: [wsForceNodePlugin],
   format: "cjs",

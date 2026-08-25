@@ -13,7 +13,7 @@ It is **not** a hosted cloud service and ships **no API keys**. You connect your
 
 LexVoice started as a plain record → transcribe → summarize plugin. But the valuable part of a meeting is rarely the raw transcript — it is *who said what, what to do next, what you learned, and the terms you will hear again*. So LexVoice was rebuilt from a transcription tool into a **meeting workbench**: recording is just the entry point; the live outline, the sediment review, and the object library are the point.
 
-LexVoice supports desktop and mobile Obsidian workflows. Mobile recording uses the device microphone. System audio, virtual audio devices, multichannel capture, and desktop device diagnostics require the desktop app.
+LexVoice supports desktop and mobile Obsidian workflows. Mobile recording uses the device microphone and supports segmented or whole-audio transcription after capture. System audio, virtual audio devices, multichannel capture, desktop device diagnostics, and realtime streaming ASR providers that require custom authentication headers require the desktop app.
 
 ## Features
 
