@@ -3625,11 +3625,14 @@ class RecorderService {
     //   mix-virtual         — 麦克风 + 电脑音频（会议/视频推荐）
       const wantMic = mode === "mic" || mode === "mix-virtual";
 
-    // 第一阶段：
-    // “仅电脑音频”使用 Windows 原生系统音频捕获。
-    // “麦克风 + 电脑音频”暂时仍保留旧虚拟声卡实现，便于单独验证。
-      const wantSystem = mode === "virtualCable";
-      const wantVirt = mode === "mix-virtual";
+    // Windows 电脑音频使用系统音频捕获。
+    // “仅电脑音频”使用 sysStream；
+    // “麦克风 + 电脑音频”使用 micStream + sysStream。
+      const wantSystem =
+        mode === "virtualCable" ||
+        mode === "mix-virtual";
+
+      const wantVirt = false;
 
       let micStream = null;
       let sysStream = null;
