@@ -83,6 +83,7 @@ import {
   resolveAudioChannelRuntimeMode,
   speakerLabelForChannel,
 } from "./audio/channel-speakers";
+import { acquireWindowsSystemAudio } from "./audio/system-audio";
 import { renderMultichannelAudioBufferSliceToWav, transcribeAudioByChannels } from "./asr/channel-transcription";
 import { applySpeakerNamesForLlm, buildConfirmedSpeakerMappings, collectSpeakerCandidates } from "./asr/speaker-mapping";
 import { isSpeakerDiarizationProvider, normalizeRequestedSpeakerCount } from "./asr/diarization";
@@ -3622,10 +3623,17 @@ class RecorderService {
     //   mic                 — 仅麦克风（默认）
     //   virtualCable        — 仅电脑音频（一个被识别为虚拟设备的 audioinput）
     //   mix-virtual         — 麦克风 + 电脑音频（会议/视频推荐）
-    const wantMic    = mode === "mic" || mode === "mix-virtual";
-    const wantVirt   = mode === "virtualCable" || mode === "mix-virtual";
+      const wantMic = mode === "mic" || mode === "mix-virtual";
 
-    let micStream = null, virtStream = null;
+    // 第一阶段：
+    // “仅电脑音频”使用 Windows 原生系统音频捕获。
+    // “麦克风 + 电脑音频”暂时仍保留旧虚拟声卡实现，便于单独验证。
+      const wantSystem = mode === "virtualCable";
+      const wantVirt = mode === "mix-virtual";
+
+      let micStream = null;
+      let sysStream = null;
+      let virtStream = null;
 
     if (wantMic) {
       const mobile = isLexVoiceMobileRuntime();
@@ -3659,6 +3667,34 @@ class RecorderService {
       }
     }
 
+    if (wantSystem) {
+      try {
+        sysStream = await acquireWindowsSystemAudio();
+
+        console.log(
+          "[LexVoice] Windows system audio acquired",
+          sysStream.getAudioTracks().map((track) => ({
+            label: track.label,
+            readyState: track.readyState,
+            settings: track.getSettings(),
+          })),
+        );
+      } catch (e) {
+        if (micStream) {
+          micStream.getTracks().forEach((track) => track.stop());
+        }
+
+        console.error(
+          "[LexVoice] Windows system audio capture failed",
+          e,
+        );
+
+        throw new Error(
+          `无法获取 Windows 系统音频：${e?.message || e}`,
+        );
+      }
+    }
+
     if (wantVirt) {
       // 电脑音频没有合理默认，必须由用户显式选定；没选 → 明确提示去选，不猜。
       const virtId = this.plugin.settings.selectedVirtualDevice || "";
@@ -3682,10 +3718,15 @@ class RecorderService {
     }
 
     this.micStreamRef = micStream;
-    this.sysStreamRef = null;
+    this.sysStreamRef = sysStream;
     this.virtStreamRef = virtStream;
 
-    const sources = [micStream, virtStream].filter(Boolean);
+    const sources = [
+      micStream,
+      sysStream,
+      virtStream,
+    ].filter(Boolean);
+
     if (sources.length > 1) {
       try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -3697,7 +3738,7 @@ class RecorderService {
         // 混流上下文构造失败：把已打开的 mic/virt 流全部停掉，避免 track 泄漏后再抛错。
         try { if (this.audioContext) { this.audioContext.close(); this.audioContext = null; } } catch { /* intentionally empty */ }
         for (const s of sources) { try { s.getTracks().forEach((t) => t.stop()); } catch { /* intentionally empty */ } }
-        this.micStreamRef = null; this.virtStreamRef = null;
+        this.micStreamRef = null; this.sysStreamRef = null; this.virtStreamRef = null;
         throw e;
       }
     }
