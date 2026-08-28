@@ -3473,6 +3473,21 @@ class RecorderService {
           if (meter) meters.push(meter);
         }
       }
+      if (this.sysStreamRef) {
+        const label = this.getStreamLabel(
+          this.sysStreamRef,
+          "Windows 系统音频",
+        );
+
+        const meter = this.createLevelMeter(
+          "computer",
+          "●",
+          label,
+          this.sysStreamRef,
+        );
+
+        if (meter) meters.push(meter);
+      }
       if (this.virtStreamRef) {
         const label = this.getStreamLabel(this.virtStreamRef, "电脑音频输入");
         const meter = this.createLevelMeter("computer", "●", label, this.virtStreamRef);
