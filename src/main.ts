@@ -14,7 +14,7 @@ import { getDesktopModule, getDesktopProcess } from "./shared/desktop-runtime";
 import { pickReportAccentColor, AudioTimeModal, PeopleDirectorySuggestionModal, SpeakerNameConfirmModal, QueueModal, VirtualCableSetupModal, RecruitContextModal, ImportTextModal, ImportAudioModal, AudioImportOptionsModal, BubbleWidget } from "./ui/modals";
 import { stripLexVoiceFrontmatterSimple, getRecentNoteProcessingState, lexvoiceConfirm, enumerateAudioDevices, trashLexVoiceFile, normalizeAudioInputMode, audioInputModeLabel } from "./ui/helpers";
 import { isKnownPolishMode, makeCustomPromptModeId, getCustomPromptModeTemplate, getCustomPromptModeTemplates, getBuiltInVisiblePolishModeKeys, getVisiblePolishModeKeys, getModeMeta, getEffectivePolishMode, getVisibleModeEntries, sanitizePromptTemplate } from "./shared/mode-meta";
-import { isLexVoiceMobileRuntime } from "./shared/util-platform";
+import { isLexVoiceMobileRuntime, isWindowsDesktopRuntime } from "./shared/util-platform";
 import { UpdateService } from "./update-service";
 import { normalizeKnowledgeExtractionHistory } from "./shared/util-knowledge";
 import { listJDProjects } from "./recruit/jd-projects";
@@ -3643,11 +3643,20 @@ class RecorderService {
     // Windows 电脑音频使用系统音频捕获。
     // “仅电脑音频”使用 sysStream；
     // “麦克风 + 电脑音频”使用 micStream + sysStream。
-      const wantSystem =
+      const wantsComputerAudio =
         mode === "virtualCable" ||
         mode === "mix-virtual";
 
-      const wantVirt = false;
+      const useWindowsSystemAudio =
+        isWindowsDesktopRuntime();
+
+      const wantSystem =
+        useWindowsSystemAudio &&
+        wantsComputerAudio;
+
+      const wantVirt =
+        !useWindowsSystemAudio &&
+        wantsComputerAudio;
 
       let micStream = null;
       let sysStream = null;
@@ -3718,7 +3727,7 @@ class RecorderService {
       const virtId = this.plugin.settings.selectedVirtualDevice || "";
       if (!virtId) {
         if (micStream) micStream.getTracks().forEach((t) => t.stop());
-        throw new Error("请先在「设置 → 常规 → 音频输入」选择电脑音频设备。\n\n录制电脑声音需要先配置虚拟声卡：\n• Windows：VB-Cable（vb-audio.com/Cable/）\n• macOS：BlackHole（existential.audio/blackhole/）\n• Linux：PulseAudio/PipeWire monitor source\n\n配置完成后，返回「音频输入」选择对应设备。");
+        throw new Error("请先在「设置 → 常规 → 音频输入」选择电脑音频设备。\n\n录制电脑声音需要先配置当前系统的电脑音频输入：\n• macOS：BlackHole（existential.audio/blackhole/）\n• Linux：PulseAudio/PipeWire monitor source\n\n配置完成后，返回「音频输入」选择对应设备。");
       }
       try {
         virtStream = await navigator.mediaDevices.getUserMedia({
@@ -13905,11 +13914,21 @@ class OutlineView extends obsidian.ItemView {
 
     mode = normalizeAudioInputMode(mode);
     const needMic    = mode === "mic" || mode === "mix-virtual";
-    const needVirt   = mode === "virtualCable" || mode === "mix-virtual";
+    const needComputerAudio = mode === "virtualCable" || mode === "mix-virtual";
+    const needSystem = needComputerAudio && isWindowsDesktopRuntime();
+    const needVirt = needComputerAudio && !isWindowsDesktopRuntime();
 
     // 去名字化：状态如实反映"用户选了什么"，而非按名字猜哪只是真麦/虚拟。
     const allInputs = (info.all || []).filter((d) => d && d.kind === "audioinput");
     const lines = [];
+
+    if (needSystem) {
+      lines.push({
+        ok: true,
+        text: "电脑音频：Windows 系统音频",
+        title: "Windows 系统音频将由 LexVoice 自动捕获，无需虚拟声卡。",
+      });
+    }
     if (needMic) {
       const selId = this.plugin.settings.selectedMicrophoneDevice || "";
       const realMic = selId

@@ -1327,7 +1327,7 @@ export class VirtualCableSetupModal extends obsidian.Modal {
 
     contentEl.createEl("h2", { text: "电脑音频捕获设置" });
     const desc = contentEl.createEl("p", { cls: "lexvoice-vcable-desc" });
-    desc.setText("LexVoice 不能直接监听耳机或扬声器里正在播放的声音。录制 B 站客户端、浏览器视频、课程或会议对方声音时，需要先把这些声音输出到虚拟声卡，让 LexVoice 将其识别为「电脑音频输入」；同时再把同一份声音监听到真实扬声器或耳机，确保本机仍可听到播放内容。一次配置，长期可用。");
+    desc.setText("电脑音频捕获方式因平台而异：Windows 桌面版可直接捕获系统播放音频，无需虚拟声卡；macOS 和 Linux 仍需要配置对应的虚拟音频输入。");
 
     // 平台 tabs
     const tabs = contentEl.createDiv({ cls: "lexvoice-vcable-tabs" });
@@ -1418,49 +1418,26 @@ export class VirtualCableSetupModal extends obsidian.Modal {
     });
   }
   renderWinContent(parent) {
-    this.step(parent, 1, "安装 VB-Cable（免费）", (b) => {
-      b.createEl("p", { text: "下载：" });
-      const a = b.createEl("a", { text: "https://vb-audio.com/Cable/", href: "https://vb-audio.com/Cable/" });
-      a.target = "_blank";
-      const ol = b.createEl("ol");
-      ol.createEl("li", { text: "下载 VB-Cable Driver Pack 后解压" });
-      ol.createEl("li", { text: "右键 VBCABLE_Setup_x64.exe → 以管理员身份运行" });
-      ol.createEl("li", { text: "点击 Install Driver → 重启电脑" });
+    this.step(parent, 1, "无需安装虚拟声卡", (b) => {
+      b.createEl("p", {
+        text: "Windows 桌面版 LexVoice 会直接捕获系统正在播放的声音，不需要安装或配置 VB-Cable。",
+      });
     });
-    this.step(parent, 2, "把要录制的声音输出切到 CABLE Input（播放设备）", (b) => {
-      b.createEl("p", { text: "线上会议可以在飞书、腾讯会议或 Zoom 的音频设置里改扬声器；B 站客户端、浏览器视频、播放器等桌面应用，可以在 Windows 音量混合器里单独指定输出设备。目标输出统一改为：" });
-      b.createEl("code", { text: "CABLE Input (VB-Audio Virtual Cable)" });
-      b.createEl("p", { cls: "lexvoice-vcable-tip" }).setText("注意：这里选的是 CABLE Input。虽然名字叫 Input，但它在 Windows 里是“播放/输出设备”；LexVoice 后面录的是同一根虚拟线缆另一端的 CABLE Output。");
-      const ol = b.createEl("ol");
-      ol.createEl("li", { text: "录会议：在会议软件的扬声器/输出设备中选择 CABLE Input" });
-      ol.createEl("li", { text: "录 B 站客户端：先播放一段视频，让应用出现在音量混合器里；Windows 设置 → 系统 → 声音 → 音量混合器 → 找到哔哩哔哩/bilibili → 输出设备选择 CABLE Input" });
-      ol.createEl("li", { text: "录浏览器：同样在音量混合器中找到 Chrome、Edge、Firefox 等浏览器 → 输出设备选择 CABLE Input" });
-      ol.createEl("li", { text: "录全部系统声音：把系统默认输出设备直接改为 CABLE Input" });
-      const warn = b.createEl("p", { cls: "lexvoice-vcable-warn" });
-      warn.setText("这一步会让系统声音暂时不从真实耳机/扬声器播放，需要完成下一步侦听设置后恢复监听。");
+
+    this.step(parent, 2, "选择录音来源", (b) => {
+      const ul = b.createEl("ul");
+      ul.createEl("li", {
+        text: "「仅电脑音频」：只录制 Windows 系统播放声音。",
+      });
+      ul.createEl("li", {
+        text: "「麦克风 + 电脑音频」：同时录制所选麦克风和 Windows 系统播放声音。",
+      });
     });
-    this.step(parent, 3, "用 CABLE Output 侦听到真实扬声器或耳机（关键）", (b) => {
-      b.createEl("p", { text: "要恢复本机监听，需要把 CABLE Output 侦听到真实耳机或扬声器：" });
-      const ol = b.createEl("ol");
-      ol.createEl("li", { text: "打开：控制面板 → 声音 → 录制（或右键任务栏喇叭图标 → 声音设置 → 更多声音设置）" });
-      ol.createEl("li", { text: "找到 CABLE Output" });
-      ol.createEl("li", { text: "双击 → 切到「侦听」标签" });
-      ol.createEl("li", { text: "勾选「侦听此设备」" });
-      ol.createEl("li", { text: "「通过此设备播放」选择真实耳机或扬声器，不要选 CABLE Input" });
-      ol.createEl("li", { text: "点「应用」" });
-      const tip = b.createEl("p", { cls: "lexvoice-vcable-tip" });
-      tip.setText("音频链路是：应用/浏览器 → CABLE Input（播放输出）→ CABLE Output（录制输入，LexVoice 读取）→ 侦听到真实耳机/扬声器。若侦听延迟明显，可改用 VoiceMeeter 这类混音工具做多输出。");
-    });
-    this.step(parent, 4, "把默认输入改回真实麦克风", (b) => {
-      const ol = b.createEl("ol");
-      ol.createEl("li", { text: "Windows 设置 → 系统 → 声音 → 输入" });
-      ol.createEl("li", { text: "选择真实麦克风，不要选 CABLE Output" });
-      ol.createEl("li", { text: "如果其他语音输入软件也没声音，通常就是这里被改成了 CABLE Output" });
-      const warn = b.createEl("p", { cls: "lexvoice-vcable-warn" });
-      warn.setText("CABLE Output 是给 LexVoice 这类录音软件读取电脑音频用的，不适合作为日常语音输入麦克风。");
-    });
-    this.step(parent, 5, "在 LexVoice 选择电脑音频模式", (b) => {
-      b.createEl("p", { text: "看 B 站、YouTube、课程或播客时选择「仅电脑音频」；线上会议或需要同时录入本人讲解时选择「麦克风加电脑音频」。" });
+
+    this.step(parent, 3, "开始录音", (b) => {
+      b.createEl("p", {
+        text: "开始录音后，LexVoice 会自动建立 Windows 系统音频捕获。无需切换系统输出设备，也无需选择额外的电脑音频输入。",
+      });
     });
   }
   renderLinuxContent(parent) {

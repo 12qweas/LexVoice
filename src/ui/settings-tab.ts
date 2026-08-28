@@ -6,7 +6,7 @@ import { DEFAULT_SETTINGS, DEFAULT_DAILY_MEETING_OVERVIEW_HEADING, DEFAULT_DAILY
 import { genId } from '../shared/util-common';
 import { canOmitServiceApiKey, isLocalLlmEndpoint, isSharedAddressSpaceEndpoint } from '../shared/util-llm-endpoint';
 import { isLocalServiceEndpoint } from '../shared/util-note';
-import { compareVersions, isLexVoiceMobileRuntime } from '../shared/util-platform';
+import { compareVersions, isLexVoiceMobileRuntime, isWindowsDesktopRuntime } from '../shared/util-platform';
 import { getEffectivePolishMode, getModeMeta, getVisibleModeEntries } from '../shared/mode-meta';
 import { LLM_SERVICE_PRESETS, ONE_CARD_PROVIDERS, applyLlmProfileToWorkingConfig, findLlmProfile, getActiveLlmServicePresetId, getLlmServicePreset, inferLlmServicePresetId, normalizeLlmProfiles, syncWorkingConfigToLlmProfile } from '../llm/config';
 import { fetchLlmModelList, getLlmConfigIssue, testLlmConnection } from '../llm/core';
@@ -374,25 +374,48 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       this.plugin.settings.selectedVirtualDevice = "";
       this.plugin.settings.captureMode = "mic";
       await this.plugin.saveSettings();
-      new obsidian.Notice("移动端已使用麦克风录音。电脑音频和虚拟声卡采集请在桌面端配置。", 7000);
+      new obsidian.Notice("移动端已使用麦克风录音。电脑音频采集请在桌面端使用。", 7000);
       return;
     }
+
     const info = await enumerateAudioDevices();
-    const virtual = info.virtualCables && info.virtualCables[0];
     const hasMic = info.mics && info.mics.length > 0;
+
+    if (isWindowsDesktopRuntime()) {
+      this.plugin.settings.selectedVirtualDevice = "";
+      this.plugin.settings.captureMode = hasMic ? "mix-virtual" : "virtualCable";
+      await this.plugin.saveSettings();
+
+      new obsidian.Notice(
+        hasMic
+          ? "已选择：麦克风 + 电脑音频。Windows 系统音频将自动捕获，无需配置虚拟声卡。请确认上方「麦克风」选择正确。"
+          : "已选择：仅电脑音频。Windows 系统音频将自动捕获，无需配置虚拟声卡。",
+        8000,
+      );
+      return;
+    }
+
+    const virtual = info.virtualCables && info.virtualCables[0];
+
     if (virtual) {
       this.plugin.settings.selectedVirtualDevice = virtual.deviceId;
       this.plugin.settings.captureMode = hasMic ? "mix-virtual" : "virtualCable";
       await this.plugin.saveSettings();
-      new obsidian.Notice(`已选择：${audioInputModeLabel(this.plugin.settings.captureMode)}（电脑音频：${virtual.label || "虚拟声卡"}）。请在上方「麦克风」下拉中确认本人说话用的设备。`, 8000);
+      new obsidian.Notice(
+        `已选择：${audioInputModeLabel(this.plugin.settings.captureMode)}（电脑音频：${virtual.label || "虚拟声卡"}）。请在上方「麦克风」下拉中确认本人说话用的设备。`,
+        8000,
+      );
       return;
     }
+
     this.plugin.settings.selectedVirtualDevice = "";
     this.plugin.settings.captureMode = "mic";
     await this.plugin.saveSettings();
+
     const msg = info.permissionRequired
-      ? "未获得音频权限或未检测到电脑音频输入，已保持「仅麦克风」。如需录 B 站客户端、浏览器视频或系统声音，请先授权并配置虚拟声卡。"
-      : "未检测到电脑音频输入，已保持「仅麦克风」。如需录 B 站客户端、浏览器视频或系统声音，请先配置虚拟声卡。";
+      ? "未获得音频权限或未检测到电脑音频输入，已保持「仅麦克风」。如需录制电脑声音，请先授权并配置当前系统所需的电脑音频输入。"
+      : "未检测到电脑音频输入，已保持「仅麦克风」。如需录制电脑声音，请先配置当前系统所需的电脑音频输入。";
+
     new obsidian.Notice(msg, 7000);
   }
 
@@ -638,7 +661,7 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
         name: "电脑音频捕获",
         need: "会议/视频适用",
         price: "可免费",
-        desc: "录制电脑声音需要虚拟声卡。选择包含电脑音频的录音来源后，在「设置电脑音频」中完成配置。",
+        desc: isWindowsDesktopRuntime() ? "Windows 可直接捕获系统音频，无需虚拟声卡。" : "录制电脑声音需要配置虚拟音频输入。选择包含电脑音频的录音来源后，在「设置电脑音频」中完成配置。",
         action: "查看设备指引",
         target: "general",
         status: "按需准备",
@@ -811,7 +834,13 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
     this.createAudioInputButton(actions, "测试设备", async () => {
       await this.runAudioDiagnostic();
     });
-    this.createAudioInputButton(actions, "设置电脑音频", () => new VirtualCableSetupModal(this.app, this.plugin).open());
+    if (!isWindowsDesktopRuntime()) {
+      this.createAudioInputButton(
+        actions,
+        "设置电脑音频",
+        () => new VirtualCableSetupModal(this.app, this.plugin).open(),
+      );
+    }
 
     const grid = card.createDiv({ cls: "lexvoice-audio-input-grid" });
 
@@ -956,20 +985,45 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       };
     }
 
-    // 电脑音频选择器：仅电脑音频 / 混合模式下显示（原来藏在「设备检测」里，现在直接放到主卡片）
+    // 电脑音频：Windows 使用系统音频自动捕获；其他桌面平台继续使用虚拟音频输入。
     if (mode === "virtualCable" || mode === "mix-virtual") {
       const vcField = grid.createDiv({ cls: "lexvoice-audio-input-field" });
-      vcField.createDiv({ cls: "lexvoice-audio-input-label", text: "电脑音频输入" });
-      const vcSelect = vcField.createEl("select", { cls: "dropdown lexvoice-audio-input-select" });
-      const vcHint = vcField.createDiv({ cls: "lexvoice-audio-input-hint" });
-      vcSelect.addEventListener("change", async () => {
-        if (vcSelect.value === "__error") return;
-        this.plugin.settings.selectedVirtualDevice = vcSelect.value;
-        await this.plugin.saveSettings();
-        await this.populateAudioInputVirtualSelect(vcSelect, vcHint);
-        new obsidian.Notice(vcSelect.value ? "电脑音频输入选择已保存" : "请选择一个电脑音频输入");
-      });
-      void this.populateAudioInputVirtualSelect(vcSelect, vcHint);
+
+      if (isWindowsDesktopRuntime()) {
+        vcField.createDiv({
+          cls: "lexvoice-audio-input-label",
+          text: "电脑音频",
+        });
+        vcField.createDiv({
+          cls: "lexvoice-audio-input-hint",
+          text: "Windows 系统音频 · 自动捕获。无需选择或配置虚拟声卡。",
+        });
+      } else {
+        vcField.createDiv({
+          cls: "lexvoice-audio-input-label",
+          text: "电脑音频输入",
+        });
+        const vcSelect = vcField.createEl("select", {
+          cls: "dropdown lexvoice-audio-input-select",
+        });
+        const vcHint = vcField.createDiv({
+          cls: "lexvoice-audio-input-hint",
+        });
+
+        vcSelect.addEventListener("change", async () => {
+          if (vcSelect.value === "__error") return;
+          this.plugin.settings.selectedVirtualDevice = vcSelect.value;
+          await this.plugin.saveSettings();
+          await this.populateAudioInputVirtualSelect(vcSelect, vcHint);
+          new obsidian.Notice(
+            vcSelect.value
+              ? "电脑音频输入选择已保存"
+              : "请选择一个电脑音频输入",
+          );
+        });
+
+        void this.populateAudioInputVirtualSelect(vcSelect, vcHint);
+      }
     }
 
     this.diagResultEl = card.createDiv({ cls: "lexvoice-diag-result lexvoice-audio-input-diag" });
@@ -2619,24 +2673,48 @@ export class LexVoiceSettingTab extends obsidian.PluginSettingTab {
       micText.createDiv({ text: allInputs.map(d => `• ${d.label || "未授权读取"}`).slice(0, 5).join("\n"), cls: "lexvoice-diag-sub" });
     }
 
-    // 电脑音频行：必须由用户显式选定，不猜第一个虚拟声卡。
+    // 电脑音频：Windows 直接使用系统音频；其他桌面平台仍校验用户选择的电脑音频输入。
+    const windowsSystemAudio = isWindowsDesktopRuntime();
     const vcRow = card.createDiv({ cls: "lexvoice-diag-row" });
     const vcSelId = this.plugin.settings.selectedVirtualDevice || "";
     const vcDev = vcSelId ? allInputs.find(d => d.deviceId === vcSelId) : null;
-    const vcOk = !!vcDev;
-    vcRow.createSpan({ cls: `lexvoice-diag-dot ${vcOk ? "is-ok" : "is-warn"}` });
-    const vcText = vcRow.createDiv({ cls: "lexvoice-diag-text" });
-    if (vcOk) {
-      vcText.createDiv({ text: "电脑音频输入（已选定）", cls: "lexvoice-diag-label" });
-      vcText.createDiv({ text: `• ${vcDev.label || "未授权读取"}`, cls: "lexvoice-diag-sub" });
-    } else if (vcSelId) {
-      vcText.createDiv({ text: "所选电脑音频输入未检测到", cls: "lexvoice-diag-label" });
-      vcText.createDiv({ text: "之前选定的设备可能已断开，请在下方重新选择。", cls: "lexvoice-diag-sub" });
-    } else {
-      vcText.createDiv({ text: "未选择电脑音频输入", cls: "lexvoice-diag-label" });
-      vcText.createDiv({ text: "录制电脑声音需要虚拟声卡。请在「设置电脑音频」中完成配置。", cls: "lexvoice-diag-sub" });
-    }
+    const vcOk = windowsSystemAudio || !!vcDev;
 
+    vcRow.createSpan({
+      cls: `lexvoice-diag-dot ${vcOk ? "is-ok" : "is-warn"}`,
+    });
+
+    const vcText = vcRow.createDiv({ cls: "lexvoice-diag-text" });
+
+    if (windowsSystemAudio) {
+      vcText.createDiv({
+        text: "Windows 系统音频",
+        cls: "lexvoice-diag-label",
+      });
+      vcText.createDiv({
+        text: "电脑音频由 LexVoice 自动捕获，无需选择或配置虚拟声卡。",
+        cls: "lexvoice-diag-sub",
+      });
+    } else if (vcDev) {
+      const label = vcDev.label || "未授权读取设备名";
+      vcText.createDiv({
+        text: `电脑音频输入：${label}`,
+        cls: "lexvoice-diag-label",
+      });
+      vcText.createDiv({
+        text: "电脑播放的声音将从这个输入录制。",
+        cls: "lexvoice-diag-sub",
+      });
+    } else {
+      vcText.createDiv({
+        text: "未选择电脑音频输入",
+        cls: "lexvoice-diag-label",
+      });
+      vcText.createDiv({
+        text: "请在「设置电脑音频」中配置当前系统所需的电脑音频输入。",
+        cls: "lexvoice-diag-sub",
+      });
+    }
     if (info.permissionRequired) {
       const permRow = card.createDiv({ cls: "lexvoice-diag-row" });
       permRow.createSpan({ cls: "lexvoice-diag-dot is-warn" });
